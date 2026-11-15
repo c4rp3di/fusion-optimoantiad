@@ -356,3 +356,4 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
 """
     }
 }
+
