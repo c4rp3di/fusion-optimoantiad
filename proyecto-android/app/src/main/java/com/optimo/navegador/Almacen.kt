@@ -82,8 +82,8 @@ class ListaPersistente(private val archivo: File, private val maximo: Int) {
 
     private fun cargar() {
         try {
-            if (!archivo.exists()) return
-            val arr = JSONArray(archivo.readText())
+            val texto = AlmacenSeguro.leerTexto(archivo) ?: return
+            val arr = JSONArray(texto)
             for (i in 0 until arr.length()) {
                 val o = arr.getJSONObject(i)
                 datos.add(Entrada(o.optString("t"), o.getString("u"), o.optLong("h")))
@@ -103,13 +103,7 @@ class ListaPersistente(private val archivo: File, private val maximo: Int) {
                 o.put("h", e.tiempo)
                 arr.put(o)
             }
-            val texto = arr.toString()
-            val tmp = File(archivo.path + ".tmp")
-            tmp.writeText(texto)
-            if (!tmp.renameTo(archivo)) {
-                archivo.writeText(texto)
-                tmp.delete()
-            }
+            AlmacenSeguro.escribirTexto(archivo, arr.toString())
         } catch (e: Exception) {
             // Sin espacio o sin permiso: se pierde solo esta escritura.
         }
@@ -223,3 +217,4 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("cookies3", v).apply()
         }
 }
+
