@@ -53,3 +53,4 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** URL http original cuando se intento mejorar a https (para el respaldo si falla). */
     var mejoradoDesde: String? = null
 }
+
