@@ -3,6 +3,7 @@ package com.optimo.navegador
 /**
  * Bloqueador basico de anuncios y rastreadores por dominio: se aplica a los subrecursos
  * (nunca a la pagina principal) comparando el host y sus dominios padre con una lista cerrada.
+ * La lista integrada (abajo) se completa con las listas descargadas de ListasManager.
  * No toca el contenido de la pagina ni bloquea anuncios servidos desde el propio dominio.
  */
 object AdBlock {
@@ -33,6 +34,13 @@ object AdBlock {
     fun bloquea(host: String): Boolean {
         var h = host.lowercase()
         if (h.endsWith(".")) h = h.substring(0, h.length - 1)
+        // Dominios que el usuario bloqueó a mano: ganan a todo lo demás.
+        if (ReglasUsuario.bloqueaDominio(h)) return true
+        // Listas descargadas (OISD, HaGeZi…): una excepción permite, un dominio listado bloquea.
+        when (ListasManager.filtro.consultar(h)) {
+            FiltroListas.PERMITIDO -> return false
+            FiltroListas.BLOQUEADO -> return true
+        }
         while (true) {
             if (DOMINIOS.contains(h)) return true
             val i = h.indexOf('.')
