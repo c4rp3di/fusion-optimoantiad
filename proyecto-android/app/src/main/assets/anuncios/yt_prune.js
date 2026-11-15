@@ -24,3 +24,4 @@
   var v;
   try{ Object.defineProperty(window,'ytInitialPlayerResponse',{get:function(){return v;},set:function(x){ v=prune(x); },configurable:true}); }catch(e){}
 })();
+
