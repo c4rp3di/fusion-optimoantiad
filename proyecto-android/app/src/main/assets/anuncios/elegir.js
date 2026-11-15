@@ -47,3 +47,4 @@ function(x,y){
     return JSON.stringify({sel:sel,dom:dom,tag:obj.tagName.toLowerCase(),w:Math.round(r.width),h:Math.round(r.height),n:cuenta(sel)});
   }catch(e){ return null; }
 }
+
