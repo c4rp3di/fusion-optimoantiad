@@ -553,3 +553,4 @@ object ListasManager {
         return bloqueo.tamano
     }
 }
+
