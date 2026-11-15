@@ -7,6 +7,7 @@ import android.webkit.WebView
 import androidx.webkit.ScriptHandler
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.io.File
@@ -243,6 +244,25 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
         return "(function(){ if(window.__optimoAds) return; window.__optimoAds=1;\n$sb})();"
     }
 
+    /** Script que oculta lo que el usuario marcó en [host]: una hoja de estilo por selector (uno inválido no estropea el resto). */
+    fun guionUsuario(host: String): String? {
+        val sels = ReglasUsuario.selectoresPara(host)
+        if (sels.isEmpty()) return null
+        val lista = JSONArray()
+        for (s in sels) lista.put(s)
+        return CSS_USUARIO_JS.replace("__LISTA__", lista.toString())
+    }
+
+    /** Oculta ya en la página abierta lo marcado para [host] (las visitas futuras lo hacen los scripts de inicio). */
+    fun aplicarAhora(web: WebView, host: String) {
+        val js = guionUsuario(host) ?: return
+        web.evaluateJavascript(js, null)
+    }
+
+    /** Script que identifica el anuncio en el punto (x, y) en píxeles CSS; devuelve JSON o null. */
+    fun scriptElegir(x: Float, y: Float): String =
+        "(" + leerTexto("elegir.js").trim() + ")(" + x + "," + y + ")"
+
     private fun envolver(js: String): String = if (js.isBlank()) "" else "try{\n$js\n}catch(e){}\n"
 
     private fun reglasDeOrigen(sitio: String): Set<String> =
@@ -268,6 +288,13 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
                 lista.add(WebViewCompat.addDocumentStartJavaScript(web, global, reglasDeOrigen("*")))
             } catch (e: Exception) { }
         }
+        // Reglas «ocultar elemento» del usuario, por sitio.
+        for (h in ReglasUsuario.hostsConReglas()) {
+            val js = guionUsuario(h) ?: continue
+            try {
+                lista.add(WebViewCompat.addDocumentStartJavaScript(web, js, reglasDeOrigen(h)))
+            } catch (e: Exception) { }
+        }
         manejadores[web] = lista
     }
 
@@ -275,8 +302,8 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
     fun alEmpezar(web: WebView, url: String?) {
         if (soportaInicio || !ajustes.bloquearAnuncios || url == null) return
         val host = try { android.net.Uri.parse(url).host?.lowercase() } catch (e: Exception) { null } ?: return
-        val js = guion(reglas.tecnicasPara(host), host) ?: return
-        web.evaluateJavascript(js, null)
+        guion(reglas.tecnicasPara(host), host)?.let { web.evaluateJavascript(it, null) }
+        guionUsuario(host)?.let { web.evaluateJavascript(it, null) }
     }
 
     companion object {
@@ -306,6 +333,18 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
 
         val CSS_GENERICO: String = SELECTORES.joinToString(",") +
             "{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important}"
+
+        /** Una hoja de estilo «display:none» por selector del usuario, insertada en cuanto exista <head> o <html>. */
+        private const val CSS_USUARIO_JS = """
+(function(){
+  var L=__LISTA__;
+  function ins(s){ var r=document.head||document.documentElement; if(r){ r.appendChild(s); return true; } return false; }
+  L.forEach(function(sel){
+    var s=document.createElement('style'); s.textContent=sel+'{display:none!important}';
+    if(!ins(s)){ var o=new MutationObserver(function(){ if(ins(s)) o.disconnect(); }); o.observe(document,{childList:true,subtree:true}); }
+  });
+})();
+"""
 
         /** Inserta una hoja de estilo en cuanto exista <head> o <html> (al inicio del documento aún pueden no existir). */
         private const val CSS_JS = """
