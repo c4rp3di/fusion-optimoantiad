@@ -89,7 +89,7 @@ class MainActivity : Activity() {
     private lateinit var paleta: Paleta
     private lateinit var ajustes: Ajustes
     private lateinit var anuncios: MotorAnuncios
-    private lateinit var marcadores: ListaPersistente
+    private lateinit var marcadores: Marcadores
     private lateinit var historial: ListaPersistente
     private lateinit var uaEscritorio: String
 
@@ -124,6 +124,7 @@ class MainActivity : Activity() {
     private lateinit var btnMarcador: TextView
     private lateinit var btnPestanas: TextView
     private lateinit var barraSuperior: LinearLayout
+    private lateinit var borrarTexto: TextView
     private lateinit var barraInferior: LinearLayout
 
     // Modo «página completa»: oculta barras de Optimo y del sistema; se sale con doble pulsación de atrás.
@@ -150,7 +151,7 @@ class MainActivity : Activity() {
         anuncios = MotorAnuncios(this, ajustes)
         ReglasUsuario.iniciar(this)
         ListasManager.iniciar(this, ajustes)
-        marcadores = ListaPersistente(File(filesDir, "marcadores.json"), 500)
+        marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
         uaEscritorio = calcularUaEscritorio()
         construirUi()
@@ -335,7 +336,7 @@ class MainActivity : Activity() {
         omnibox.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         omnibox.imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
         omnibox.setSelectAllOnFocus(true)
-        omnibox.setPadding(16.dp(), 0, 16.dp(), 0)
+        omnibox.setPadding(16.dp(), 0, 34.dp(), 0)
         omnibox.background = fondoRedondeado(paleta.campo, 20.dp())
         omnibox.setOnEditorActionListener { _, accion, evento ->
             if (accion == EditorInfo.IME_ACTION_GO ||
@@ -348,10 +349,39 @@ class MainActivity : Activity() {
             }
         }
         omnibox.setOnFocusChangeListener { _, tiene ->
+            actualizarBotonBorrar()
             if (!tiene) actualizarUi()
         }
-        barraSup.addView(omnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
-        barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        omnibox.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                actualizarBotonBorrar()
+            }
+        })
+
+        // ✕ dentro del omnibox (a la derecha): borra lo escrito y deja el teclado listo
+        borrarTexto = TextView(this)
+        borrarTexto.text = "✕"
+        borrarTexto.textSize = 15f
+        borrarTexto.gravity = Gravity.CENTER
+        borrarTexto.setTextColor(paleta.tenue)
+        borrarTexto.visibility = View.GONE
+        borrarTexto.setOnClickListener {
+            omnibox.setText("")
+            omnibox.requestFocus()
+            mostrarTeclado(omnibox)
+        }
+        val cajaOmnibox = FrameLayout(this)
+        cajaOmnibox.addView(omnibox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        cajaOmnibox.addView(
+            borrarTexto,
+            FrameLayout.LayoutParams(36.dp(), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END or Gravity.CENTER_VERTICAL)
+        )
+        barraSup.addView(cajaOmnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
+        // Marcadores (junto al de pantalla completa, que queda en el extremo derecho)
+        barraSup.addView(boton("🔖", 17f) { mostrarMarcadores() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
+        barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
         barraSuperior = barraSup
         principal.addView(
             barraSup,
@@ -431,6 +461,10 @@ class MainActivity : Activity() {
         }
         btnRecargar = boton("↻") { recargarOParar() }
         btnMarcador = boton("☆") { alternarMarcador() }
+        btnMarcador.setOnLongClickListener {
+            editarMarcadorActual()
+            true
+        }
 
         btnPestanas = TextView(this)
         btnPestanas.text = "1"
@@ -886,9 +920,10 @@ class MainActivity : Activity() {
         if (marcadores.contiene(p.url)) {
             marcadores.quitar(p.url)
             toast("Marcador eliminado")
+        } else if (marcadores.agregar(tituloDe(p), p.url, 0L)) {
+            toast("Marcador guardado (mantén pulsada ☆ para elegir carpeta)")
         } else {
-            marcadores.agregar(Entrada(tituloDe(p), p.url, System.currentTimeMillis()))
-            toast("Marcador guardado")
+            toast("Has alcanzado el máximo de marcadores")
         }
         actualizarUi()
     }
@@ -945,7 +980,7 @@ class MainActivity : Activity() {
         add("Nueva pestaña") { nuevaPestana(null) }
         add("Nueva pestaña privada") { nuevaPestana(null, true) }
         add("Buscar en la página") { mostrarBusqueda() }
-        add("Marcadores") { mostrarLista("Marcadores", marcadores, "Aún no tienes marcadores", false) }
+        add("Marcadores") { mostrarMarcadores() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
@@ -1128,7 +1163,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.4.0")
+            .setTitle("Optimo 1.5.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -1229,6 +1264,316 @@ class MainActivity : Activity() {
         val d = b.create()
         dialogo = d
         d.show()
+    }
+
+    private fun actualizarBotonBorrar() {
+        borrarTexto.visibility = if (omnibox.hasFocus() && omnibox.text.isNotEmpty()) View.VISIBLE else View.GONE
+    }
+
+    // ---------------------------------------------------------------- marcadores: gestor con carpetas
+
+    private fun normalizarUrl(texto: String): String? {
+        val t = texto.trim()
+        if (t.isEmpty()) return null
+        val esquema = Omnibox.esquemaExplicito(t)
+        val u = when {
+            esquema == "http" || esquema == "https" -> t
+            esquema == null && Omnibox.pareceDominio(t) ->
+                (if (Omnibox.esLocal(Omnibox.hostDe(t))) "http://" else "https://") + t
+            else -> return null
+        }
+        return if (Omnibox.hostDe(u).isNotEmpty()) u else null
+    }
+
+    private fun pedirTexto(titulo: String, inicial: String, alAceptar: (String) -> Unit) {
+        val campo = EditText(this)
+        campo.setSingleLine(true)
+        campo.setText(inicial)
+        campo.setSelectAllOnFocus(true)
+        val caja = FrameLayout(this)
+        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
+        caja.addView(campo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        nuevoDialogo()
+            .setTitle(titulo)
+            .setView(caja)
+            .setPositiveButton("Aceptar") { _, _ ->
+                val t = campo.text.toString().trim()
+                if (t.isNotEmpty()) alAceptar(t)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    /** Lista de carpetas (con sangría) para elegir destino. [excluir] oculta una carpeta y todo lo que cuelga de ella. */
+    private fun elegirCarpeta(titulo: String, actualId: Long, excluir: Long, alElegir: (Long) -> Unit) {
+        val ids = ArrayList<Long>()
+        val nombres = ArrayList<String>()
+        ids.add(0L)
+        nombres.add((if (actualId == 0L) "● " else "") + "Marcadores (raíz)")
+        for ((c, nivel) in marcadores.arbol(excluir)) {
+            ids.add(c.id)
+            nombres.add("    ".repeat(nivel) + (if (c.id == actualId) "● " else "") + "📁 " + c.nombre)
+        }
+        nuevoDialogo()
+            .setTitle(titulo)
+            .setItems(nombres.toTypedArray()) { _, i -> alElegir(ids[i]) }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    /** Formulario nombre + dirección + carpeta. [alGuardar] devuelve false para dejar el formulario abierto. */
+    private fun editarMarcador(
+        encabezado: String,
+        titulo: String,
+        url: String,
+        carpeta: Long,
+        alGuardar: (String, String, Long) -> Boolean
+    ) {
+        val caja = LinearLayout(this)
+        caja.setOrientation(LinearLayout.VERTICAL)
+        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
+        val campoTitulo = EditText(this)
+        campoTitulo.hint = "Nombre"
+        campoTitulo.setSingleLine(true)
+        campoTitulo.setText(titulo)
+        val campoUrl = EditText(this)
+        campoUrl.hint = "Dirección (https://…)"
+        campoUrl.setSingleLine(true)
+        campoUrl.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        campoUrl.setText(url)
+        val etiquetaCarpeta = TextView(this)
+        etiquetaCarpeta.textSize = 15f
+        etiquetaCarpeta.setTextColor(paleta.acento)
+        etiquetaCarpeta.setPadding(4.dp(), 14.dp(), 4.dp(), 14.dp())
+        etiquetaCarpeta.isClickable = true
+        var elegida = carpeta
+        fun pintar() {
+            etiquetaCarpeta.text = "📁  " + marcadores.ruta(elegida) + "  ▸"
+        }
+        pintar()
+        etiquetaCarpeta.setOnClickListener {
+            elegirCarpeta("Guardar en", elegida, 0L) { id ->
+                elegida = id
+                pintar()
+            }
+        }
+        caja.addView(campoTitulo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        caja.addView(campoUrl, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        caja.addView(etiquetaCarpeta, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val d = nuevoDialogo()
+            .setTitle(encabezado)
+            .setView(caja)
+            .setPositiveButton("Guardar", null)
+            .setNegativeButton("Cancelar", null)
+            .create()
+        d.show()
+        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            val u = normalizarUrl(campoUrl.text.toString())
+            if (u == null) {
+                toast("Dirección no válida")
+            } else {
+                val nombre = campoTitulo.text.toString().trim()
+                if (alGuardar(if (nombre.isEmpty()) u else nombre, u, elegida)) d.dismiss()
+            }
+        }
+    }
+
+    /** Pulsación larga en ☆: guardar la página eligiendo nombre y carpeta, o editar su marcador. */
+    private fun editarMarcadorActual() {
+        val p = actual ?: return
+        if (p.inicio || p.url.isEmpty()) {
+            toast("No hay nada que guardar")
+            return
+        }
+        val existente = marcadores.buscar(p.url)
+        if (existente != null) {
+            editarMarcador("Editar marcador", existente.titulo, existente.url, existente.carpeta) { t, u, c ->
+                val ok = marcadores.actualizar(existente, t, u, c)
+                if (!ok) toast("Ya existe un marcador con esa dirección")
+                actualizarUi()
+                ok
+            }
+        } else {
+            editarMarcador("Guardar marcador", tituloDe(p), p.url, 0L) { t, u, c ->
+                val ok = marcadores.agregar(t, u, c)
+                if (ok) {
+                    toast("Marcador guardado")
+                } else {
+                    toast(if (marcadores.contiene(u)) "Ya existe un marcador con esa dirección" else "Has alcanzado el máximo de marcadores")
+                }
+                actualizarUi()
+                ok
+            }
+        }
+    }
+
+    private fun confirmarBorrarCarpeta(c: CarpetaMarcadores, alBorrar: () -> Unit) {
+        val n = marcadores.elementosEn(c.id)
+        val detalle = if (n > 0) "Sus $n elemento(s) pasarán a «" + marcadores.ruta(c.padre) + "»." else "Está vacía."
+        nuevoDialogo()
+            .setTitle("Eliminar carpeta")
+            .setMessage("Se eliminará «" + c.nombre + "». " + detalle)
+            .setPositiveButton("Eliminar") { _, _ ->
+                marcadores.borrarCarpeta(c)
+                alBorrar()
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    /**
+     * Gestor de marcadores: tocar abre (o entra en una carpeta); mantener pulsado abre las acciones
+     * (editar, mover, eliminar, renombrar...). «Nueva carpeta» crea dentro de la carpeta actual.
+     */
+    private fun mostrarMarcadores(carpetaInicial: Long = 0L) {
+        var carpetaActual = if (marcadores.carpeta(carpetaInicial) != null) carpetaInicial else 0L
+        var filas: List<FilaMarcadores> = marcadores.filas(carpetaActual)
+        var dialogo: AlertDialog? = null
+
+        val vacio = TextView(this)
+        vacio.setTextColor(paleta.tenue)
+        vacio.textSize = 14f
+        vacio.setPadding(24.dp(), 16.dp(), 24.dp(), 8.dp())
+        val vista = ListView(this)
+        val adaptador = object : ArrayAdapter<FilaMarcadores>(
+            this, android.R.layout.simple_list_item_2, android.R.id.text1, ArrayList<FilaMarcadores>()
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                val f = getItem(position)
+                val t1 = v.findViewById<TextView>(android.R.id.text1)
+                val t2 = v.findViewById<TextView>(android.R.id.text2)
+                if (f != null) {
+                    val c = f.carpeta
+                    val m = f.marcador
+                    if (f.subir) {
+                        t1.text = "⬆  Subir"
+                        t2.text = marcadores.ruta(marcadores.carpeta(carpetaActual)?.padre ?: 0L)
+                    } else if (c != null) {
+                        t1.text = "📁  " + c.nombre
+                        val n = marcadores.elementosEn(c.id)
+                        t2.text = if (n == 1) "1 elemento" else "$n elementos"
+                    } else if (m != null) {
+                        t1.text = if (m.titulo.isNotEmpty()) m.titulo else m.url
+                        t2.text = m.url
+                    }
+                }
+                t1.maxLines = 1
+                t2.maxLines = 1
+                t1.ellipsize = TextUtils.TruncateAt.END
+                t2.ellipsize = TextUtils.TruncateAt.END
+                t1.setTextColor(paleta.texto)
+                t2.setTextColor(paleta.tenue)
+                return v
+            }
+        }
+        vista.setAdapter(adaptador)
+
+        fun refrescar() {
+            filas = marcadores.filas(carpetaActual)
+            adaptador.clear()
+            adaptador.addAll(filas)
+            adaptador.notifyDataSetChanged()
+            dialogo?.setTitle(marcadores.ruta(carpetaActual))
+            var hay = false
+            for (f in filas) {
+                if (!f.subir) hay = true
+            }
+            vacio.text = if (carpetaActual == 0L) "Aún no tienes marcadores. Pulsa ☆ para guardar una página." else "Carpeta vacía."
+            vacio.visibility = if (hay) View.GONE else View.VISIBLE
+            actualizarUi()
+        }
+
+        vista.setOnItemClickListener { _, _, pos, _ ->
+            val f = filas[pos]
+            val c = f.carpeta
+            val m = f.marcador
+            if (f.subir) {
+                carpetaActual = marcadores.carpeta(carpetaActual)?.padre ?: 0L
+                refrescar()
+            } else if (c != null) {
+                carpetaActual = c.id
+                refrescar()
+            } else if (m != null) {
+                dialogo?.dismiss()
+                cargarEnActual(m.url)
+            }
+        }
+        vista.setOnItemLongClickListener { _, _, pos, _ ->
+            val f = filas[pos]
+            val c = f.carpeta
+            val m = f.marcador
+            val items = ArrayList<Pair<String, () -> Unit>>()
+            if (m != null) {
+                items.add(Pair("Abrir en pestaña nueva", {
+                    dialogo?.dismiss()
+                    nuevaPestana(m.url)
+                    Unit
+                }))
+                items.add(Pair("Editar…", {
+                    editarMarcador("Editar marcador", m.titulo, m.url, m.carpeta) { t, u, cf ->
+                        val ok = marcadores.actualizar(m, t, u, cf)
+                        if (ok) refrescar() else toast("Ya existe un marcador con esa dirección")
+                        ok
+                    }
+                    Unit
+                }))
+                items.add(Pair("Mover a…", {
+                    elegirCarpeta("Mover a", m.carpeta, 0L) { destino ->
+                        marcadores.moverMarcador(m, destino)
+                        refrescar()
+                    }
+                    Unit
+                }))
+                items.add(Pair("Eliminar", {
+                    marcadores.quitar(m.url)
+                    refrescar()
+                    Unit
+                }))
+            } else if (c != null) {
+                items.add(Pair("Renombrar…", {
+                    pedirTexto("Renombrar carpeta", c.nombre) { n ->
+                        marcadores.renombrarCarpeta(c, n)
+                        refrescar()
+                    }
+                    Unit
+                }))
+                items.add(Pair("Mover a…", {
+                    elegirCarpeta("Mover carpeta a", c.padre, c.id) { destino ->
+                        if (marcadores.moverCarpeta(c, destino)) refrescar() else toast("No se puede mover ahí")
+                    }
+                    Unit
+                }))
+                items.add(Pair("Eliminar carpeta", {
+                    confirmarBorrarCarpeta(c) { refrescar() }
+                    Unit
+                }))
+            }
+            if (items.isNotEmpty()) opciones(null, items)
+            true
+        }
+
+        val caja = LinearLayout(this)
+        caja.setOrientation(LinearLayout.VERTICAL)
+        caja.addView(vacio, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        caja.addView(vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        val d = nuevoDialogo()
+            .setTitle(marcadores.ruta(carpetaActual))
+            .setView(caja)
+            .setPositiveButton("Nueva carpeta", null)
+            .setNegativeButton("Cerrar", null)
+            .create()
+        dialogo = d
+        d.show()
+        // «Nueva carpeta» no debe cerrar el gestor.
+        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
+            pedirTexto("Nueva carpeta", "") { n ->
+                if (marcadores.crearCarpeta(n, carpetaActual) == null) toast("No se pudo crear la carpeta")
+                refrescar()
+            }
+        }
+        refrescar()
     }
 
     private fun mostrarPestanas() {
