@@ -1,0 +1,4233 @@
+=====[FUSION:PROYECTO v1]=====
+nombre: optimoantiad-vc3-para-fusion
+tipo: android
+paquete: com.optimo.navegador
+archivos: 33
+
+=====[FUSION:ARCHIVO] MainActivity.kt =====
+package com.optimo.navegador
+
+import android.Manifest
+import android.annotation.SuppressLint
+import android.app.Activity
+import android.app.AlertDialog
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.graphics.Bitmap
+import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.net.Uri
+import android.net.http.SslError
+import android.os.Build
+import android.os.Bundle
+import android.os.Environment
+import android.os.Handler
+import android.os.Looper
+import android.os.Message
+import android.text.Editable
+import android.text.InputType
+import android.text.TextUtils
+import android.text.TextWatcher
+import android.util.TypedValue
+import android.view.Gravity
+import android.view.KeyEvent
+import android.view.View
+import android.view.ViewGroup
+import android.view.WindowInsets
+import android.view.WindowManager
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputMethodManager
+import android.webkit.CookieManager
+import android.webkit.GeolocationPermissions
+import android.webkit.PermissionRequest
+import android.webkit.RenderProcessGoneDetail
+import android.webkit.SslErrorHandler
+import android.webkit.URLUtil
+import android.webkit.ValueCallback
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebSettings
+import android.webkit.WebStorage
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.ArrayAdapter
+import android.widget.BaseAdapter
+import android.widget.EditText
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ListView
+import android.widget.ProgressBar
+import android.widget.TextView
+import android.widget.Toast
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONArray
+import java.io.File
+
+/**
+ * Optimo: navegador sobre el WebView del sistema. Pestañas (normales y privadas), omnibox con
+ * busqueda, marcadores, historial, descargas, buscar en la pagina, bloqueo basico de anuncios,
+ * HTTPS primero, modo escritorio, permisos de camara/microfono/ubicacion y pantalla completa.
+ * Sin dependencias externas: todo con APIs del sistema.
+ */
+class MainActivity : Activity() {
+
+    companion object {
+        private const val REQ_ARCHIVO = 101
+        private const val REQ_PERMISOS_WEB = 102
+        private const val REQ_UBICACION = 103
+        private const val REQ_ALMACENAMIENTO = 104
+        private const val MAX_PESTANAS = 20
+
+        /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
+        private const val PERFIL_PRIVADO = "optimo_privado"
+    }
+
+    private lateinit var paleta: Paleta
+    private lateinit var ajustes: Ajustes
+    private lateinit var anuncios: MotorAnuncios
+    private lateinit var marcadores: ListaPersistente
+    private lateinit var historial: ListaPersistente
+    private lateinit var uaEscritorio: String
+
+    private val pestanas = ArrayList<Pestana>()
+    private var actual: Pestana? = null
+    private var siguienteId = 1
+
+    /** Hosts a los que el usuario confirmó entrar por http (solo hasta cerrar la app). */
+    private val httpPermitido = HashSet<String>()
+
+    /** Equipos de la red local con certificado no válido a los que el usuario confirmó continuar. */
+    private val sslPermitido = HashSet<String>()
+
+    /** El WebView del sistema admite perfiles separados (necesario para aislar las pestañas privadas). */
+    private val perfilesOk: Boolean by lazy {
+        try { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) } catch (e: Throwable) { false }
+    }
+
+    // Vistas
+    private lateinit var principal: LinearLayout
+    private lateinit var pantallaCompleta: FrameLayout
+    private lateinit var contenedor: FrameLayout
+    private lateinit var candado: TextView
+    private lateinit var omnibox: EditText
+    private lateinit var progreso: ProgressBar
+    private lateinit var barraBuscar: LinearLayout
+    private lateinit var campoBuscar: EditText
+    private lateinit var contadorBuscar: TextView
+    private lateinit var btnAtras: TextView
+    private lateinit var btnAdelante: TextView
+    private lateinit var btnRecargar: TextView
+    private lateinit var btnMarcador: TextView
+    private lateinit var btnPestanas: TextView
+    private lateinit var barraSuperior: LinearLayout
+    private lateinit var barraInferior: LinearLayout
+
+    // Modo «página completa»: oculta barras de Optimo y del sistema; se sale con doble pulsación de atrás.
+    private var paginaCompleta = false
+    private var ultimoAtras = 0L
+
+    // Estado de peticiones pendientes
+    private var selectorArchivos: ValueCallback<Array<Uri>>? = null
+    private var pendientePermisosWeb: Pair<PermissionRequest, Array<String>>? = null
+    private var pendienteUbicacion: Pair<GeolocationPermissions.Callback, String>? = null
+    private var pendienteDescarga: (() -> Unit)? = null
+    private var vistaCompleta: View? = null
+    private var callbackCompleta: WebChromeClient.CustomViewCallback? = null
+
+    // ---------------------------------------------------------------- ciclo de vida
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        val noche = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK) ==
+            Configuration.UI_MODE_NIGHT_YES
+        paleta = Paleta(noche)
+        ajustes = Ajustes(this)
+        borrarPerfilPrivado()
+        anuncios = MotorAnuncios(this, ajustes)
+        ReglasUsuario.iniciar(this)
+        ListasManager.iniciar(this, ajustes)
+        marcadores = ListaPersistente(File(filesDir, "marcadores.json"), 500)
+        historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
+        uaEscritorio = calcularUaEscritorio()
+        construirUi()
+        configurarVentana()
+        restaurarSesion()
+        procesarIntent(intent)
+    }
+
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        salirPaginaCompleta()
+        procesarIntent(intent)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        actual?.web?.onResume()
+        // Al volver de otra app el sistema puede haber mostrado sus barras.
+        if (paginaCompleta && vistaCompleta == null) ajustarBarrasSistema(true)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        guardarSesion()
+        marcadores.guardarAhora()
+        historial.guardarAhora()
+        CookieManager.getInstance().flush()
+    }
+
+    override fun onDestroy() {
+        for (p in pestanas) {
+            val w = p.web
+            if (w != null) {
+                contenedor.removeView(w)
+                w.destroy()
+                p.web = null
+            }
+        }
+        super.onDestroy()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onBackPressed() {
+        if (vistaCompleta != null) {
+            quitarPantallaCompleta()
+            return
+        }
+        if (paginaCompleta) {
+            val ahora = android.os.SystemClock.elapsedRealtime()
+            if (ahora - ultimoAtras <= 2000L) {
+                ultimoAtras = 0L
+                salirPaginaCompleta()
+            } else {
+                ultimoAtras = ahora
+                toast("Pulsa atrás otra vez para salir de pantalla completa")
+            }
+            return
+        }
+        if (barraBuscar.visibility == View.VISIBLE) {
+            cerrarBusqueda()
+            return
+        }
+        if (omnibox.hasFocus()) {
+            omnibox.clearFocus()
+            ocultarTeclado(omnibox)
+            return
+        }
+        val p = actual
+        val w = p?.web
+        if (w != null && w.canGoBack()) {
+            w.goBack()
+            return
+        }
+        if (p != null && pestanas.size > 1) {
+            cerrarPestana(p)
+            return
+        }
+        super.onBackPressed()
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_ARCHIVO) {
+            val cb = selectorArchivos
+            selectorArchivos = null
+            cb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        var todos = grantResults.isNotEmpty()
+        for (r in grantResults) {
+            if (r != PackageManager.PERMISSION_GRANTED) todos = false
+        }
+        when (requestCode) {
+            REQ_PERMISOS_WEB -> {
+                val par = pendientePermisosWeb
+                pendientePermisosWeb = null
+                if (par != null) {
+                    if (todos) par.first.grant(par.second) else par.first.deny()
+                }
+            }
+            REQ_UBICACION -> {
+                val par = pendienteUbicacion
+                pendienteUbicacion = null
+                if (par != null) par.first.invoke(par.second, todos, false)
+            }
+            REQ_ALMACENAMIENTO -> {
+                val tarea = pendienteDescarga
+                pendienteDescarga = null
+                if (todos && tarea != null) tarea() else toast("Sin permiso para guardar archivos")
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------- interfaz
+
+    private fun Int.dp(): Int = (this * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun toast(texto: String) {
+        Toast.makeText(this, texto, Toast.LENGTH_SHORT).show()
+    }
+
+    private fun fondoRedondeado(color: Int, radio: Int): GradientDrawable {
+        val g = GradientDrawable()
+        g.setColor(color)
+        g.setCornerRadius(radio.toFloat())
+        return g
+    }
+
+    private fun ripple(v: View) {
+        val tv = TypedValue()
+        if (theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, tv, true)) {
+            v.setBackgroundResource(tv.resourceId)
+        }
+    }
+
+    private fun boton(texto: String, tam: Float = 20f, accion: () -> Unit): TextView {
+        val t = TextView(this)
+        t.text = texto
+        t.textSize = tam
+        t.gravity = Gravity.CENTER
+        t.setTextColor(paleta.texto)
+        t.isClickable = true
+        t.setOnClickListener { accion() }
+        ripple(t)
+        return t
+    }
+
+    private fun construirUi() {
+        val raiz = FrameLayout(this)
+        raiz.setBackgroundColor(paleta.fondo)
+
+        principal = LinearLayout(this)
+        principal.setOrientation(LinearLayout.VERTICAL)
+
+        // Barra superior: indicador de seguridad + omnibox
+        val barraSup = LinearLayout(this)
+        barraSup.setOrientation(LinearLayout.HORIZONTAL)
+        barraSup.setGravity(Gravity.CENTER_VERTICAL)
+        barraSup.setBackgroundColor(paleta.barra)
+        barraSup.setPadding(8.dp(), 6.dp(), 8.dp(), 6.dp())
+
+        candado = TextView(this)
+        candado.textSize = 16f
+        candado.gravity = Gravity.CENTER
+        barraSup.addView(candado, LinearLayout.LayoutParams(34.dp(), ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        omnibox = EditText(this)
+        omnibox.hint = "Busca o escribe una dirección"
+        omnibox.setHintTextColor(paleta.tenue)
+        omnibox.setTextColor(paleta.texto)
+        omnibox.textSize = 15f
+        omnibox.setSingleLine(true)
+        omnibox.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
+        omnibox.imeOptions = EditorInfo.IME_ACTION_GO or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        omnibox.setSelectAllOnFocus(true)
+        omnibox.setPadding(16.dp(), 0, 16.dp(), 0)
+        omnibox.background = fondoRedondeado(paleta.campo, 20.dp())
+        omnibox.setOnEditorActionListener { _, accion, evento ->
+            if (accion == EditorInfo.IME_ACTION_GO ||
+                (evento != null && evento.keyCode == KeyEvent.KEYCODE_ENTER && evento.action == KeyEvent.ACTION_DOWN)
+            ) {
+                ir(omnibox.text.toString())
+                true
+            } else {
+                false
+            }
+        }
+        omnibox.setOnFocusChangeListener { _, tiene ->
+            if (!tiene) actualizarUi()
+        }
+        barraSup.addView(omnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
+        barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        barraSuperior = barraSup
+        principal.addView(
+            barraSup,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
+
+        // Barra de progreso con alto fijo explicito (3 dp)
+        progreso = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
+        progreso.max = 100
+        progreso.isIndeterminate = false
+        progreso.progressTintList = ColorStateList.valueOf(paleta.acento)
+        progreso.progressBackgroundTintList = ColorStateList.valueOf(paleta.campo)
+        progreso.visibility = View.INVISIBLE
+        principal.addView(
+            progreso,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 3.dp())
+        )
+
+        // Barra de buscar en la pagina
+        barraBuscar = LinearLayout(this)
+        barraBuscar.setOrientation(LinearLayout.HORIZONTAL)
+        barraBuscar.setGravity(Gravity.CENTER_VERTICAL)
+        barraBuscar.setBackgroundColor(paleta.barra)
+        barraBuscar.setPadding(8.dp(), 4.dp(), 4.dp(), 4.dp())
+        barraBuscar.visibility = View.GONE
+        campoBuscar = EditText(this)
+        campoBuscar.hint = "Buscar en la página"
+        campoBuscar.setHintTextColor(paleta.tenue)
+        campoBuscar.setTextColor(paleta.texto)
+        campoBuscar.textSize = 15f
+        campoBuscar.setSingleLine(true)
+        campoBuscar.imeOptions = EditorInfo.IME_ACTION_SEARCH or EditorInfo.IME_FLAG_NO_EXTRACT_UI
+        campoBuscar.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                buscarEnPagina(s?.toString() ?: "")
+            }
+        })
+        campoBuscar.setOnEditorActionListener { _, _, _ ->
+            actual?.web?.findNext(true)
+            true
+        }
+        contadorBuscar = TextView(this)
+        contadorBuscar.textSize = 13f
+        contadorBuscar.setTextColor(paleta.tenue)
+        contadorBuscar.setPadding(8.dp(), 0, 8.dp(), 0)
+        barraBuscar.addView(campoBuscar, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        barraBuscar.addView(contadorBuscar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        barraBuscar.addView(boton("▲", 16f) { actual?.web?.findNext(false) }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        barraBuscar.addView(boton("▼", 16f) { actual?.web?.findNext(true) }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        barraBuscar.addView(boton("✕", 16f) { cerrarBusqueda() }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        principal.addView(
+            barraBuscar,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
+
+        // Contenido (el WebView de la pestaña activa)
+        contenedor = FrameLayout(this)
+        contenedor.setBackgroundColor(paleta.fondo)
+        principal.addView(contenedor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        // Barra inferior: atras, adelante, recargar/parar, marcador, pestañas, menu
+        val barraInf = LinearLayout(this)
+        barraInf.setOrientation(LinearLayout.HORIZONTAL)
+        barraInf.setGravity(Gravity.CENTER_VERTICAL)
+        barraInf.setBackgroundColor(paleta.barra)
+        barraInferior = barraInf
+
+        btnAtras = boton("←") {
+            val w = actual?.web
+            if (w != null && w.canGoBack()) w.goBack()
+        }
+        btnAdelante = boton("→") {
+            val w = actual?.web
+            if (w != null && w.canGoForward()) w.goForward()
+        }
+        btnRecargar = boton("↻") { recargarOParar() }
+        btnMarcador = boton("☆") { alternarMarcador() }
+
+        btnPestanas = TextView(this)
+        btnPestanas.text = "1"
+        btnPestanas.textSize = 12f
+        btnPestanas.gravity = Gravity.CENTER
+        btnPestanas.setTextColor(paleta.texto)
+        val cajaPestanas = GradientDrawable()
+        cajaPestanas.setColor(Color.TRANSPARENT)
+        cajaPestanas.setStroke(2.dp(), paleta.texto)
+        cajaPestanas.setCornerRadius(6.dp().toFloat())
+        btnPestanas.background = cajaPestanas
+        val envoltorio = FrameLayout(this)
+        envoltorio.isClickable = true
+        envoltorio.setOnClickListener { mostrarPestanas() }
+        ripple(envoltorio)
+        envoltorio.addView(btnPestanas, FrameLayout.LayoutParams(26.dp(), 22.dp(), Gravity.CENTER))
+
+        val btnMenu = boton("⋮", 22f) { mostrarMenu() }
+
+        val vistasInf = listOf<View>(btnAtras, btnAdelante, btnRecargar, btnMarcador, envoltorio, btnMenu)
+        for (v in vistasInf) {
+            barraInf.addView(v, LinearLayout.LayoutParams(0, 48.dp(), 1f))
+        }
+        principal.addView(
+            barraInf,
+            LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        )
+
+        pantallaCompleta = FrameLayout(this)
+        pantallaCompleta.setBackgroundColor(Color.BLACK)
+        pantallaCompleta.visibility = View.GONE
+
+        raiz.addView(principal, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        raiz.addView(pantallaCompleta, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(raiz)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun configurarVentana() {
+        window.setStatusBarColor(paleta.barra)
+        window.setNavigationBarColor(paleta.barra)
+        if (!paleta.oscuro) {
+            var f = window.decorView.systemUiVisibility
+            f = f or View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+            f = f or View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR
+            window.decorView.systemUiVisibility = f
+        }
+    }
+
+    private fun tituloDe(p: Pestana): String {
+        if (p.titulo.isNotEmpty()) return p.titulo
+        if (p.url.isNotEmpty()) return p.url
+        return "Nueva pestaña"
+    }
+
+    private fun actualizarUi() {
+        val p = actual ?: return
+        aplicarPantallaSegura(p.privada)
+        if (!omnibox.hasFocus()) {
+            omnibox.setText(if (p.inicio) "" else p.url)
+        }
+        omnibox.background = fondoRedondeado(if (p.privada) paleta.campoPrivado else paleta.campo, 20.dp())
+        if (p.privada) {
+            candado.text = "🕶"
+            candado.setTextColor(paleta.texto)
+        } else if (p.url.startsWith("https://")) {
+            candado.text = "🔒"
+            candado.setTextColor(paleta.seguro)
+        } else if (p.url.startsWith("http://")) {
+            candado.text = "⚠"
+            candado.setTextColor(paleta.advertencia)
+        } else {
+            candado.text = "🔍"
+            candado.setTextColor(paleta.tenue)
+        }
+        val w = p.web
+        btnAtras.alpha = if (w != null && w.canGoBack()) 1f else 0.35f
+        btnAdelante.alpha = if (w != null && w.canGoForward()) 1f else 0.35f
+        val guardado = p.url.isNotEmpty() && marcadores.contiene(p.url)
+        btnMarcador.text = if (guardado) "★" else "☆"
+        btnMarcador.setTextColor(if (guardado) paleta.acento else paleta.texto)
+        btnPestanas.text = pestanas.size.toString()
+        actualizarProgreso()
+    }
+
+    private fun actualizarProgreso() {
+        val p = actual ?: return
+        progreso.progress = p.progreso
+        progreso.visibility = if (p.progreso in 0..99) View.VISIBLE else View.INVISIBLE
+        btnRecargar.text = if (p.progreso in 0..99) "✕" else "↻"
+    }
+
+    private fun ocultarTeclado(v: View) {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.hideSoftInputFromWindow(v.windowToken, 0)
+    }
+
+    private fun mostrarTeclado(v: View) {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
+    }
+
+    /** Con una pestaña privada visible no se permiten capturas de pantalla ni miniatura en «recientes». */
+    private fun aplicarPantallaSegura(privada: Boolean) {
+        if (privada) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    private fun hayPrivadas(): Boolean {
+        for (q in pestanas) {
+            if (q.privada) return true
+        }
+        return false
+    }
+
+    /** Los diálogos son ventanas aparte: si hay pestañas privadas abiertas (p. ej. el selector de pestañas) también son seguros. */
+    private fun nuevoDialogo(): AlertDialog.Builder {
+        val tema = if (paleta.oscuro) android.R.style.Theme_Material_Dialog_Alert
+        else android.R.style.Theme_Material_Light_Dialog_Alert
+        return object : AlertDialog.Builder(this@MainActivity, tema) {
+            override fun create(): AlertDialog {
+                val d = super.create()
+                if (hayPrivadas()) d.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                return d
+            }
+        }
+    }
+
+    private fun opciones(titulo: String?, items: List<Pair<String, () -> Unit>>) {
+        val b = nuevoDialogo()
+        if (titulo != null) b.setTitle(titulo)
+        val etiquetas = Array(items.size) { i -> items[i].first }
+        b.setItems(etiquetas) { _, i -> items[i].second() }
+        b.show()
+    }
+
+    // ---------------------------------------------------------------- pestañas
+
+    private fun calcularUaEscritorio(): String {
+        val base = WebSettings.getDefaultUserAgent(this)
+        return base.replace(Regex("\\(Linux; Android[^)]*\\)"), "(X11; Linux x86_64)").replace(" Mobile", "")
+    }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun webDe(p: Pestana): WebView {
+        val existente = p.web
+        if (existente != null) return existente
+        val w = WebView(this)
+        // Debe ir antes que cualquier otra llamada al WebView: la pestaña privada usa su propio perfil aislado.
+        if (p.privada && perfilesOk) WebViewCompat.setProfile(w, PERFIL_PRIVADO)
+        w.setBackgroundColor(paleta.fondo)
+        val s = w.settings
+        s.javaScriptEnabled = true
+        s.domStorageEnabled = true
+        s.databaseEnabled = true
+        s.setSupportZoom(true)
+        s.builtInZoomControls = true
+        s.setDisplayZoomControls(false)
+        s.useWideViewPort = true
+        s.loadWithOverviewMode = true
+        s.setSupportMultipleWindows(true)
+        s.javaScriptCanOpenWindowsAutomatically = false
+        s.allowFileAccess = false
+        s.allowContentAccess = false
+        s.setGeolocationEnabled(true)
+        s.safeBrowsingEnabled = true
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+        s.cacheMode = if (p.privada) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
+        if (p.escritorio) s.userAgentString = uaEscritorio
+        w.setWebViewClient(ClienteWeb(p))
+        w.setWebChromeClient(ClienteChrome(p))
+        w.setDownloadListener { url, ua, disposicion, mime, _ ->
+            descargar(url, ua, disposicion, mime, p.privada)
+        }
+        w.setFindListener { ordinal, total, _ ->
+            contadorBuscar.text = if (total == 0) "0/0" else "${ordinal + 1}/$total"
+        }
+        w.setOnTouchListener { v, ev -> alTocar(v as WebView, p, ev) }
+        w.setOnLongClickListener { v -> menuContextual(v as WebView, p) }
+        aplicarAjustesWeb(w)
+        anuncios.instalar(w)
+        p.web = w
+        return w
+    }
+
+    @Suppress("DEPRECATION")
+    private fun aplicarAjustesWeb(w: WebView) {
+        val oscuro = ajustes.oscurecerPaginas
+        if (Build.VERSION.SDK_INT >= 33) {
+            w.settings.isAlgorithmicDarkeningAllowed = oscuro
+        } else if (Build.VERSION.SDK_INT >= 29) {
+            w.settings.forceDark = if (oscuro) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
+        }
+        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+    }
+
+    /** Gestor de cookies del perfil al que pertenece el WebView (el privado tiene el suyo). */
+    private fun gestorCookies(w: WebView): CookieManager {
+        if (perfilesOk) {
+            try {
+                return WebViewCompat.getProfile(w).cookieManager
+            } catch (e: Throwable) {
+                // Se usa el gestor general.
+            }
+        }
+        return CookieManager.getInstance()
+    }
+
+    private fun gestorCookiesPrivado(): CookieManager? {
+        if (!perfilesOk) return null
+        return try {
+            ProfileStore.getInstance().getOrCreateProfile(PERFIL_PRIVADO).cookieManager
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /** Borra cookies, almacenamiento y caché de las pestañas privadas (el perfil entero). No hace nada si sigue en uso. */
+    private fun borrarPerfilPrivado() {
+        if (!perfilesOk) return
+        try {
+            ProfileStore.getInstance().deleteProfile(PERFIL_PRIVADO)
+        } catch (e: Throwable) {
+            // En uso o inexistente: se reintenta al cerrar la última pestaña privada o al arrancar.
+        }
+    }
+
+    private fun crearPestana(privada: Boolean, url: String?, cargada: Boolean): Pestana? {
+        if (privada && !perfilesOk) {
+            toast("Tu WebView no admite pestañas privadas aisladas. Actualiza «Android System WebView».")
+            return null
+        }
+        if (pestanas.size >= MAX_PESTANAS) {
+            toast("Has alcanzado el máximo de pestañas")
+            return null
+        }
+        val p = Pestana(siguienteId++, privada)
+        p.cargada = cargada
+        p.pendiente = url
+        p.inicio = (url == null && !cargada)
+        pestanas.add(p)
+        activar(p)
+        return p
+    }
+
+    private fun nuevaPestana(url: String?, privada: Boolean = false): Pestana? =
+        crearPestana(privada, url, false)
+
+    private fun activar(p: Pestana) {
+        val anterior = actual
+        if (anterior != null && anterior !== p) {
+            val wa = anterior.web
+            if (wa != null) {
+                contenedor.removeView(wa)
+                wa.onPause()
+            }
+        }
+        actual = p
+        val w = webDe(p)
+        if (w.parent == null) {
+            contenedor.addView(
+                w,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+        }
+        w.onResume()
+        if (!p.cargada) {
+            p.cargada = true
+            val pend = p.pendiente
+            p.pendiente = null
+            if (pend != null) {
+                p.inicio = false
+                p.url = pend
+                cargarUrl(p, w, pend)
+            } else {
+                mostrarInicio(p)
+            }
+        }
+        cerrarBusqueda()
+        actualizarUi()
+    }
+
+    private fun cerrarPestana(p: Pestana) {
+        val idx = pestanas.indexOf(p)
+        if (idx < 0) return
+        pestanas.removeAt(idx)
+        val w = p.web
+        if (w != null) {
+            contenedor.removeView(w)
+            w.stopLoading()
+            w.destroy()
+            p.web = null
+        }
+        if (p === actual) {
+            actual = null
+            if (pestanas.isEmpty()) {
+                nuevaPestana(null)
+            } else {
+                activar(pestanas[minOf(idx, pestanas.size - 1)])
+            }
+        } else {
+            actualizarUi()
+        }
+        if (p.privada) {
+            var quedan = false
+            for (q in pestanas) {
+                if (q.privada) quedan = true
+            }
+            if (!quedan) {
+                // Última pestaña privada: se destruye su perfil (cookies, almacenamiento y caché).
+                borrarPerfilPrivado()
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!hayPrivadas()) borrarPerfilPrivado()
+                }, 1500L)
+            }
+        }
+    }
+
+    private fun cargarEn(p: Pestana, url: String) {
+        p.cargada = true
+        p.pendiente = null
+        p.inicio = false
+        p.url = url
+        p.titulo = ""
+        cargarUrl(p, webDe(p), url)
+        if (p === actual) actualizarUi()
+    }
+
+    /**
+     * Punto único para cargar una URL. Un sitio por http (salvo la red local) nunca se abre sin más:
+     * con «HTTPS primero» se intenta https y, si falla, se pregunta; sin él, se pregunta directamente.
+     */
+    private fun cargarUrl(p: Pestana, w: WebView, url: String, esEnlace: Boolean = false) {
+        val sinCifrar = url.startsWith("http://", ignoreCase = true)
+        val host = Omnibox.hostDe(url).lowercase()
+        if (!sinCifrar || httpPermitido.contains(host) || Omnibox.esLocal(host)) {
+            w.loadUrl(url)
+            return
+        }
+        if (ajustes.httpsPrimero) {
+            p.mejoradoDesde = url
+            w.loadUrl("https://" + url.substring(7))
+        } else {
+            preguntarHttp(p, w, url, null, esEnlace)
+        }
+    }
+
+    private fun preguntarHttp(p: Pestana, w: WebView, url: String, motivo: String?, esEnlace: Boolean) {
+        val host = Omnibox.hostDe(url).lowercase()
+        val aviso = StringBuilder()
+        aviso.append(host).append(" no ofrece una conexión cifrada (HTTPS).")
+        if (motivo != null) aviso.append(" (").append(motivo).append(")")
+        aviso.append("\n\nSi continúas, lo que veas o envíes puede ser leído o modificado por terceros. No escribas contraseñas ni datos personales.")
+        val volver: () -> Unit = {
+            if (!esEnlace) mostrarBloqueoHttp(w, url, motivo)
+        }
+        nuevoDialogo()
+            .setTitle("Conexión sin cifrar")
+            .setMessage(aviso.toString())
+            .setPositiveButton("Volver") { _, _ -> volver() }
+            .setNegativeButton("Continuar sin cifrar") { _, _ ->
+                httpPermitido.add(host)
+                w.loadUrl(url)
+            }
+            .setOnCancelListener { volver() }
+            .show()
+    }
+
+    private fun mostrarBloqueoHttp(w: WebView, url: String, motivo: String?) {
+        val destino = if (motivo != null) "https://" + url.substring(7) else url
+        val texto = motivo ?: "Conexión sin cifrar bloqueada."
+        w.loadDataWithBaseURL(destino, Paginas.error(paleta.colores, destino, texto), "text/html", "utf-8", destino)
+    }
+
+    private fun mostrarInicio(p: Pestana) {
+        p.cargada = true
+        p.pendiente = null
+        p.inicio = true
+        p.url = ""
+        p.titulo = "Nueva pestaña"
+        p.progreso = 100
+        webDe(p).loadDataWithBaseURL("optimo://inicio", paginaInicio(), "text/html", "utf-8", "optimo://inicio")
+        if (p === actual) actualizarUi()
+    }
+
+    private fun paginaInicio(): String {
+        val atajos = ArrayList<Pair<String, String>>()
+        for (e in marcadores.todos()) {
+            atajos.add(Pair(e.titulo, e.url))
+            if (atajos.size >= 8) break
+        }
+        if (atajos.isEmpty()) atajos.addAll(Paginas.ATAJOS_POR_DEFECTO)
+        return Paginas.inicio(paleta.colores, Omnibox.motor(ajustes.motor), atajos)
+    }
+
+    private fun fijarUrl(p: Pestana, url: String?) {
+        if (url == null) return
+        if (url.startsWith("optimo://") || ((url.startsWith("data:") || url == "about:blank") && p.inicio)) {
+            p.inicio = true
+            p.url = ""
+        } else {
+            p.inicio = false
+            p.url = url
+        }
+    }
+
+    private fun ir(texto: String) {
+        val r = Omnibox.resolver(texto, Omnibox.motor(ajustes.motor))
+        when (r) {
+            is Omnibox.Resolucion.Vacio -> return
+            is Omnibox.Resolucion.Navegar -> cargarEnActual(r.url)
+            is Omnibox.Resolucion.Buscar -> cargarEnActual(r.url)
+            is Omnibox.Resolucion.Externo -> abrirExterno(r.url)
+            is Omnibox.Resolucion.NoSoportado -> toast("Esquema no soportado: " + r.esquema)
+        }
+        omnibox.clearFocus()
+        ocultarTeclado(omnibox)
+    }
+
+    private fun cargarEnActual(url: String) {
+        val p = actual
+        if (p == null) {
+            nuevaPestana(url)
+        } else {
+            cargarEn(p, url)
+            p.web?.requestFocus()
+        }
+    }
+
+    private fun recargarOParar() {
+        val p = actual ?: return
+        val w = p.web ?: return
+        if (p.progreso in 0..99) {
+            w.stopLoading()
+            p.progreso = 100
+            actualizarUi()
+        } else if (p.inicio) {
+            mostrarInicio(p)
+        } else {
+            w.reload()
+        }
+    }
+
+    private fun alternarMarcador() {
+        val p = actual ?: return
+        if (p.inicio || p.url.isEmpty()) {
+            toast("No hay nada que guardar")
+            return
+        }
+        if (marcadores.contiene(p.url)) {
+            marcadores.quitar(p.url)
+            toast("Marcador eliminado")
+        } else {
+            marcadores.agregar(Entrada(tituloDe(p), p.url, System.currentTimeMillis()))
+            toast("Marcador guardado")
+        }
+        actualizarUi()
+    }
+
+    private fun alternarEscritorio() {
+        val p = actual ?: return
+        p.escritorio = !p.escritorio
+        val w = p.web ?: return
+        w.settings.userAgentString = if (p.escritorio) uaEscritorio else null
+        w.settings.useWideViewPort = true
+        w.settings.loadWithOverviewMode = true
+        if (p.inicio) mostrarInicio(p) else w.reload()
+        toast(if (p.escritorio) "Versión de escritorio" else "Versión móvil")
+    }
+
+    // ---------------------------------------------------------------- buscar en la pagina
+
+    private fun mostrarBusqueda() {
+        barraBuscar.visibility = View.VISIBLE
+        campoBuscar.setText("")
+        contadorBuscar.text = ""
+        campoBuscar.requestFocus()
+        mostrarTeclado(campoBuscar)
+    }
+
+    private fun buscarEnPagina(q: String) {
+        val w = actual?.web ?: return
+        if (q.isEmpty()) {
+            w.clearMatches()
+            contadorBuscar.text = ""
+        } else {
+            w.findAllAsync(q)
+        }
+    }
+
+    private fun cerrarBusqueda() {
+        if (barraBuscar.visibility == View.VISIBLE) {
+            actual?.web?.clearMatches()
+            barraBuscar.visibility = View.GONE
+            ocultarTeclado(campoBuscar)
+        }
+    }
+
+    // ---------------------------------------------------------------- menus y dialogos
+
+    private fun si(b: Boolean): String = if (b) "sí" else "no"
+
+    private fun mostrarMenu() {
+        val p = actual ?: return
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Nueva pestaña") { nuevaPestana(null) }
+        add("Nueva pestaña privada") { nuevaPestana(null, true) }
+        add("Buscar en la página") { mostrarBusqueda() }
+        add("Marcadores") { mostrarLista("Marcadores", marcadores, "Aún no tienes marcadores", false) }
+        add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
+        if (!p.inicio && p.url.isNotEmpty()) {
+            add("Compartir página") { compartir(p.url) }
+            add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
+        }
+        add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
+        add("Ir a la página de inicio") { mostrarInicio(p) }
+        add("Descargas") { abrirDescargas() }
+        add("Ajustes") { mostrarAjustes() }
+        add("Cerrar todas las pestañas") { cerrarTodas() }
+        val bloq = p.bloqueados.get()
+        val titulo = if (ajustes.bloquearAnuncios) "Bloqueados en esta página: $bloq" else null
+        opciones(titulo, items)
+    }
+
+    private fun mostrarAjustes() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Buscador: " + Omnibox.motor(ajustes.motor).nombre) { elegirMotor() }
+        add("Bloquear anuncios y rastreadores: " + si(ajustes.bloquearAnuncios)) {
+            ajustes.bloquearAnuncios = !ajustes.bloquearAnuncios
+            reinstalarAnuncios()
+            mostrarAjustes()
+        }
+        add("Listas de bloqueo…") { mostrarListas() }
+        add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
+        add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Usar HTTPS primero: " + si(ajustes.httpsPrimero)) {
+            ajustes.httpsPrimero = !ajustes.httpsPrimero
+            mostrarAjustes()
+        }
+        add("Oscurecer páginas web: " + si(ajustes.oscurecerPaginas)) {
+            ajustes.oscurecerPaginas = !ajustes.oscurecerPaginas
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) aplicarAjustesWeb(w)
+            }
+            mostrarAjustes()
+        }
+        add("Permitir cookies de terceros: " + si(ajustes.cookiesTerceros)) {
+            ajustes.cookiesTerceros = !ajustes.cookiesTerceros
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) aplicarAjustesWeb(w)
+            }
+            mostrarAjustes()
+        }
+        add("Borrar historial, caché y cookies") { confirmarBorrado() }
+        add("Acerca de Optimo") { acercaDe() }
+        opciones("Ajustes", items)
+    }
+
+    private fun mostrarListas() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Elegir listas…") { elegirListas() }
+        add("Añadir lista por URL (https)…") { anadirLista() }
+        add("Actualizar ahora") { actualizarListas(false) }
+        add("Actualizar solo con Wi-Fi: " + si(ajustes.soloWifi)) {
+            ajustes.soloWifi = !ajustes.soloWifi
+            mostrarListas()
+        }
+        if (ajustes.propias().isNotEmpty()) add("Quitar una lista añadida…") { quitarLista() }
+        opciones(ListasManager.resumen(), items)
+    }
+
+    private fun actualizarListas(forzarCompilar: Boolean) {
+        toast("Actualizando listas…")
+        ListasManager.actualizarAsync(forzarCompilar) { mensaje -> toast(mensaje) }
+    }
+
+    private fun elegirListas() {
+        val todas = ListasManager.todas()
+        val nombres = Array(todas.size) { i -> todas[i].nombre + " · " + todas[i].tam }
+        val activas = ajustes.listasActivas()
+        val marcadas = BooleanArray(todas.size) { i -> activas.contains(todas[i].id) }
+        nuevoDialogo()
+            .setTitle("Listas de bloqueo")
+            .setMultiChoiceItems(nombres, marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Aplicar") { _, _ ->
+                val nuevas = HashSet<String>()
+                for (i in todas.indices) if (marcadas[i]) nuevas.add(todas[i].id)
+                ajustes.ponerListasActivas(nuevas)
+                actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun anadirLista() {
+        val campo = android.widget.EditText(this)
+        campo.hint = "https://…"
+        campo.setSingleLine(true)
+        nuevoDialogo()
+            .setTitle("Añadir lista por URL")
+            .setView(campo)
+            .setPositiveButton("Añadir") { _, _ ->
+                val lista = ajustes.agregarPropia(campo.text.toString())
+                if (lista == null) toast("URL no válida: debe empezar por https://")
+                else actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun quitarLista() {
+        val propias = ajustes.propias()
+        val nombres = Array(propias.size) { i -> propias[i].nombre }
+        nuevoDialogo()
+            .setTitle("Quitar lista")
+            .setItems(nombres) { _, i ->
+                ajustes.quitarPropia(propias[i].id)
+                actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun reinstalarAnuncios() {
+        for (q in pestanas) {
+            val w = q.web
+            if (w != null) anuncios.instalar(w)
+        }
+    }
+
+    private fun elegirTecnicasAnuncios() {
+        val tecnicas = MotorAnuncios.TECNICAS
+        val nombres = Array(tecnicas.size) { i -> tecnicas[i].nombre }
+        val marcadas = BooleanArray(tecnicas.size) { i -> ajustes.tecnica(tecnicas[i].id) }
+        nuevoDialogo()
+            .setTitle("Técnicas contra anuncios")
+            .setMultiChoiceItems(nombres, marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Aplicar") { _, _ ->
+                for (i in tecnicas.indices) ajustes.ponerTecnica(tecnicas[i].id, marcadas[i])
+                reinstalarAnuncios()
+                toast("Recarga la página para aplicar los cambios")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun elegirMotor() {
+        val nombres = Array(Omnibox.MOTORES.size) { i -> Omnibox.MOTORES[i].nombre }
+        var elegido = 0
+        for (i in Omnibox.MOTORES.indices) {
+            if (Omnibox.MOTORES[i].id == ajustes.motor) elegido = i
+        }
+        nuevoDialogo()
+            .setTitle("Buscador")
+            .setSingleChoiceItems(nombres, elegido) { d, i ->
+                ajustes.motor = Omnibox.MOTORES[i].id
+                d.dismiss()
+                mostrarAjustes()
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
+
+    private fun confirmarBorrado() {
+        nuevoDialogo()
+            .setTitle("Borrar datos de navegación")
+            .setMessage("Se borrarán el historial, la caché y las cookies (se cerrarán tus sesiones en los sitios web). Los marcadores se conservan.")
+            .setPositiveButton("Borrar") { _, _ -> borrarDatos() }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun borrarDatos() {
+        historial.vaciar()
+        CookieManager.getInstance().removeAllCookies(null)
+        CookieManager.getInstance().flush()
+        WebStorage.getInstance().deleteAllData()
+        actual?.web?.clearCache(true)
+        toast("Datos de navegación borrados")
+    }
+
+    private fun acercaDe() {
+        nuevoDialogo()
+            .setTitle("Optimo 1.4.0")
+            .setMessage(
+                "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
+                    "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
+                    "• HTTPS primero. Si el sitio no lo ofrece, solo se abre por http si lo confirmas. Los certificados no válidos se bloquean (solo la red local permite continuar, tras confirmar).\n" +
+                    "• Pestaña privada: perfil aislado (cookies, almacenamiento y caché propios, que se borran al cerrar la última pestaña privada), sin historial y sin capturas de pantalla.\n" +
+                    "• Marcadores, historial, sesión y reglas se guardan cifrados con una clave del Keystore del dispositivo.\n" +
+                    "• El modo oscuro de páginas es experimental y funciona mejor con el sistema en modo oscuro."
+            )
+            .setPositiveButton("Cerrar", null)
+            .show()
+    }
+
+    private fun cerrarTodas() {
+        val copia = ArrayList<Pestana>(pestanas)
+        for (q in copia) {
+            cerrarPestana(q)
+        }
+    }
+
+    private fun abrirDescargas() {
+        try {
+            startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
+        } catch (e: Exception) {
+            toast("No se pudo abrir las descargas")
+        }
+    }
+
+    private fun compartir(url: String) {
+        val i = Intent(Intent.ACTION_SEND)
+        i.type = "text/plain"
+        i.putExtra(Intent.EXTRA_TEXT, url)
+        startActivity(Intent.createChooser(i, "Compartir enlace"))
+    }
+
+    private fun copiar(texto: String) {
+        val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        cm.setPrimaryClip(ClipData.newPlainText("url", texto))
+        toast("Copiado")
+    }
+
+    private fun mostrarLista(titulo: String, lista: ListaPersistente, vacio: String, conBorrarTodo: Boolean) {
+        if (lista.todos().isEmpty()) {
+            toast(vacio)
+            return
+        }
+        val vista = ListView(this)
+        val adaptador = object : ArrayAdapter<Entrada>(
+            this, android.R.layout.simple_list_item_2, android.R.id.text1, lista.todos()
+        ) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val v = super.getView(position, convertView, parent)
+                val e = getItem(position)
+                val t1 = v.findViewById<TextView>(android.R.id.text1)
+                val t2 = v.findViewById<TextView>(android.R.id.text2)
+                if (e != null) {
+                    t1.text = if (e.titulo.isNotEmpty()) e.titulo else e.url
+                    t2.text = e.url
+                }
+                t1.maxLines = 1
+                t2.maxLines = 1
+                t1.ellipsize = TextUtils.TruncateAt.END
+                t2.ellipsize = TextUtils.TruncateAt.END
+                t1.setTextColor(paleta.texto)
+                t2.setTextColor(paleta.tenue)
+                return v
+            }
+        }
+        vista.setAdapter(adaptador)
+        var dialogo: AlertDialog? = null
+        vista.setOnItemClickListener { _, _, pos, _ ->
+            val e = lista.todos()[pos]
+            dialogo?.dismiss()
+            cargarEnActual(e.url)
+        }
+        vista.setOnItemLongClickListener { _, _, pos, _ ->
+            val e = lista.todos()[pos]
+            val items = ArrayList<Pair<String, () -> Unit>>()
+            items.add(Pair("Abrir en pestaña nueva", {
+                dialogo?.dismiss()
+                nuevaPestana(e.url)
+                Unit
+            }))
+            items.add(Pair("Eliminar", {
+                lista.quitar(e.url)
+                adaptador.notifyDataSetChanged()
+                actualizarUi()
+            }))
+            opciones(null, items)
+            true
+        }
+        val b = nuevoDialogo().setTitle(titulo).setView(vista).setNegativeButton("Cerrar", null)
+        if (conBorrarTodo) {
+            b.setNeutralButton("Borrar todo") { _, _ ->
+                lista.vaciar()
+                toast("Historial borrado")
+            }
+        }
+        val d = b.create()
+        dialogo = d
+        d.show()
+    }
+
+    private fun mostrarPestanas() {
+        val lista = ListView(this)
+        var dialogo: AlertDialog? = null
+        val adaptador = object : BaseAdapter() {
+            override fun getCount(): Int = pestanas.size
+            override fun getItem(position: Int): Any = pestanas[position]
+            override fun getItemId(position: Int): Long = pestanas[position].id.toLong()
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val p = pestanas[position]
+                val fila = LinearLayout(this@MainActivity)
+                fila.setOrientation(LinearLayout.HORIZONTAL)
+                fila.setGravity(Gravity.CENTER_VERTICAL)
+                fila.setPadding(16.dp(), 8.dp(), 4.dp(), 8.dp())
+                val textos = LinearLayout(this@MainActivity)
+                textos.setOrientation(LinearLayout.VERTICAL)
+                val t1 = TextView(this@MainActivity)
+                t1.text = (if (p === actual) "● " else "") + (if (p.privada) "🕶 " else "") + tituloDe(p)
+                t1.textSize = 16f
+                t1.maxLines = 1
+                t1.ellipsize = TextUtils.TruncateAt.END
+                t1.setTextColor(paleta.texto)
+                val t2 = TextView(this@MainActivity)
+                t2.text = if (p.url.isNotEmpty()) p.url else "Pestaña nueva"
+                t2.textSize = 12f
+                t2.maxLines = 1
+                t2.ellipsize = TextUtils.TruncateAt.END
+                t2.setTextColor(paleta.tenue)
+                textos.addView(t1)
+                textos.addView(t2)
+                fila.addView(textos, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                val cerrar = boton("✕", 18f) {
+                    cerrarPestana(p)
+                    notifyDataSetChanged()
+                }
+                fila.addView(cerrar, LinearLayout.LayoutParams(48.dp(), 48.dp()))
+                return fila
+            }
+        }
+        lista.setAdapter(adaptador)
+        lista.setOnItemClickListener { _, _, pos, _ ->
+            dialogo?.dismiss()
+            activar(pestanas[pos])
+        }
+        val d = nuevoDialogo()
+            .setTitle("Pestañas")
+            .setView(lista)
+            .setPositiveButton("Nueva") { _, _ -> nuevaPestana(null) }
+            .setNeutralButton("Privada") { _, _ -> nuevaPestana(null, true) }
+            .setNegativeButton("Cerrar", null)
+            .create()
+        dialogo = d
+        d.show()
+    }
+
+    private fun menuContextual(v: WebView, p: Pestana): Boolean {
+        val r = v.hitTestResult
+        val extra = r.extra
+        when (r.type) {
+            WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
+                if (extra == null) return false
+                menuEnlace(extra, null, p.privada, v, p)
+                return true
+            }
+            WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
+                val msg = Handler(Looper.getMainLooper()) { m ->
+                    val enlace = m.data.getString("url")
+                    if (enlace != null) menuEnlace(enlace, extra, p.privada, v, p)
+                    true
+                }.obtainMessage()
+                v.requestFocusNodeHref(msg)
+                return true
+            }
+            WebView.HitTestResult.IMAGE_TYPE -> {
+                if (extra == null) return false
+                menuEnlace(null, extra, p.privada, v, p)
+                return true
+            }
+        }
+        return false
+    }
+
+    private fun menuEnlace(enlace: String?, imagen: String?, privada: Boolean, web: WebView, p: Pestana) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        if (enlace != null) {
+            add("Abrir en pestaña nueva") { nuevaPestana(enlace, privada) }
+            add("Copiar enlace") { copiar(enlace) }
+            add("Compartir enlace") { compartir(enlace) }
+        }
+        if (imagen != null) {
+            add("Abrir imagen en pestaña nueva") { nuevaPestana(imagen, privada) }
+            add("Descargar imagen") {
+                descargar(imagen, actual?.web?.settings?.userAgentString, null, null, actual?.privada == true)
+            }
+        }
+        add("Bloquear este anuncio…") { bloquearAnuncio(web, p, imagen, p.toqueX, p.toqueY) }
+        opciones(enlace ?: imagen, items)
+    }
+
+    // ---------------------------------------------------------------- reglas propias contra anuncios
+
+    /** Registra la última pulsación y, en modo «elegir», convierte el siguiente toque en la selección. */
+    private fun alTocar(v: WebView, p: Pestana, ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            p.toqueX = ev.x
+            p.toqueY = ev.y
+        }
+        if (!p.eligiendo) return false
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_UP -> {
+                p.eligiendo = false
+                bloquearAnuncio(v, p, null, ev.x, ev.y)
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val holgura = android.view.ViewConfiguration.get(this).scaledTouchSlop
+                if (Math.abs(ev.x - p.toqueX) > holgura || Math.abs(ev.y - p.toqueY) > holgura) {
+                    p.eligiendo = false
+                    toast("Selección cancelada")
+                    return false
+                }
+                return true
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                p.eligiendo = false
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun iniciarSeleccion(p: Pestana) {
+        p.eligiendo = true
+        toast("Toca el anuncio que quieres bloquear")
+    }
+
+    /** Identifica el anuncio en (x, y) —píxeles de pantalla— y ofrece ocultarlo y/o bloquear su dominio. */
+    @Suppress("DEPRECATION")
+    private fun bloquearAnuncio(web: WebView, p: Pestana, imagen: String?, x: Float, y: Float) {
+        val escala = if (web.scale > 0f) web.scale else resources.displayMetrics.density
+        web.evaluateJavascript(anuncios.scriptElegir(x / escala, y / escala)) { crudo ->
+            var datos: org.json.JSONObject? = null
+            try {
+                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
+                if (v is String) datos = org.json.JSONObject(v)
+            } catch (e: Exception) {
+                datos = null
+            }
+            if (datos == null) {
+                toast("No he encontrado un anuncio ahí. Prueba «Bloquear un anuncio (tocar)» en el menú")
+                return@evaluateJavascript
+            }
+            ofrecerReglas(web, p, imagen, datos)
+        }
+    }
+
+    private fun ofrecerReglas(web: WebView, p: Pestana, imagen: String?, d: org.json.JSONObject) {
+        val paginaHost = (try { Uri.parse(web.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
+        val sel = d.optString("sel")
+        if (paginaHost.isEmpty() || sel.isEmpty()) {
+            toast("No se pudo crear la regla para esta página")
+            return
+        }
+        var dom = d.optString("dom").lowercase().removePrefix("www.")
+        if (dom.isEmpty() && imagen != null) {
+            dom = (try { Uri.parse(imagen).host } catch (e: Exception) { null } ?: "").lowercase().removePrefix("www.")
+        }
+        // Nunca se ofrece bloquear el propio dominio de la página (o uno emparentado): rompería el sitio entero.
+        val propio = dom.isEmpty() || dom == paginaHost || paginaHost.endsWith(".$dom") || dom.endsWith(".$paginaHost") ||
+            UtilDominio.normalizar(dom) == null
+        val sitio = ReglasUsuario.clave(paginaHost)
+        val n = d.optInt("n", 1)
+        val etiquetas = ArrayList<String>()
+        etiquetas.add("Ocultar en $sitio (" + d.optString("tag") + " " + d.optInt("w") + "×" + d.optInt("h") +
+            (if (n > 1) ", $n elementos" else "") + ")\n" + sel)
+        if (!propio) etiquetas.add("Bloquear el dominio $dom en todas partes")
+        val marcadas = BooleanArray(etiquetas.size) { i -> i == 0 }
+        nuevoDialogo()
+            .setTitle("Bloquear este anuncio")
+            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Añadir") { _, _ ->
+                var hecho = false
+                if (marcadas[0] && ReglasUsuario.agregarOcultar(sitio, sel)) {
+                    hecho = true
+                    reinstalarAnuncios()
+                    anuncios.aplicarAhora(web, paginaHost)
+                }
+                if (marcadas.size > 1 && marcadas[1] && ReglasUsuario.agregarDominio(dom)) hecho = true
+                toast(if (hecho) "Regla añadida. Recarga la página para ver el efecto completo" else "No se añadió nada")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun mostrarReglasUsuario() {
+        val ocultar = ReglasUsuario.listaOcultar()
+        val dominios = ReglasUsuario.listaDominios()
+        if (ocultar.isEmpty() && dominios.isEmpty()) {
+            toast("Aún no has añadido reglas")
+            return
+        }
+        val etiquetas = ArrayList<String>()
+        for (r in ocultar) etiquetas.add("Ocultar en " + r.host + ": " + r.sel)
+        for (dd in dominios) etiquetas.add("Bloquear dominio: $dd")
+        val marcadas = BooleanArray(etiquetas.size)
+        nuevoDialogo()
+            .setTitle("Reglas añadidas (marca para borrar)")
+            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Borrar marcadas") { _, _ ->
+                var borradas = 0
+                for (i in ocultar.indices) if (marcadas[i]) { ReglasUsuario.quitarOcultar(ocultar[i]); borradas++ }
+                for (j in dominios.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarDominio(dominios[j]); borradas++ }
+                if (borradas > 0) {
+                    reinstalarAnuncios()
+                    toast("$borradas regla(s) borradas. Recarga las páginas abiertas")
+                }
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
+
+    // ---------------------------------------------------------------- descargas, externos, intents
+
+    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false) {
+        if (!(url.startsWith("http://") || url.startsWith("https://"))) {
+            toast("Este tipo de descarga no es compatible")
+            return
+        }
+        if (url.startsWith("http://")) {
+            val h = Omnibox.hostDe(url).lowercase()
+            if (!httpPermitido.contains(h) && !Omnibox.esLocal(h)) {
+                toast("Descarga sin cifrar bloqueada")
+                return
+            }
+        }
+        if (Build.VERSION.SDK_INT < 29 &&
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendienteDescarga = { descargar(url, ua, disposicion, mime, privada) }
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
+            return
+        }
+        try {
+            val nombre = URLUtil.guessFileName(url, disposicion, mime)
+            val pet = DownloadManager.Request(Uri.parse(url))
+            if (!mime.isNullOrEmpty()) pet.setMimeType(mime)
+            if (!ua.isNullOrEmpty()) pet.addRequestHeader("User-Agent", ua)
+            // La descarga desde una pestaña privada usa las cookies del perfil privado, nunca las de las normales.
+            val gestor = if (privada) gestorCookiesPrivado() else CookieManager.getInstance()
+            val cookie = gestor?.getCookie(url)
+            if (!cookie.isNullOrEmpty()) pet.addRequestHeader("Cookie", cookie)
+            pet.setTitle(nombre)
+            pet.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+            pet.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, nombre)
+            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
+            dm.enqueue(pet)
+            toast("Descargando $nombre")
+        } catch (e: Exception) {
+            toast("No se pudo iniciar la descarga")
+        }
+    }
+
+    private fun abrirExterno(url: String) {
+        try {
+            val intent = if (url.startsWith("intent:")) {
+                Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
+            } else {
+                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            }
+            val respaldo = intent.getStringExtra("browser_fallback_url")
+            intent.addCategory(Intent.CATEGORY_BROWSABLE)
+            intent.component = null
+            intent.selector = null
+            try {
+                startActivity(intent)
+            } catch (e: ActivityNotFoundException) {
+                if (respaldo != null && (respaldo.startsWith("https://") || respaldo.startsWith("http://"))) {
+                    cargarEnActual(respaldo)
+                } else {
+                    toast("No hay ninguna aplicación para abrir este enlace")
+                }
+            }
+        } catch (e: Exception) {
+            toast("No se pudo abrir el enlace")
+        }
+    }
+
+    private fun procesarIntent(i: Intent?) {
+        if (i == null) return
+        if (i.action == Intent.ACTION_VIEW) {
+            val d = i.data
+            if (d != null) abrirDesdeFuera(d.toString())
+        } else if (i.action == Intent.ACTION_SEND) {
+            val t = i.getStringExtra(Intent.EXTRA_TEXT)
+            if (t != null) abrirDesdeFuera(t)
+        }
+    }
+
+    private fun abrirDesdeFuera(texto: String) {
+        val r = Omnibox.resolver(texto, Omnibox.motor(ajustes.motor))
+        val url: String? = when (r) {
+            is Omnibox.Resolucion.Navegar -> r.url
+            is Omnibox.Resolucion.Buscar -> r.url
+            else -> null
+        }
+        if (url == null) return
+        val p = actual
+        if (p != null && p.inicio && pestanas.size == 1) {
+            cargarEn(p, url)
+        } else {
+            nuevaPestana(url)
+        }
+    }
+
+    // ---------------------------------------------------------------- sesion
+
+    private fun guardarSesion() {
+        val arr = JSONArray()
+        var activa = 0
+        var n = 0
+        for (p in pestanas) {
+            if (p.privada) continue
+            if (p === actual) activa = n
+            arr.put(if (p.inicio) "" else p.url)
+            n++
+        }
+        val cifrada = AlmacenSeguro.cifrarTexto(arr.toString(), "sesion")
+        val ed = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE).edit()
+        ed.remove("urls") // formato antiguo, en texto plano
+        if (cifrada != null) ed.putString("urls_c", cifrada) else ed.remove("urls_c")
+        ed.putInt("activa", activa)
+        ed.apply()
+    }
+
+    private fun restaurarSesion() {
+        var restaurada = false
+        try {
+            val sp = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE)
+            val cifrada = sp.getString("urls_c", null)
+            val texto = if (cifrada != null) AlmacenSeguro.descifrarTexto(cifrada, "sesion") else sp.getString("urls", null)
+            if (texto != null) {
+                val arr = JSONArray(texto)
+                val n = minOf(arr.length(), 10)
+                for (i in 0 until n) {
+                    val u = arr.getString(i)
+                    val p = Pestana(siguienteId++, false)
+                    if (u.isEmpty()) {
+                        p.inicio = true
+                    } else {
+                        p.url = u
+                        p.pendiente = u
+                    }
+                    pestanas.add(p)
+                }
+                if (pestanas.isNotEmpty()) {
+                    val activa = sp.getInt("activa", 0)
+                    activar(pestanas[if (activa in 0 until pestanas.size) activa else 0])
+                    restaurada = true
+                }
+            }
+        } catch (e: Exception) {
+            restaurada = false
+        }
+        if (!restaurada) {
+            pestanas.clear()
+            nuevaPestana(null)
+        }
+    }
+
+    // ---------------------------------------------------------------- pantalla completa
+
+    @Suppress("DEPRECATION")
+    private fun ajustarBarrasSistema(ocultar: Boolean) {
+        if (Build.VERSION.SDK_INT >= 30) {
+            val c = window.insetsController
+            if (c != null) {
+                if (ocultar) {
+                    c.hide(WindowInsets.Type.systemBars())
+                    c.systemBarsBehavior = android.view.WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                } else {
+                    c.show(WindowInsets.Type.systemBars())
+                }
+            }
+        } else {
+            var f = window.decorView.systemUiVisibility
+            val banderas = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION or
+                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+            f = if (ocultar) f or banderas else f and banderas.inv()
+            window.decorView.systemUiVisibility = f
+        }
+    }
+
+    private fun quitarPantallaCompleta() {
+        val v = vistaCompleta ?: return
+        pantallaCompleta.removeView(v)
+        pantallaCompleta.visibility = View.GONE
+        principal.visibility = View.VISIBLE
+        vistaCompleta = null
+        callbackCompleta?.onCustomViewHidden()
+        callbackCompleta = null
+        ajustarBarrasSistema(paginaCompleta)
+    }
+
+    private fun entrarPaginaCompleta() {
+        if (paginaCompleta) return
+        paginaCompleta = true
+        ultimoAtras = 0L
+        omnibox.clearFocus()
+        ocultarTeclado(omnibox)
+        cerrarBusqueda()
+        barraSuperior.visibility = View.GONE
+        barraInferior.visibility = View.GONE
+        ajustarBarrasSistema(true)
+        toast("Pantalla completa: pulsa atrás dos veces para salir")
+    }
+
+    private fun salirPaginaCompleta() {
+        if (!paginaCompleta) return
+        paginaCompleta = false
+        barraSuperior.visibility = View.VISIBLE
+        barraInferior.visibility = View.VISIBLE
+        if (vistaCompleta == null) ajustarBarrasSistema(false)
+    }
+
+    // ---------------------------------------------------------------- clientes del WebView
+
+    private inner class ClienteWeb(private val p: Pestana) : WebViewClient() {
+
+        override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean {
+            if (view == null || request == null) return false
+            val uri = request.url
+            val esquema = uri.scheme?.lowercase() ?: return false
+            if (esquema == "http" || esquema == "https") {
+                val host = (uri.host ?: "").lowercase()
+                if (esquema == "http" && request.isForMainFrame &&
+                    !httpPermitido.contains(host) && !Omnibox.esLocal(host)
+                ) {
+                    cargarUrl(p, view, uri.toString(), true)
+                    return true
+                }
+                return false
+            }
+            if (esquema == "about" || esquema == "blob" || esquema == "data" || esquema == "javascript") return false
+            if (esquema == "file" || esquema == "content") return true
+            if (request.hasGesture()) abrirExterno(uri.toString())
+            return true
+        }
+
+        override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame) {
+                val respuesta = anuncios.interceptar(request)
+                if (respuesta != null) {
+                    p.bloqueados.incrementAndGet()
+                    return respuesta
+                }
+            }
+            return null
+        }
+
+        override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+            super.onPageStarted(view, url, favicon)
+            if (view != null) anuncios.alEmpezar(view, url)
+            p.progreso = 0
+            p.bloqueados.set(0)
+            fijarUrl(p, url)
+            if (p === actual) actualizarUi()
+        }
+
+        override fun onPageFinished(view: WebView?, url: String?) {
+            super.onPageFinished(view, url)
+            p.progreso = 100
+            p.mejoradoDesde = null
+            fijarUrl(p, url)
+            val titulo = view?.title ?: ""
+            if (titulo.isNotEmpty() && !p.inicio) p.titulo = titulo
+            if (!p.privada && !p.inicio && url != null && titulo != Paginas.TITULO_ERROR &&
+                (url.startsWith("http://") || url.startsWith("https://"))
+            ) {
+                historial.agregar(Entrada(if (titulo.isNotEmpty()) titulo else url, url, System.currentTimeMillis()))
+            }
+            if (p === actual) actualizarUi()
+        }
+
+        override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+            super.doUpdateVisitedHistory(view, url, isReload)
+            fijarUrl(p, url)
+            if (p === actual) actualizarUi()
+        }
+
+        override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
+            super.onReceivedError(view, request, error)
+            if (view == null || request == null || !request.isForMainFrame) return
+            val fallida = request.url.toString()
+            val descripcion = error?.description?.toString() ?: "Error de red"
+            if (descripcion.contains("ERR_ABORTED")) return
+            val original = p.mejoradoDesde
+            if (original != null && fallida.startsWith("https://") &&
+                Omnibox.hostDe(original).equals(request.url.host ?: "", ignoreCase = true) &&
+                !descripcion.contains("ERR_CERT") && !descripcion.contains("ERR_SSL")
+            ) {
+                // El sitio no responde por https: se ofrece http, pero solo si la persona lo confirma.
+                p.mejoradoDesde = null
+                preguntarHttp(p, view, original, descripcion, false)
+                return
+            }
+            view.loadDataWithBaseURL(
+                fallida,
+                Paginas.error(paleta.colores, fallida, descripcion),
+                "text/html",
+                "utf-8",
+                fallida
+            )
+        }
+
+        override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
+            if (handler == null) return
+            val urlError = error?.url ?: ""
+            val host = Omnibox.hostDe(urlError).lowercase()
+            val esPrincipal = host.isNotEmpty() && host == Omnibox.hostDe(p.url).lowercase()
+            val motivo = when (error?.primaryError) {
+                SslError.SSL_EXPIRED -> "El certificado ha caducado."
+                SslError.SSL_UNTRUSTED -> "El certificado no es de una entidad de confianza."
+                SslError.SSL_IDMISMATCH -> "El certificado no corresponde a este sitio."
+                SslError.SSL_NOTYETVALID -> "El certificado aún no es válido."
+                else -> "El certificado no es válido."
+            }
+            // Un fallo de certificado jamás debe acabar degradado a http.
+            if (esPrincipal) p.mejoradoDesde = null
+
+            // Internet: nunca se continúa con un certificado inválido (sin excepción ni botón para saltarlo).
+            if (!Omnibox.esLocal(host)) {
+                handler.cancel()
+                if (esPrincipal && view != null) {
+                    view.post {
+                        view.loadDataWithBaseURL(
+                            urlError,
+                            Paginas.error(paleta.colores, urlError, motivo + " La conexión se ha bloqueado por seguridad."),
+                            "text/html",
+                            "utf-8",
+                            urlError
+                        )
+                    }
+                }
+                return
+            }
+
+            // Red local (router, NAS...): certificados autofirmados habituales; solo la página principal y tras confirmar.
+            if (sslPermitido.contains(host)) {
+                handler.proceed()
+                return
+            }
+            if (!esPrincipal) {
+                handler.cancel()
+                return
+            }
+            nuevoDialogo()
+                .setTitle("Certificado no válido")
+                .setMessage(host + "\n\n" + motivo + "\n\nEs un equipo de tu red local. Continúa solo si lo reconoces.")
+                .setPositiveButton("Volver") { _, _ -> handler.cancel() }
+                .setNegativeButton("Continuar (equipo local)") { _, _ ->
+                    sslPermitido.add(host)
+                    handler.proceed()
+                }
+                .setOnCancelListener { handler.cancel() }
+                .show()
+        }
+
+        override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+            // El proceso de render murio: se destruye el WebView y se recrea al reactivar la pestaña.
+            if (view == null || view !== p.web) return true
+            val url = p.url
+            contenedor.removeView(view)
+            view.destroy()
+            p.web = null
+            p.cargada = false
+            p.pendiente = if (url.isEmpty()) null else url
+            p.inicio = url.isEmpty()
+            p.progreso = 100
+            Handler(Looper.getMainLooper()).post {
+                if (p === actual) activar(p)
+            }
+            return true
+        }
+    }
+
+    private inner class ClienteChrome(private val p: Pestana) : WebChromeClient() {
+
+        override fun onProgressChanged(view: WebView?, newProgress: Int) {
+            p.progreso = newProgress
+            if (p === actual) actualizarProgreso()
+        }
+
+        override fun onReceivedTitle(view: WebView?, title: String?) {
+            if (!title.isNullOrEmpty() && !p.inicio) p.titulo = title
+        }
+
+        override fun onCreateWindow(
+            view: WebView?,
+            isDialog: Boolean,
+            isUserGesture: Boolean,
+            resultMsg: Message?
+        ): Boolean {
+            if (!isUserGesture || resultMsg == null) return false
+            val nueva = crearPestana(p.privada, null, true) ?: return false
+            val transporte = resultMsg.obj as WebView.WebViewTransport
+            transporte.webView = webDe(nueva)
+            resultMsg.sendToTarget()
+            return true
+        }
+
+        override fun onCloseWindow(window: WebView?) {
+            Handler(Looper.getMainLooper()).post {
+                if (pestanas.contains(p)) cerrarPestana(p)
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        override fun onShowFileChooser(
+            webView: WebView?,
+            filePathCallback: ValueCallback<Array<Uri>>?,
+            fileChooserParams: FileChooserParams?
+        ): Boolean {
+            if (filePathCallback == null || fileChooserParams == null) return false
+            selectorArchivos?.onReceiveValue(null)
+            selectorArchivos = filePathCallback
+            return try {
+                startActivityForResult(fileChooserParams.createIntent(), REQ_ARCHIVO)
+                true
+            } catch (e: Exception) {
+                selectorArchivos = null
+                false
+            }
+        }
+
+        override fun onPermissionRequest(request: PermissionRequest?) {
+            if (request == null) return
+            val soportados = ArrayList<String>()
+            val permisosAndroid = ArrayList<String>()
+            val etiquetas = ArrayList<String>()
+            for (r in request.resources) {
+                if (r == PermissionRequest.RESOURCE_VIDEO_CAPTURE) {
+                    soportados.add(r)
+                    permisosAndroid.add(Manifest.permission.CAMERA)
+                    etiquetas.add("la cámara")
+                } else if (r == PermissionRequest.RESOURCE_AUDIO_CAPTURE) {
+                    soportados.add(r)
+                    permisosAndroid.add(Manifest.permission.RECORD_AUDIO)
+                    etiquetas.add("el micrófono")
+                }
+            }
+            if (soportados.isEmpty()) {
+                request.deny()
+                return
+            }
+            val origen = request.origin.host ?: ""
+            val recursos = soportados.toTypedArray()
+            nuevoDialogo()
+                .setTitle("Permiso del sitio")
+                .setMessage(origen + " quiere usar " + etiquetas.joinToString(" y ") + ".")
+                .setPositiveButton("Permitir") { _, _ ->
+                    val faltan = ArrayList<String>()
+                    for (perm in permisosAndroid) {
+                        if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) faltan.add(perm)
+                    }
+                    if (faltan.isEmpty()) {
+                        request.grant(recursos)
+                    } else {
+                        pendientePermisosWeb = Pair(request, recursos)
+                        requestPermissions(faltan.toTypedArray(), REQ_PERMISOS_WEB)
+                    }
+                }
+                .setNegativeButton("Denegar") { _, _ -> request.deny() }
+                .setOnCancelListener { request.deny() }
+                .show()
+        }
+
+        override fun onGeolocationPermissionsShowPrompt(
+            origin: String?,
+            callback: GeolocationPermissions.Callback?
+        ) {
+            if (origin == null || callback == null) return
+            nuevoDialogo()
+                .setTitle("Ubicación")
+                .setMessage(Omnibox.hostDe(origin) + " quiere conocer tu ubicación.")
+                .setPositiveButton("Permitir") { _, _ ->
+                    if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                        callback.invoke(origin, true, false)
+                    } else {
+                        pendienteUbicacion = Pair(callback, origin)
+                        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_UBICACION)
+                    }
+                }
+                .setNegativeButton("Denegar") { _, _ -> callback.invoke(origin, false, false) }
+                .setOnCancelListener { callback.invoke(origin, false, false) }
+                .show()
+        }
+
+        override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
+            if (view == null) return
+            if (vistaCompleta != null) {
+                callback?.onCustomViewHidden()
+                return
+            }
+            vistaCompleta = view
+            callbackCompleta = callback
+            pantallaCompleta.addView(
+                view,
+                FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            )
+            pantallaCompleta.visibility = View.VISIBLE
+            principal.visibility = View.GONE
+            ajustarBarrasSistema(true)
+        }
+
+        override fun onHideCustomView() {
+            quitarPantallaCompleta()
+        }
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] AdBlock.kt =====
+package com.optimo.navegador
+
+/**
+ * Bloqueador basico de anuncios y rastreadores por dominio: se aplica a los subrecursos
+ * (nunca a la pagina principal) comparando el host y sus dominios padre con una lista cerrada.
+ * La lista integrada (abajo) se completa con las listas descargadas de ListasManager.
+ * No toca el contenido de la pagina ni bloquea anuncios servidos desde el propio dominio.
+ */
+object AdBlock {
+
+    private val DOMINIOS: Set<String> = hashSetOf(
+        // Redes publicitarias
+        "doubleclick.net", "googlesyndication.com", "googleadservices.com", "googletagservices.com",
+        "2mdn.net", "adnxs.com", "adsrvr.org", "advertising.com", "criteo.com", "criteo.net",
+        "outbrain.com", "taboola.com", "taboolasyndication.com", "rubiconproject.com", "pubmatic.com",
+        "openx.net", "casalemedia.com", "smartadserver.com", "adform.net", "bidswitch.net",
+        "contextweb.com", "lijit.com", "sharethrough.com", "teads.tv", "zedo.com", "serving-sys.com",
+        "yieldmo.com", "33across.com", "media.net", "popads.net", "propellerads.com", "exoclick.com",
+        "adcolony.com", "applovin.com", "mopub.com", "inmobi.com", "chartboost.com", "revcontent.com",
+        "mgid.com", "adblade.com", "richaudience.com", "tapad.com", "adtechus.com", "ads.yahoo.com",
+        "amazon-adsystem.com", "ads.linkedin.com", "ads.twitter.com", "ads-api.twitter.com",
+        // Verificacion y medicion publicitaria
+        "moatads.com", "adsafeprotected.com", "doubleverify.com", "scorecardresearch.com",
+        "quantserve.com", "quantcount.com", "mathtag.com",
+        // Rastreo y perfilado
+        "google-analytics.com", "bluekai.com", "krxd.net", "demdex.net", "everesttech.net",
+        "adsymptotic.com", "rlcdn.com", "id5-sync.com", "liadm.com", "agkn.com", "crwdcntrl.net",
+        "ml314.com", "analytics.twitter.com", "hotjar.com", "clarity.ms"
+    )
+
+    val TOTAL: Int get() = DOMINIOS.size
+
+    /** True si el host (o alguno de sus dominios padre) esta en la lista. */
+    fun bloquea(host: String): Boolean {
+        var h = host.lowercase()
+        if (h.endsWith(".")) h = h.substring(0, h.length - 1)
+        // Dominios que el usuario bloqueó a mano: ganan a todo lo demás.
+        if (ReglasUsuario.bloqueaDominio(h)) return true
+        // Listas descargadas (OISD, HaGeZi…): una excepción permite, un dominio listado bloquea.
+        when (ListasManager.filtro.consultar(h)) {
+            FiltroListas.PERMITIDO -> return false
+            FiltroListas.BLOQUEADO -> return true
+        }
+        while (true) {
+            if (DOMINIOS.contains(h)) return true
+            val i = h.indexOf('.')
+            if (i < 0) return false
+            h = h.substring(i + 1)
+            if (h.indexOf('.') < 0) return false
+        }
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] Almacen.kt =====
+package com.optimo.navegador
+
+import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/** Elemento de marcadores o historial. */
+class Entrada(val titulo: String, val url: String, val tiempo: Long)
+
+/**
+ * Lista persistente en un archivo JSON (marcadores e historial). Lo mas reciente va primero,
+ * sin duplicados por URL y con un maximo. Las escrituras frecuentes se agrupan (guardarPronto).
+ */
+class ListaPersistente(private val archivo: File, private val maximo: Int) {
+
+    private val datos = ArrayList<Entrada>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendiente = false
+    private val tarea = Runnable {
+        pendiente = false
+        guardar()
+    }
+
+    init {
+        cargar()
+    }
+
+    fun todos(): List<Entrada> = datos
+
+    fun contiene(url: String): Boolean {
+        for (e in datos) {
+            if (e.url == url) return true
+        }
+        return false
+    }
+
+    fun agregar(e: Entrada) {
+        quitarSinGuardar(e.url)
+        datos.add(0, e)
+        while (datos.size > maximo) {
+            datos.removeAt(datos.size - 1)
+        }
+        guardarPronto()
+    }
+
+    fun quitar(url: String) {
+        if (quitarSinGuardar(url)) guardarPronto()
+    }
+
+    fun vaciar() {
+        datos.clear()
+        guardarAhora()
+    }
+
+    fun guardarPronto() {
+        if (!pendiente) {
+            pendiente = true
+            handler.postDelayed(tarea, 3000L)
+        }
+    }
+
+    fun guardarAhora() {
+        handler.removeCallbacks(tarea)
+        pendiente = false
+        guardar()
+    }
+
+    private fun quitarSinGuardar(url: String): Boolean {
+        var quitado = false
+        val it = datos.iterator()
+        while (it.hasNext()) {
+            if (it.next().url == url) {
+                it.remove()
+                quitado = true
+            }
+        }
+        return quitado
+    }
+
+    private fun cargar() {
+        try {
+            val texto = AlmacenSeguro.leerTexto(archivo) ?: return
+            val arr = JSONArray(texto)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                datos.add(Entrada(o.optString("t"), o.getString("u"), o.optLong("h")))
+            }
+        } catch (e: Exception) {
+            datos.clear()
+        }
+    }
+
+    private fun guardar() {
+        try {
+            val arr = JSONArray()
+            for (e in datos) {
+                val o = JSONObject()
+                o.put("t", e.titulo)
+                o.put("u", e.url)
+                o.put("h", e.tiempo)
+                arr.put(o)
+            }
+            AlmacenSeguro.escribirTexto(archivo, arr.toString())
+        } catch (e: Exception) {
+            // Sin espacio o sin permiso: se pierde solo esta escritura.
+        }
+    }
+}
+
+/** Ajustes del usuario en SharedPreferences. */
+class Ajustes(contexto: Context) {
+
+    private val sp = contexto.getSharedPreferences("optimo_ajustes", Context.MODE_PRIVATE)
+
+    var motor: String
+        get() = sp.getString("motor", "ddg") ?: "ddg"
+        set(v) {
+            sp.edit().putString("motor", v).apply()
+        }
+
+    var bloquearAnuncios: Boolean
+        get() = sp.getBoolean("anuncios", true)
+        set(v) {
+            sp.edit().putBoolean("anuncios", v).apply()
+        }
+
+    var httpsPrimero: Boolean
+        get() = sp.getBoolean("https", true)
+        set(v) {
+            sp.edit().putBoolean("https", v).apply()
+        }
+
+    var oscurecerPaginas: Boolean
+        get() = sp.getBoolean("oscuro", false)
+        set(v) {
+            sp.edit().putBoolean("oscuro", v).apply()
+        }
+
+    /** Técnicas contra anuncios (ver MotorAnuncios.TECNICAS): todas activas por defecto. */
+    fun tecnica(id: String): Boolean = sp.getBoolean("ads_$id", true)
+
+    fun ponerTecnica(id: String, valor: Boolean) {
+        sp.edit().putBoolean("ads_$id", valor).apply()
+    }
+
+    // ---- listas de bloqueo (ver Listas.kt)
+    var soloWifi: Boolean
+        get() = sp.getBoolean("listas_wifi", true)
+        set(v) {
+            sp.edit().putBoolean("listas_wifi", v).apply()
+        }
+
+    var ultimaActualizacion: Long
+        get() = sp.getLong("listas_ultima", 0L)
+        set(v) {
+            sp.edit().putLong("listas_ultima", v).apply()
+        }
+
+    fun listasActivas(): Set<String> {
+        val g = sp.getStringSet("listas_activas", null) ?: return ListasManager.POR_DEFECTO
+        return HashSet(g)
+    }
+
+    fun ponerListasActivas(v: Set<String>) {
+        sp.edit().putStringSet("listas_activas", HashSet(v)).apply()
+    }
+
+    fun propias(): List<ListaDef> {
+        val texto = sp.getString("listas_propias", "") ?: ""
+        val res = ArrayList<ListaDef>()
+        for (linea in texto.split('\n')) {
+            val partes = linea.split('\t')
+            if (partes.size == 3) res.add(ListaDef(partes[0], partes[1], "propia", partes[2], true))
+        }
+        return res
+    }
+
+    /** Añade una lista propia (solo https) y la activa. Devuelve null si la URL no es válida. */
+    fun agregarPropia(urlCruda: String): ListaDef? {
+        val url = urlCruda.trim()
+        if (!url.startsWith("https://") || url.length < 12 || url.contains('\t') || url.contains('\n')) return null
+        val host = try { android.net.Uri.parse(url).host } catch (e: Exception) { null } ?: return null
+        val id = "p" + Integer.toHexString(url.hashCode())
+        val lista = ListaDef(id, host, "propia", url, true)
+        guardarPropias(propias().filter { it.id != id } + lista)
+        val activas = HashSet(listasActivas())
+        activas.add(id)
+        ponerListasActivas(activas)
+        return lista
+    }
+
+    fun quitarPropia(id: String) {
+        guardarPropias(propias().filter { it.id != id })
+        val activas = HashSet(listasActivas())
+        activas.remove(id)
+        ponerListasActivas(activas)
+    }
+
+    private fun guardarPropias(lista: List<ListaDef>) {
+        sp.edit().putString("listas_propias", lista.joinToString("\n") { it.id + "\t" + it.nombre + "\t" + it.url }).apply()
+    }
+
+    fun etag(id: String): String? = sp.getString("etag_$id", null)
+
+    fun modificado(id: String): String? = sp.getString("mod_$id", null)
+
+    fun setCabecerasCache(id: String, etag: String?, modificado: String?) {
+        sp.edit().putString("etag_$id", etag).putString("mod_$id", modificado).apply()
+    }
+
+    var cookiesTerceros: Boolean
+        get() = sp.getBoolean("cookies3", false)
+        set(v) {
+            sp.edit().putBoolean("cookies3", v).apply()
+        }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] AlmacenSeguro.kt =====
+package com.optimo.navegador
+
+import android.security.keystore.KeyGenParameterSpec
+import android.security.keystore.KeyProperties
+import android.util.Base64
+import java.io.File
+import java.security.InvalidKeyException
+import java.security.KeyStore
+import java.security.UnrecoverableKeyException
+import javax.crypto.Cipher
+import javax.crypto.KeyGenerator
+import javax.crypto.SecretKey
+import javax.crypto.spec.GCMParameterSpec
+
+/**
+ * Cifrado de los datos locales de Optimo (marcadores, historial, sesion, reglas del usuario).
+ *
+ * Misma idea que La Boveda: AES-256-GCM con una clave que vive en el Android Keystore y nunca sale de el.
+ * Cada dato lleva una etiqueta (nombre del archivo) como datos autenticados, asi que un archivo cifrado no
+ * se puede intercambiar por otro. Formato del archivo: "OPT1" + IV (12 bytes) + texto cifrado con etiqueta GCM.
+ *
+ * Los archivos antiguos en texto plano se leen y se migran a cifrado al instante. Si el Keystore no esta
+ * disponible NO se escribe en claro: se pierde la escritura (privacidad antes que persistencia).
+ * Sin dependencias: solo APIs del sistema.
+ */
+object AlmacenSeguro {
+
+    private const val ALIAS = "optimo_datos_v1"
+    private const val TAM_IV = 12
+    private const val TAM_ETIQUETA_BITS = 128
+    private val MAGIA = byteArrayOf(0x4F, 0x50, 0x54, 0x31) // "OPT1"
+
+    private fun clave(): SecretKey {
+        val ks = KeyStore.getInstance("AndroidKeyStore")
+        ks.load(null)
+        val existente = ks.getKey(ALIAS, null)
+        if (existente is SecretKey) return existente
+        val gen = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+        gen.init(
+            KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
+                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                .setKeySize(256)
+                .build()
+        )
+        return gen.generateKey()
+    }
+
+    /** Solo cuando la clave es inservible (invalidada o irrecuperable): se descarta para crear una nueva. */
+    private fun descartarClave() {
+        try {
+            val ks = KeyStore.getInstance("AndroidKeyStore")
+            ks.load(null)
+            ks.deleteEntry(ALIAS)
+        } catch (e: Exception) {
+            // Nada mas que hacer.
+        }
+    }
+
+    fun esCifrado(datos: ByteArray): Boolean {
+        if (datos.size < MAGIA.size) return false
+        for (i in MAGIA.indices) {
+            if (datos[i] != MAGIA[i]) return false
+        }
+        return true
+    }
+
+    private fun cifrarBytes(claro: ByteArray, etiqueta: String): ByteArray? {
+        for (intento in 0..1) {
+            try {
+                val c = Cipher.getInstance("AES/GCM/NoPadding")
+                c.init(Cipher.ENCRYPT_MODE, clave())
+                c.updateAAD(etiqueta.toByteArray(Charsets.UTF_8))
+                val iv = c.iv
+                val cifrado = c.doFinal(claro)
+                return MAGIA + iv + cifrado
+            } catch (e: Exception) {
+                if (intento == 0 && (e is InvalidKeyException || e is UnrecoverableKeyException)) {
+                    descartarClave()
+                } else {
+                    return null
+                }
+            }
+        }
+        return null
+    }
+
+    private fun descifrarBytes(datos: ByteArray, etiqueta: String): ByteArray? {
+        if (!esCifrado(datos) || datos.size < MAGIA.size + TAM_IV + 16) return null
+        return try {
+            val iv = datos.copyOfRange(MAGIA.size, MAGIA.size + TAM_IV)
+            val cifrado = datos.copyOfRange(MAGIA.size + TAM_IV, datos.size)
+            val c = Cipher.getInstance("AES/GCM/NoPadding")
+            c.init(Cipher.DECRYPT_MODE, clave(), GCMParameterSpec(TAM_ETIQUETA_BITS, iv))
+            c.updateAAD(etiqueta.toByteArray(Charsets.UTF_8))
+            c.doFinal(cifrado)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Texto cifrado y en Base64, para guardarlo en SharedPreferences. Null si el Keystore falla. */
+    fun cifrarTexto(texto: String, etiqueta: String): String? {
+        val b = cifrarBytes(texto.toByteArray(Charsets.UTF_8), etiqueta) ?: return null
+        return Base64.encodeToString(b, Base64.NO_WRAP)
+    }
+
+    fun descifrarTexto(base64: String, etiqueta: String): String? {
+        return try {
+            val claro = descifrarBytes(Base64.decode(base64, Base64.NO_WRAP), etiqueta) ?: return null
+            String(claro, Charsets.UTF_8)
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    /** Lee un archivo cifrado (o uno antiguo en texto plano, que migra). Null si no existe o no se puede descifrar. */
+    fun leerTexto(f: File, etiqueta: String = f.name): String? {
+        try {
+            if (!f.exists()) return null
+            val datos = f.readBytes()
+            if (esCifrado(datos)) {
+                val claro = descifrarBytes(datos, etiqueta) ?: return null
+                return String(claro, Charsets.UTF_8)
+            }
+            val texto = String(datos, Charsets.UTF_8)
+            escribirTexto(f, texto, etiqueta)
+            return texto
+        } catch (e: Exception) {
+            return null
+        }
+    }
+
+    /** Escribe cifrado y de forma atomica (archivo temporal + renombrar). False si no se pudo. */
+    fun escribirTexto(f: File, texto: String, etiqueta: String = f.name): Boolean {
+        val cifrado = cifrarBytes(texto.toByteArray(Charsets.UTF_8), etiqueta) ?: return false
+        return try {
+            val tmp = File(f.path + ".tmp")
+            tmp.writeBytes(cifrado)
+            if (!tmp.renameTo(f)) {
+                f.writeBytes(cifrado)
+                tmp.delete()
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] Listas.kt =====
+package com.optimo.navegador
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.os.Handler
+import android.os.Looper
+import java.io.DataInputStream
+import java.io.File
+import java.io.InputStream
+import java.io.OutputStream
+import java.net.HttpURLConnection
+import java.net.URL
+import java.nio.ByteBuffer
+import java.text.DateFormat
+import java.util.Date
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+/** Una lista de bloqueo descargable. [tam] es un texto orientativo (nº de dominios). */
+class ListaDef(val id: String, val nombre: String, val tam: String, val url: String, val propia: Boolean = false)
+
+object UtilDominio {
+    fun parseIpv4(entrada: String): Int? {
+        val partes = entrada.trim().split('.')
+        if (partes.size != 4) return null
+        var resultado = 0
+        for (p in partes) {
+            if (p.isEmpty() || p.length > 3) return null
+            val n = p.toIntOrNull() ?: return null
+            if (n < 0 || n > 255) return null
+            resultado = (resultado shl 8) or n
+        }
+        return resultado
+    }
+
+    /** Dominio en minúsculas, o null si no es válido (menos de 3 caracteres, sin punto, caracteres raros o IP). */
+    fun normalizar(entrada: String): String? {
+        var t = entrada.trim().lowercase()
+        if (t.startsWith("http://")) t = t.substring(7)
+        if (t.startsWith("https://")) t = t.substring(8)
+        val barra = t.indexOf('/')
+        if (barra >= 0) t = t.substring(0, barra)
+        val dosPuntos = t.indexOf(':')
+        if (dosPuntos >= 0) t = t.substring(0, dosPuntos)
+        t = t.trim('.')
+        if (t.length < 3 || t.length > 253 || !t.contains('.')) return null
+        for (c in t) {
+            val valido = (c in 'a'..'z') || (c in '0'..'9') || c == '-' || c == '.' || c == '_'
+            if (!valido) return null
+        }
+        if (parseIpv4(t) != null) return null
+        return t
+    }
+}
+
+/**
+ * Lee una línea de una lista de bloqueo en cualquiera de estos formatos y devuelve el dominio, o null si no sirve:
+ *  - hosts:     «0.0.0.0 ads.ejemplo.com»  (AdAway, StevenBlack, 1Hosts)
+ *  - dominios:  «ads.ejemplo.com»          (OISD, Firebog, anudeepND)
+ *  - Adblock:   «||ads.ejemplo.com^»       (EasyList, HaGeZi, AdGuard) y excepciones «@@||ok.ejemplo.com^»
+ * Solo se pueden aplicar reglas de dominio entero: se descartan rutas, comodines, modificadores y reglas cosméticas.
+ */
+object ParserListas {
+
+    class Entrada(val dominio: String, val permitido: Boolean)
+
+    private val IGNORADOS = setOf(
+        "localhost", "localhost.localdomain", "local", "broadcasthost", "ip6-localhost", "ip6-loopback",
+        "ip6-localnet", "ip6-mcastprefix", "ip6-allnodes", "ip6-allrouters", "ip6-allhosts", "0.0.0.0"
+    )
+
+    private val MODIFICADORES_ACEPTADOS = setOf("", "|", "\$important", "\$all")
+
+    fun procesarLinea(linea: String): Entrada? {
+        var s = linea.trim()
+        if (s.isEmpty()) return null
+        val c0 = s[0]
+        if (c0 == '#' || c0 == '!' || c0 == '[') return null
+        if (s.contains("##") || s.contains("#@#") || s.contains("#?#") || s.contains("#\$#")) return null
+
+        if (s.startsWith("||") || s.startsWith("@@||")) {
+            val permitido = s.startsWith("@@")
+            val resto = s.substring(if (permitido) 4 else 2)
+            val fin = resto.indexOf('^')
+            if (fin < 0) return null
+            if (!MODIFICADORES_ACEPTADOS.contains(resto.substring(fin + 1))) return null
+            return crear(resto.substring(0, fin), permitido)
+        }
+
+        // Formato hosts o lista de dominios: se corta el comentario final.
+        val almohadilla = s.indexOf('#')
+        if (almohadilla > 0) s = s.substring(0, almohadilla).trim()
+        val partes = s.split(' ', '\t').filter { it.isNotEmpty() }
+        if (partes.isEmpty()) return null
+        val candidato: String
+        if (partes.size == 1) {
+            candidato = partes[0]
+        } else {
+            val primero = partes[0]
+            val esIp = UtilDominio.parseIpv4(primero) != null || primero.contains(':')
+            if (!esIp) return null
+            candidato = partes[1]
+        }
+        return crear(candidato, false)
+    }
+
+    private fun crear(crudo: String, permitido: Boolean): Entrada? {
+        var d = crudo
+        if (d.startsWith("*.")) d = d.substring(2)
+        if (d.startsWith(".")) d = d.substring(1)
+        if (d.contains('/') || d.contains('*') || d.contains(':') || d.contains('?') || d.contains('|')) return null
+        val limpio = UtilDominio.normalizar(d) ?: return null
+        if (IGNORADOS.contains(limpio)) return null
+        return Entrada(limpio, permitido)
+    }
+}
+
+/** Hash de 64 bits de un dominio, calculado de DERECHA a IZQUIERDA para comprobar todos sus sufijos en una pasada. */
+object HashDominio {
+    const val SEMILLA = 1125899906842597L
+    const val PRIMO = 1099511628211L
+
+    fun completo(dominio: String): Long {
+        var h = SEMILLA
+        var i = dominio.length - 1
+        while (i >= 0) {
+            h = (h xor dominio[i].code.toLong()) * PRIMO
+            i--
+        }
+        return h
+    }
+}
+
+/**
+ * Conjunto de hashes de 64 bits en una tabla abierta de longs: ~16 bytes por dominio, sin objetos por entrada.
+ * 600 000 dominios ocupan unos 16 MB y una consulta tarda menos de un microsegundo. El 0 marca «hueco».
+ */
+class ConjuntoHash64 private constructor(capacidad: Int) {
+    private var tabla = LongArray(capacidad)
+
+    var tamano = 0
+        private set
+
+    constructor() : this(1024)
+
+    fun agregar(valor: Long): Boolean {
+        val h = if (valor == 0L) 1L else valor
+        if ((tamano + 1) * 10 > tabla.size * 6) crecer()
+        if (insertar(tabla, h)) {
+            tamano++
+            return true
+        }
+        return false
+    }
+
+    fun contiene(valor: Long): Boolean {
+        val h = if (valor == 0L) 1L else valor
+        val t = tabla
+        val mascara = t.size - 1
+        var i = ((h xor (h ushr 32)).toInt()) and mascara
+        while (true) {
+            val v = t[i]
+            if (v == 0L) return false
+            if (v == h) return true
+            i = (i + 1) and mascara
+        }
+    }
+
+    private fun insertar(t: LongArray, h: Long): Boolean {
+        val mascara = t.size - 1
+        var i = ((h xor (h ushr 32)).toInt()) and mascara
+        while (true) {
+            val v = t[i]
+            if (v == 0L) {
+                t[i] = h
+                return true
+            }
+            if (v == h) return false
+            i = (i + 1) and mascara
+        }
+    }
+
+    private fun crecer() {
+        val nueva = LongArray(tabla.size * 2)
+        for (v in tabla) {
+            if (v != 0L) insertar(nueva, v)
+        }
+        tabla = nueva
+    }
+
+    fun escribir(salida: OutputStream) {
+        val cab = ByteBuffer.allocate(8)
+        cab.putInt(tamano)
+        cab.putInt(tabla.size)
+        salida.write(cab.array())
+        val bloque = ByteBuffer.allocate(BLOQUE * 8)
+        var i = 0
+        while (i < tabla.size) {
+            val n = minOf(BLOQUE, tabla.size - i)
+            bloque.clear()
+            for (j in 0 until n) bloque.putLong(tabla[i + j])
+            salida.write(bloque.array(), 0, n * 8)
+            i += n
+        }
+    }
+
+    companion object {
+        private const val BLOQUE = 8192
+
+        fun leer(entrada: InputStream): ConjuntoHash64 {
+            val din = DataInputStream(entrada)
+            val tam = din.readInt()
+            val cap = din.readInt()
+            if (cap < 16 || cap > (1 shl 26) || (cap and (cap - 1)) != 0 || tam < 0 || tam > cap) {
+                throw IllegalStateException("caché de filtro no válida")
+            }
+            val c = ConjuntoHash64(cap)
+            val bytes = ByteArray(BLOQUE * 8)
+            var i = 0
+            while (i < cap) {
+                val n = minOf(BLOQUE, cap - i)
+                din.readFully(bytes, 0, n * 8)
+                val bb = ByteBuffer.wrap(bytes, 0, n * 8)
+                for (j in 0 until n) c.tabla[i + j] = bb.getLong()
+                i += n
+            }
+            c.tamano = tam
+            return c
+        }
+    }
+}
+
+/** Dominios bloqueados y excepciones. Un dominio bloqueado incluye sus subdominios; una excepción gana siempre. */
+class FiltroListas {
+
+    class Tablas(val bloqueo: ConjuntoHash64, val permitido: ConjuntoHash64)
+
+    @Volatile
+    private var tablas: Tablas? = null
+
+    val cargado: Boolean get() = tablas != null
+
+    val totalDominios: Int get() = tablas?.bloqueo?.tamano ?: 0
+
+    fun reemplazar(nuevas: Tablas) {
+        tablas = nuevas
+    }
+
+    /** NO_LISTADO, BLOQUEADO o PERMITIDO (excepción de las listas). */
+    fun consultar(nombre: String): Int {
+        val t = tablas ?: return NO_LISTADO
+        return evaluar(t, nombre.lowercase().trim('.'))
+    }
+
+    private fun evaluar(t: Tablas, nombre: String): Int {
+        var h = HashDominio.SEMILLA
+        var puntos = 0
+        var bloq = false
+        var perm = false
+        var i = nombre.length - 1
+        while (i >= 0) {
+            val c = nombre[i]
+            h = (h xor c.code.toLong()) * HashDominio.PRIMO
+            if (c == '.') puntos++
+            // [i..fin] es un sufijo completo (empieza en una etiqueta). Los sufijos sin punto (TLD) no se miran.
+            if ((i == 0 || nombre[i - 1] == '.') && puntos > 0) {
+                if (t.permitido.contiene(h)) perm = true
+                if (t.bloqueo.contiene(h)) bloq = true
+            }
+            i--
+        }
+        if (perm) return PERMITIDO
+        return if (bloq) BLOQUEADO else NO_LISTADO
+    }
+
+    fun guardarCache(archivo: File, t: Tablas) {
+        val tmp = File(archivo.parentFile, archivo.name + ".tmp")
+        tmp.outputStream().buffered().use { out ->
+            out.write(MAGIA)
+            t.bloqueo.escribir(out)
+            t.permitido.escribir(out)
+        }
+        if (!tmp.renameTo(archivo)) {
+            archivo.delete()
+            tmp.renameTo(archivo)
+        }
+    }
+
+    /** Caché compilada (mucho más rápida que reprocesar las listas); null si no existe o está dañada. */
+    fun leerCache(archivo: File): Tablas? {
+        if (!archivo.exists()) return null
+        return try {
+            archivo.inputStream().buffered().use { entrada ->
+                val magia = ByteArray(MAGIA.size)
+                DataInputStream(entrada).readFully(magia)
+                if (!magia.contentEquals(MAGIA)) {
+                    null
+                } else {
+                    val bloqueo = ConjuntoHash64.leer(entrada)
+                    val permitido = ConjuntoHash64.leer(entrada)
+                    Tablas(bloqueo, permitido)
+                }
+            }
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    companion object {
+        const val NO_LISTADO = 0
+        const val BLOQUEADO = 1
+        const val PERMITIDO = 2
+        private val MAGIA = "ADB1".toByteArray(Charsets.US_ASCII)
+    }
+}
+
+/**
+ * Descarga, valida, compila y guarda las listas. El filtro compilado se cachea en un archivo para arrancar rápido.
+ * Todo el trabajo pesado va en un hilo aparte; los avisos al terminar se entregan en el hilo principal.
+ */
+object ListasManager {
+
+    val CATALOGO = listOf(
+        ListaDef("oisd_small", "OISD small", "~57 000", "https://small.oisd.nl/domainswild2"),
+        ListaDef("adaway", "AdAway", "~6 000", "https://adaway.org/hosts.txt"),
+        ListaDef("oisd_big", "OISD big", "~200 000", "https://big.oisd.nl/domainswild2"),
+        ListaDef("hagezi_pro", "HaGeZi Pro", "~350 000", "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.txt"),
+        ListaDef("adguard_dns", "AdGuard DNS filter", "~100 000", "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"),
+        ListaDef("onehosts_lite", "1Hosts Lite", "~90 000", "https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt"),
+        ListaDef("stevenblack", "StevenBlack", "~150 000", "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts"),
+        ListaDef("easylist", "EasyList", "solo dominios enteros", "https://easylist.to/easylist/easylist.txt"),
+        ListaDef("easyprivacy", "EasyPrivacy", "solo dominios enteros", "https://easylist.to/easylist/easyprivacy.txt"),
+        // Las que tenías añadidas por URL en AntiAds, ya incluidas para no tener que escribirlas.
+        ListaDef("firebog_w3kbl", "Firebog w3kbl", "extra", "https://v.firebog.net/hosts/static/w3kbl.txt"),
+        ListaDef("yoyo_adservers", "Yoyo adservers", "extra", "https://pgl.yoyo.org/adservers/serverlist.php?hostformat=nohtml&showintro=0&mimetype=plaintext"),
+        ListaDef("anudeep_adservers", "anudeepND adservers", "extra", "https://raw.githubusercontent.com/anudeepND/blacklist/master/adservers.txt"),
+        ListaDef("hagezi_tif_medium", "HaGeZi TIF medium", "extra", "https://cdn.jsdelivr.net/gh/hagezi/dns-blocklists@latest/adblock/tif.medium.txt"),
+        ListaDef("disconnect_malvertising", "Disconnect malvertising", "extra", "https://s3.amazonaws.com/lists.disconnect.me/simple_malvertising.txt"),
+        ListaDef("hagezi_ultimate", "HaGeZi Ultimate", "extra · muy grande", "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/ultimate.txt"),
+        ListaDef("hagezi_pro_plus", "HaGeZi Pro++", "extra · muy grande", "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/pro.plus.txt"),
+        ListaDef("hagezi_light", "HaGeZi Light", "extra", "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/adblock/light.txt")
+    )
+
+    val POR_DEFECTO = setOf("oisd_small", "adaway")
+
+    val filtro = FiltroListas()
+
+    private const val LIMITE_BYTES = 80L * 1024L * 1024L
+    private const val MIN_ENTRADAS = 50
+    private const val DIA_MS = 24L * 60L * 60L * 1000L
+
+    private val hilo = Executors.newSingleThreadExecutor()
+    private val principal = Handler(Looper.getMainLooper())
+    private val enCurso = AtomicBoolean(false)
+    private val cerrojo = Any()
+
+    @Volatile
+    private var app: Context? = null
+
+    @Volatile
+    private var ajustes: Ajustes? = null
+
+    fun todas(): List<ListaDef> {
+        val a = ajustes ?: return CATALOGO
+        return CATALOGO + a.propias()
+    }
+
+    private fun activas(): List<ListaDef> {
+        val a = ajustes ?: return emptyList()
+        val ids = a.listasActivas()
+        return todas().filter { ids.contains(it.id) }
+    }
+
+    private fun carpeta(c: Context): File {
+        val d = File(c.filesDir, "listas")
+        if (!d.exists()) d.mkdirs()
+        return d
+    }
+
+    private fun archivoLista(c: Context, id: String) = File(carpeta(c), "$id.txt")
+    private fun archivoCache(c: Context) = File(carpeta(c), "filtro.bin")
+
+    private fun redMedida(c: Context): Boolean = try {
+        (c.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager).isActiveNetworkMetered
+    } catch (e: Exception) {
+        false
+    }
+
+    /** Texto para el título del menú de listas. */
+    fun resumen(): String {
+        val a = ajustes
+        val total = filtro.totalDominios
+        if (total == 0) return "Sin listas descargadas"
+        val t = a?.ultimaActualizacion ?: 0L
+        val fecha = if (t > 0L) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(t)) else "—"
+        return "$total dominios en listas · actualizado $fecha"
+    }
+
+    /** Al arrancar: carga el filtro desde la caché y, si toca (más de 24 h, red permitida), actualiza. */
+    fun iniciar(contexto: Context, a: Ajustes) {
+        app = contexto.applicationContext
+        ajustes = a
+        hilo.execute {
+            val c = app ?: return@execute
+            try {
+                synchronized(cerrojo) {
+                    if (!filtro.cargado) {
+                        val t = filtro.leerCache(archivoCache(c))
+                        if (t != null) filtro.reemplazar(t)
+                        else if (activas().any { archivoLista(c, it.id).exists() }) compilar(c)
+                    }
+                }
+            } catch (e: Throwable) {
+                // Sin filtro de listas, sigue funcionando la lista integrada.
+            }
+            val ultima = a.ultimaActualizacion
+            val permitido = !a.soloWifi || !redMedida(c)
+            if (activas().isNotEmpty() && permitido && System.currentTimeMillis() - ultima > DIA_MS) {
+                actualizar(false)
+            }
+        }
+    }
+
+    /**
+     * Actualiza en segundo plano. [forzarCompilar] vuelve a compilar aunque ninguna lista haya cambiado
+     * (al cambiar la selección de listas). [alTerminar] recibe un mensaje y se llama en el hilo principal.
+     */
+    fun actualizarAsync(forzarCompilar: Boolean, alTerminar: ((String) -> Unit)?) {
+        hilo.execute {
+            val msg = actualizar(forzarCompilar)
+            if (alTerminar != null) principal.post { alTerminar(msg) }
+        }
+    }
+
+    private fun actualizar(forzarCompilar: Boolean): String {
+        val c = app ?: return "No iniciado"
+        val a = ajustes ?: return "No iniciado"
+        if (!enCurso.compareAndSet(false, true)) return "Ya hay una actualización en curso"
+        try {
+            val lista = activas()
+            var ok = 0
+            var err = 0
+            val mensajes = ArrayList<String>()
+            for (l in lista) {
+                try {
+                    if (descargar(c, a, l)) ok++
+                } catch (e: Exception) {
+                    err++
+                    mensajes.add(l.nombre + ": " + (e.message ?: e.javaClass.simpleName))
+                }
+            }
+            var dominios = filtro.totalDominios
+            if (ok > 0 || forzarCompilar || !filtro.cargado) {
+                synchronized(cerrojo) { dominios = compilar(c) }
+            }
+            if (lista.isEmpty() || err < lista.size) a.ultimaActualizacion = System.currentTimeMillis()
+            return if (err == 0) "Listas al día · $dominios dominios"
+            else "Actualizado con $err error(es): " + mensajes.joinToString("; ")
+        } catch (e: OutOfMemoryError) {
+            return "Memoria insuficiente: activa menos listas o evita las muy grandes"
+        } catch (e: Exception) {
+            return "Error: " + (e.message ?: e.javaClass.simpleName)
+        } finally {
+            enCurso.set(false)
+        }
+    }
+
+    /** Devuelve true si la lista cambió, false si el servidor dijo «sin cambios». Lanza excepción si falla. */
+    private fun descargar(c: Context, a: Ajustes, lista: ListaDef): Boolean {
+        if (!lista.url.startsWith("https://")) throw IllegalArgumentException("solo se admiten URL https")
+        val destino = archivoLista(c, lista.id)
+        val conn = URL(lista.url).openConnection() as HttpURLConnection
+        try {
+            conn.connectTimeout = 15000
+            conn.readTimeout = 30000
+            conn.instanceFollowRedirects = true
+            conn.setRequestProperty("User-Agent", "Optimo/1.2")
+            if (destino.exists()) {
+                val etag = a.etag(lista.id)
+                val mod = a.modificado(lista.id)
+                if (etag != null) conn.setRequestProperty("If-None-Match", etag)
+                if (mod != null) conn.setRequestProperty("If-Modified-Since", mod)
+            }
+            val codigo = conn.responseCode
+            if (codigo == HttpURLConnection.HTTP_NOT_MODIFIED) return false
+            if (codigo != HttpURLConnection.HTTP_OK) throw IllegalStateException("el servidor respondió $codigo")
+
+            val tmp = File(destino.parentFile, lista.id + ".descarga")
+            var bytes = 0L
+            conn.inputStream.use { entrada ->
+                tmp.outputStream().buffered().use { salida ->
+                    val buf = ByteArray(32768)
+                    while (true) {
+                        val n = entrada.read(buf)
+                        if (n < 0) break
+                        bytes += n
+                        if (bytes > LIMITE_BYTES) throw IllegalStateException("lista demasiado grande")
+                        salida.write(buf, 0, n)
+                    }
+                }
+            }
+            val validas = contarEntradas(tmp)
+            if (validas < MIN_ENTRADAS) {
+                tmp.delete()
+                throw IllegalStateException("no parece una lista válida ($validas entradas)")
+            }
+            if (!tmp.renameTo(destino)) {
+                destino.delete()
+                if (!tmp.renameTo(destino)) throw IllegalStateException("no se pudo guardar la lista")
+            }
+            a.setCabecerasCache(lista.id, conn.getHeaderField("ETag"), conn.getHeaderField("Last-Modified"))
+            return true
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    private fun contarEntradas(f: File): Int {
+        var n = 0
+        f.useLines(Charsets.UTF_8) { lineas ->
+            for (l in lineas) {
+                if (ParserListas.procesarLinea(l) != null) {
+                    n++
+                    if (n >= MIN_ENTRADAS) break
+                }
+            }
+        }
+        return n
+    }
+
+    /** Procesa las listas activas, guarda la caché y cambia el filtro en caliente. Devuelve el nº de dominios. */
+    private fun compilar(c: Context): Int {
+        val bloqueo = ConjuntoHash64()
+        val permitido = ConjuntoHash64()
+        for (lista in activas()) {
+            val f = archivoLista(c, lista.id)
+            if (!f.exists()) continue
+            f.useLines(Charsets.UTF_8) { lineas ->
+                for (l in lineas) {
+                    val e = ParserListas.procesarLinea(l) ?: continue
+                    if (e.permitido) permitido.agregar(HashDominio.completo(e.dominio))
+                    else bloqueo.agregar(HashDominio.completo(e.dominio))
+                }
+            }
+        }
+        val tablas = FiltroListas.Tablas(bloqueo, permitido)
+        try {
+            filtro.guardarCache(archivoCache(c), tablas)
+        } catch (e: Exception) {
+            // Sin caché el filtro funciona igual; solo tardará más en arrancar.
+        }
+        filtro.reemplazar(tablas)
+        return bloqueo.tamano
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] Modelo.kt =====
+package com.optimo.navegador
+
+import android.graphics.Color
+import android.webkit.WebView
+import java.util.concurrent.atomic.AtomicInteger
+
+/** Paleta clara u oscura segun el modo del sistema al arrancar. */
+class Paleta(val oscuro: Boolean) {
+    val colores: Colores =
+        if (oscuro) Colores("#121418", "#E8EAED", "#1E2229", "#00BFA5", "#9AA0A6")
+        else Colores("#FFFFFF", "#202124", "#F1F3F4", "#00897B", "#5F6368")
+
+    val fondo: Int = Color.parseColor(colores.fondo)
+    val texto: Int = Color.parseColor(colores.texto)
+    val superficie: Int = Color.parseColor(colores.superficie)
+    val acento: Int = Color.parseColor(colores.acento)
+    val tenue: Int = Color.parseColor(colores.tenue)
+    val barra: Int = Color.parseColor(if (oscuro) "#181B20" else "#F8F9FA")
+    val campo: Int = Color.parseColor(if (oscuro) "#272B33" else "#E8EAED")
+    val campoPrivado: Int = Color.parseColor(if (oscuro) "#3A2D52" else "#E6DBF5")
+    val advertencia: Int = Color.parseColor("#F9A825")
+    val seguro: Int = Color.parseColor(if (oscuro) "#00BFA5" else "#00796B")
+}
+
+/**
+ * Una pestaña. El WebView se crea de forma perezosa (las pestañas restauradas de la sesion
+ * anterior no cargan hasta que se activan).
+ */
+class Pestana(val id: Int, val privada: Boolean) {
+    var web: WebView? = null
+    var url: String = ""
+    var titulo: String = ""
+    var progreso: Int = 100
+    var escritorio: Boolean = false
+
+    /** Muestra la pagina de inicio propia (nueva pestaña). */
+    var inicio: Boolean = false
+
+    /** Ya se ha ordenado la primera carga (o la hara quien creo la pestaña). */
+    var cargada: Boolean = false
+
+    /** URL por cargar la primera vez que se active (sesion restaurada). */
+    var pendiente: String? = null
+
+    /** Anuncios y rastreadores bloqueados en la pagina actual (se escribe desde hilos de red). */
+    val bloqueados = AtomicInteger(0)
+
+    /** Última pulsación sobre el WebView (px de pantalla) y modo «toca el anuncio que quieres bloquear». */
+    var toqueX: Float = 0f
+    var toqueY: Float = 0f
+    var eligiendo: Boolean = false
+
+    /** URL http original cuando se intento mejorar a https (para el respaldo si falla). */
+    var mejoradoDesde: String? = null
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] MotorAnuncios.kt =====
+package com.optimo.navegador
+
+import android.content.Context
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
+import android.webkit.WebView
+import androidx.webkit.ScriptHandler
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.ByteArrayInputStream
+import java.io.File
+import java.util.WeakHashMap
+
+/**
+ * Reglas de las técnicas (portadas de AntiAds): patrones de red y técnicas de página por sitio.
+ * Se leen de assets/anuncios/reglas.json; si existe filesDir/reglas_anuncios.json y es válido, manda ese.
+ */
+class ReglasAnuncios(
+    val vast: List<String>,
+    val stubs: List<Pair<String, String>>,
+    val juguete: List<String>,
+    val permitir: List<String>,
+    val sitios: List<Pair<String, Set<String>>>
+) {
+    /** Técnicas de página que aplican a un solo grupo: «*» o un sitio concreto. */
+    fun tecnicasDe(host: String): Set<String> {
+        val res = HashSet<String>()
+        for ((h, t) in sitios) if (h == host) res.addAll(t)
+        return res
+    }
+
+    /** Las de «*» más las del sitio que mejor encaje por sufijo de dominio. */
+    fun tecnicasPara(host: String): Set<String> {
+        val res = HashSet<String>(tecnicasDe("*"))
+        val mejor = sitios.filter { it.first != "*" && (host == it.first || host.endsWith("." + it.first)) }
+            .maxByOrNull { it.first.length }
+        if (mejor != null) res.addAll(mejor.second)
+        return res
+    }
+
+    companion object {
+        fun parse(texto: String): ReglasAnuncios {
+            val j = JSONObject(texto)
+            fun lista(clave: String): List<String> {
+                val res = ArrayList<String>()
+                val a = j.optJSONArray(clave) ?: return res
+                for (i in 0 until a.length()) res.add(a.getString(i).lowercase())
+                return res
+            }
+            val stubs = ArrayList<Pair<String, String>>()
+            j.optJSONArray("stubs")?.let {
+                for (i in 0 until it.length()) {
+                    val o = it.getJSONObject(i)
+                    stubs.add(Pair(o.getString("patron").lowercase(), o.getString("stub")))
+                }
+            }
+            val sitios = ArrayList<Pair<String, Set<String>>>()
+            j.optJSONArray("sitios")?.let {
+                for (i in 0 until it.length()) {
+                    val o = it.getJSONObject(i)
+                    val t = HashSet<String>()
+                    val a = o.optJSONArray("tecnicas")
+                    if (a != null) for (k in 0 until a.length()) t.add(a.getString(k))
+                    sitios.add(Pair(o.getString("host").lowercase(), t))
+                }
+            }
+            return ReglasAnuncios(lista("vast"), stubs, lista("juguete"), lista("permitir"), sitios)
+        }
+    }
+}
+
+class TecnicaAnuncios(val id: String, val nombre: String)
+
+/**
+ * Técnicas contra anuncios de navegación sobre el WebView, sin VPN ni certificados:
+ *  - Red (shouldInterceptRequest): bloqueo con CORS, VAST/VMAP vacíos, scripts sustitutos (GPT, IMA, AdSense)
+ *    y «anuncio de juguete» (MP4 válido de 0,3 s con soporte de Range).
+ *  - Página (script de inicio de documento): borrar datos de anuncios de YouTube, saltador y CSS de huecos.
+ * Las técnicas de página se instalan con androidx.webkit (DOCUMENT_START_SCRIPT); si el WebView del sistema
+ * no lo soporta, se ejecutan en onPageStarted (más tarde, menos eficaz).
+ */
+class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
+
+    private val c = contexto.applicationContext
+
+    private val reglas: ReglasAnuncios by lazy {
+        val f = File(c.filesDir, "reglas_anuncios.json")
+        var r: ReglasAnuncios? = null
+        if (f.exists()) {
+            try { r = ReglasAnuncios.parse(f.readText()) } catch (e: Exception) { r = null }
+        }
+        r ?: ReglasAnuncios.parse(leerTexto("reglas.json"))
+    }
+
+    private val juguete: ByteArray? by lazy {
+        try { c.assets.open("anuncios/vacio.mp4").use { it.readBytes() } } catch (e: Exception) { null }
+    }
+
+    private val textos = HashMap<String, String>()
+
+    private fun leerTexto(nombre: String): String = synchronized(textos) {
+        textos.getOrPut(nombre) {
+            try { c.assets.open("anuncios/$nombre").bufferedReader().use { it.readText() } } catch (e: Exception) { "" }
+        }
+    }
+
+    private val manejadores = WeakHashMap<WebView, MutableList<ScriptHandler>>()
+    private val soportaInicio: Boolean by lazy {
+        try { WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) } catch (e: Throwable) { false }
+    }
+
+    // ---------------------------------------------------------------- red
+
+    /** Respuesta inventada o bloqueo para una petición de subrecurso; null si se deja pasar. */
+    fun interceptar(request: WebResourceRequest): WebResourceResponse? {
+        if (request.isForMainFrame) return null
+        val uri = request.url
+        val host = (uri.host ?: return null).lowercase()
+        val ruta = (uri.encodedPath ?: "").lowercase()
+        val consulta = uri.encodedQuery
+        val url = host + ruta + (if (consulta != null) "?" + consulta.lowercase() else "")
+        val r = reglas
+        val listaNegra = AdBlock.bloquea(host)
+
+        // 1) Anuncio de juguete: .mp4 de dominios de la lista, o URL que encaja con un patrón de «juguete».
+        val patronJuguete = r.juguete.firstOrNull { url.contains(it) }
+        if (ajustes.tecnica("juguete") && ((ruta.endsWith(".mp4") && listaNegra) || patronJuguete != null)) {
+            val resp = respuestaJuguete(request)
+            if (resp != null) return resp
+        }
+        // 2) Scripts sustitutos.
+        if (ajustes.tecnica("stubs")) {
+            for ((patron, stub) in r.stubs) {
+                if (!url.contains(patron)) continue
+                val js = when (stub) {
+                    "gpt" -> leerTexto("gpt.js")
+                    "ima" -> leerTexto("ima.js")
+                    "adsbygoogle" -> leerTexto("adsbygoogle.js")
+                    else -> ""
+                }
+                if (js.isEmpty()) continue
+                return conCors(request, "application/javascript", js.toByteArray(Charsets.UTF_8))
+            }
+        }
+        // 3) VAST / VMAP vacíos.
+        if (ajustes.tecnica("vast") && r.vast.any { url.contains(it) }) {
+            val vmap = url.contains("vmap")
+            return conCors(request, "application/xml", (if (vmap) VMAP_VACIO else VAST_VACIO).toByteArray(Charsets.UTF_8))
+        }
+        // 4) Lista «permitir»: se deja pasar (p. ej. el script que detecta bloqueadores y rompería la web).
+        if (r.permitir.any { url.contains(it) }) return null
+        // 5) Bloqueo clásico por dominio y, opcionalmente, por rutas típicas de anuncios; respuesta vacía con CORS.
+        if (listaNegra || (ajustes.tecnica("rutas") && RUTAS.any { ruta.contains(it) })) {
+            val mime = if (ruta.endsWith(".js")) "application/javascript" else "text/plain"
+            return conCors(request, mime, ByteArray(0))
+        }
+        return null
+    }
+
+    private fun cabecera(request: WebResourceRequest, nombre: String): String? {
+        val h = request.requestHeaders ?: return null
+        for ((k, v) in h) if (k.equals(nombre, ignoreCase = true)) return v
+        return null
+    }
+
+    private fun razon(estado: Int): String = when (estado) {
+        206 -> "Partial Content"
+        416 -> "Range Not Satisfiable"
+        else -> "OK"
+    }
+
+    /** Respuesta con cabeceras CORS: sin ellas el emisor la toma por fallo y reintenta en bucle. */
+    private fun conCors(
+        request: WebResourceRequest, mime: String, datos: ByteArray,
+        estado: Int = 200, extra: Map<String, String> = emptyMap()
+    ): WebResourceResponse {
+        val h = HashMap<String, String>()
+        val origen = cabecera(request, "Origin")
+        h["Access-Control-Allow-Origin"] = origen ?: "*"
+        if (origen != null) {
+            h["Access-Control-Allow-Credentials"] = "true"
+            h["Vary"] = "Origin"
+        }
+        h["Access-Control-Allow-Methods"] = "GET, POST, HEAD, OPTIONS"
+        h["Access-Control-Allow-Headers"] = cabecera(request, "Access-Control-Request-Headers") ?: "*"
+        h["Cache-Control"] = "no-store"
+        h["Content-Length"] = datos.size.toString()
+        h.putAll(extra)
+        val codificacion = if (mime.startsWith("text/") || mime.contains("javascript") || mime.contains("xml")) "utf-8" else null
+        return WebResourceResponse(mime, codificacion, estado, razon(estado), h, ByteArrayInputStream(datos))
+    }
+
+    /** MP4 válido de 0,3 s. Un <video> pide «bytes=0-» y espera un 206, así que se atiende Range (206/416). */
+    private fun respuestaJuguete(request: WebResourceRequest): WebResourceResponse? {
+        val v = juguete ?: return null
+        val n = v.size.toLong()
+        val extra = HashMap<String, String>()
+        extra["Accept-Ranges"] = "bytes"
+        val rango = cabecera(request, "Range")
+        val m = if (rango != null) Regex("bytes=(\\d*)-(\\d*)").find(rango) else null
+        if (m == null || (m.groupValues[1].isEmpty() && m.groupValues[2].isEmpty())) {
+            return conCors(request, "video/mp4", v, 200, extra)
+        }
+        val a = m.groupValues[1].toLongOrNull()
+        val b = m.groupValues[2].toLongOrNull()
+        val desde: Long
+        val hasta: Long
+        if (a == null) {
+            val k = (b ?: 0L).coerceAtMost(n)
+            desde = n - k
+            hasta = n - 1L
+        } else {
+            desde = a
+            hasta = if (b == null) n - 1L else minOf(b, n - 1L)
+        }
+        if (desde >= n || desde > hasta) {
+            extra["Content-Range"] = "bytes */$n"
+            return conCors(request, "video/mp4", ByteArray(0), 416, extra)
+        }
+        extra["Content-Range"] = "bytes $desde-$hasta/$n"
+        return conCors(request, "video/mp4", v.copyOfRange(desde.toInt(), hasta.toInt() + 1), 206, extra)
+    }
+
+    // ---------------------------------------------------------------- página
+
+    private fun esYoutube(h: String): Boolean =
+        h == "youtube.com" || h.endsWith(".youtube.com") || h.endsWith("youtube-nocookie.com")
+
+    /** Script combinado de las técnicas de página [tecnicas] para el sitio [sitio] («*» o un dominio); null si no hay. */
+    private fun guion(tecnicas: Set<String>, sitio: String): String? {
+        val sb = StringBuilder()
+        if (tecnicas.contains("yt") && ajustes.tecnica("yt")) sb.append(envolver(leerTexto("yt_prune.js")))
+        if (tecnicas.contains("skip") && ajustes.tecnica("skip")) {
+            sb.append(envolver(leerTexto(if (esYoutube(sitio)) "skip_yt.js" else "skip_generico.js")))
+        }
+        if (tecnicas.contains("css") && ajustes.tecnica("css")) {
+            val css = CSS_GENERICO + (if (tecnicas.contains("yt")) "\n" + leerTexto("yt.css").trim() else "")
+            sb.append(envolver(CSS_JS.replace("__CSS__", JSONObject.quote(css))))
+        }
+        if (sb.isEmpty()) return null
+        // El indicador evita ejecutar dos veces lo mismo cuando coinciden el script de «*» y el del sitio.
+        return "(function(){ if(window.__optimoAds) return; window.__optimoAds=1;\n$sb})();"
+    }
+
+    /** Script que oculta lo que el usuario marcó en [host]: una hoja de estilo por selector (uno inválido no estropea el resto). */
+    fun guionUsuario(host: String): String? {
+        val sels = ReglasUsuario.selectoresPara(host)
+        if (sels.isEmpty()) return null
+        val lista = JSONArray()
+        for (s in sels) lista.put(s)
+        return CSS_USUARIO_JS.replace("__LISTA__", lista.toString())
+    }
+
+    /** Oculta ya en la página abierta lo marcado para [host] (las visitas futuras lo hacen los scripts de inicio). */
+    fun aplicarAhora(web: WebView, host: String) {
+        val js = guionUsuario(host) ?: return
+        web.evaluateJavascript(js, null)
+    }
+
+    /** Script que identifica el anuncio en el punto (x, y) en píxeles CSS; devuelve JSON o null. */
+    fun scriptElegir(x: Float, y: Float): String =
+        "(" + leerTexto("elegir.js").trim() + ")(" + x + "," + y + ")"
+
+    private fun envolver(js: String): String = if (js.isBlank()) "" else "try{\n$js\n}catch(e){}\n"
+
+    private fun reglasDeOrigen(sitio: String): Set<String> =
+        if (sitio == "*") setOf("*")
+        else setOf("https://$sitio", "https://*.$sitio", "http://$sitio", "http://*.$sitio")
+
+    /** (Re)instala los scripts de inicio en [web]; llamar al crear la pestaña y al cambiar ajustes. */
+    fun instalar(web: WebView) {
+        manejadores.remove(web)?.forEach { try { it.remove() } catch (e: Exception) { } }
+        if (!ajustes.bloquearAnuncios || !soportaInicio) return
+        val lista = ArrayList<ScriptHandler>()
+        // Primero los sitios concretos (llevan la unión de «*» y lo suyo) y al final «*»: el indicador evita duplicados.
+        val sitios = reglas.sitios.map { it.first }.filter { it != "*" }.distinct()
+        for (s in sitios) {
+            val js = guion(reglas.tecnicasPara(s), s) ?: continue
+            try {
+                lista.add(WebViewCompat.addDocumentStartJavaScript(web, js, reglasDeOrigen(s)))
+            } catch (e: Exception) { }
+        }
+        val global = guion(reglas.tecnicasDe("*"), "*")
+        if (global != null) {
+            try {
+                lista.add(WebViewCompat.addDocumentStartJavaScript(web, global, reglasDeOrigen("*")))
+            } catch (e: Exception) { }
+        }
+        // Reglas «ocultar elemento» del usuario, por sitio.
+        for (h in ReglasUsuario.hostsConReglas()) {
+            val js = guionUsuario(h) ?: continue
+            try {
+                lista.add(WebViewCompat.addDocumentStartJavaScript(web, js, reglasDeOrigen(h)))
+            } catch (e: Exception) { }
+        }
+        manejadores[web] = lista
+    }
+
+    /** Respaldo si el WebView no soporta scripts de inicio: se ejecuta al empezar la página. */
+    fun alEmpezar(web: WebView, url: String?) {
+        if (soportaInicio || !ajustes.bloquearAnuncios || url == null) return
+        val host = try { android.net.Uri.parse(url).host?.lowercase() } catch (e: Exception) { null } ?: return
+        guion(reglas.tecnicasPara(host), host)?.let { web.evaluateJavascript(it, null) }
+        guionUsuario(host)?.let { web.evaluateJavascript(it, null) }
+    }
+
+    companion object {
+        val TECNICAS = listOf(
+            TecnicaAnuncios("rutas", "Bloqueo por rutas de anuncios (/pagead/, /adserver/…)"),
+            TecnicaAnuncios("vast", "Anuncios de vídeo vacíos (VAST)"),
+            TecnicaAnuncios("juguete", "Anuncio de juguete (vídeo válido de 0,3 s)"),
+            TecnicaAnuncios("stubs", "Scripts sustitutos (GPT, IMA, AdSense)"),
+            TecnicaAnuncios("yt", "YouTube: quitar datos de anuncios"),
+            TecnicaAnuncios("skip", "Saltar anuncios (YouTube y webs configuradas)"),
+            TecnicaAnuncios("css", "Ocultar huecos de anuncios (CSS)")
+        )
+
+        const val VAST_VACIO = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VAST version=\"3.0\"></VAST>"
+        const val VMAP_VACIO = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><vmap:VMAP xmlns:vmap=\"http://www.iab.net/videosuite/vmap\" version=\"1.0\"></vmap:VMAP>"
+
+        /** Rutas típicas de anuncios en dominios que mezclan contenido y publicidad. Conservadora a propósito. */
+        private val RUTAS = listOf("/pagead/", "/adserver/", "/ads/banner", "/doubleclick/", "/adsbygoogle.js", "/prebid")
+
+        private val SELECTORES = listOf(
+            "ins.adsbygoogle", "[id^=\"google_ads_\"]", "[id^=\"div-gpt-ad\"]", "[class*=\"adsbygoogle\"]",
+            "iframe[src*=\"doubleclick.net\"]", "iframe[src*=\"googlesyndication.com\"]", "iframe[src*=\"adservice.\"]",
+            "[data-ad-slot]", "[data-ad-unit]", "[aria-label=\"Advertisement\"]", "[aria-label=\"Publicidad\"]",
+            ".ad-slot", ".ad-container", ".ad-banner", ".advert", ".advertisement", ".publicidad", ".sponsored-ad",
+            "#ad-banner", "#ads", "#adContainer"
+        )
+
+        val CSS_GENERICO: String = SELECTORES.joinToString(",") +
+            "{display:none!important;height:0!important;min-height:0!important;margin:0!important;padding:0!important}"
+
+        /** Una hoja de estilo «display:none» por selector del usuario, insertada en cuanto exista <head> o <html>. */
+        private const val CSS_USUARIO_JS = """
+(function(){
+  var L=__LISTA__;
+  function ins(s){ var r=document.head||document.documentElement; if(r){ r.appendChild(s); return true; } return false; }
+  L.forEach(function(sel){
+    var s=document.createElement('style'); s.textContent=sel+'{display:none!important}';
+    if(!ins(s)){ var o=new MutationObserver(function(){ if(ins(s)) o.disconnect(); }); o.observe(document,{childList:true,subtree:true}); }
+  });
+})();
+"""
+
+        /** Inserta una hoja de estilo en cuanto exista <head> o <html> (al inicio del documento aún pueden no existir). */
+        private const val CSS_JS = """
+(function(){
+  var s=document.createElement('style'); s.textContent=__CSS__;
+  function ins(){ var r=document.head||document.documentElement; if(r){ r.appendChild(s); return true; } return false; }
+  if(!ins()){ var o=new MutationObserver(function(){ if(ins()) o.disconnect(); }); o.observe(document,{childList:true,subtree:true}); }
+})();
+"""
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] Omnibox.kt =====
+package com.optimo.navegador
+
+import java.net.URLEncoder
+
+/** Buscador seleccionable. [base] termina en "?q=" (o equivalente) y se le añade la consulta codificada. */
+class Motor(val id: String, val nombre: String, val base: String) {
+    /** URL del formulario de busqueda (sin la consulta). */
+    fun accion(): String = base.substringBefore('?')
+
+    /** Nombre del parametro de la consulta (por defecto "q"). */
+    fun parametro(): String {
+        val q = base.substringAfter('?', "q=")
+        val nombre = q.substringBefore('=')
+        return if (nombre.isEmpty()) "q" else nombre
+    }
+}
+
+/**
+ * Resolucion del texto del omnibox (reglas del omnibox de NIA, simplificadas y sin
+ * dependencias): vacio; http/https explicito; esquema externo (mailto, tel...);
+ * esquema bloqueado; parece dominio (https implicito, http en redes locales); si no, busqueda.
+ */
+object Omnibox {
+
+    val MOTORES: List<Motor> = listOf(
+        Motor("ddg", "DuckDuckGo", "https://duckduckgo.com/?q="),
+        Motor("google", "Google", "https://www.google.com/search?q="),
+        Motor("bing", "Bing", "https://www.bing.com/search?q="),
+        Motor("brave", "Brave Search", "https://search.brave.com/search?q="),
+        Motor("ecosia", "Ecosia", "https://www.ecosia.org/search?q=")
+    )
+
+    fun motor(id: String): Motor {
+        for (m in MOTORES) {
+            if (m.id == id) return m
+        }
+        return MOTORES[0]
+    }
+
+    sealed class Resolucion {
+        object Vacio : Resolucion()
+        class Navegar(val url: String) : Resolucion()
+        class Buscar(val url: String) : Resolucion()
+        class Externo(val url: String) : Resolucion()
+        class NoSoportado(val esquema: String) : Resolucion()
+    }
+
+    private val EXTERNOS = setOf("mailto", "tel", "sms", "geo")
+    private val RE_ESQUEMA = Regex("^[a-zA-Z][a-zA-Z0-9+.-]*$")
+    private val CONOCIDOS = setOf(
+        "about", "file", "chrome", "javascript", "data", "view-source", "mailto",
+        "ftp", "ws", "wss", "blob", "tel", "sms", "geo", "intent", "content"
+    )
+
+    fun resolver(texto: String, motor: Motor): Resolucion {
+        val t = texto.trim()
+        if (t.isEmpty()) return Resolucion.Vacio
+        val esquema = esquemaExplicito(t)
+        if (esquema == "http" || esquema == "https") {
+            return if (hostDe(t).isNotEmpty()) {
+                Resolucion.Navegar(t)
+            } else {
+                Resolucion.Buscar(motor.base + codificar(t))
+            }
+        }
+        if (esquema != null) {
+            return if (esquema in EXTERNOS) Resolucion.Externo(t) else Resolucion.NoSoportado(esquema)
+        }
+        if (!pareceDominio(t)) return Resolucion.Buscar(motor.base + codificar(t))
+        val prefijo = if (esLocal(hostDe(t))) "http://" else "https://"
+        return Resolucion.Navegar(prefijo + t)
+    }
+
+    /** Esquema explicito en minusculas, o null. "host:puerto" no es un esquema. */
+    fun esquemaExplicito(texto: String): String? {
+        val i = texto.indexOf(':')
+        if (i <= 0) return null
+        val candidato = texto.substring(0, i)
+        if (!RE_ESQUEMA.matches(candidato)) return null
+        val min = candidato.lowercase()
+        if (min == "http" || min == "https") return min
+        if (texto.substring(i + 1).startsWith("//")) return min
+        return if (min in CONOCIDOS) min else null
+    }
+
+    /** Host de una URL o de un texto sin esquema ("example.com:80/ruta" -> "example.com"). */
+    fun hostDe(texto: String): String {
+        var s = texto
+        val i = s.indexOf("://")
+        if (i >= 0) s = s.substring(i + 3)
+        var fin = s.length
+        for (c in charArrayOf('/', '?', '#')) {
+            val k = s.indexOf(c)
+            if (k in 0 until fin) fin = k
+        }
+        s = s.substring(0, fin)
+        val arroba = s.lastIndexOf('@')
+        if (arroba >= 0) s = s.substring(arroba + 1)
+        if (s.startsWith("[")) {
+            val c = s.indexOf(']')
+            return if (c > 0) s.substring(0, c + 1) else ""
+        }
+        val p = s.indexOf(':')
+        if (p >= 0) s = s.substring(0, p)
+        return s
+    }
+
+    /** Sin espacios, sin arroba (correo), localhost, IP o host con punto (no "3.14"). */
+    fun pareceDominio(texto: String): Boolean {
+        if (texto.any { it <= ' ' }) return false
+        val autoridad = texto.substringBefore('/').substringBefore('?').substringBefore('#')
+        if (autoridad.contains('@')) return false
+        if (autoridad.startsWith("[")) return true
+        val host = hostDe(texto)
+        if (host.isEmpty()) return false
+        if (host == "localhost") return true
+        if (!host.contains('.')) return false
+        val partes = host.split('.')
+        if (partes.any { it.isEmpty() }) return false
+        if (partes.all { p -> p.all { it.isDigit() } }) return partes.size == 4
+        return true
+    }
+
+    /** Hosts a los que se accede por http por defecto: red local (localhost, .local e IP de rangos privados). */
+    fun esLocal(host: String): Boolean {
+        val h = host.lowercase()
+        if (h == "localhost" || h.endsWith(".localhost") || h.endsWith(".local")) return true
+        if (h.startsWith("[")) {
+            return h == "[::1]" || h.startsWith("[fe80:") || h.startsWith("[fc") || h.startsWith("[fd")
+        }
+        val partes = h.split('.')
+        if (partes.size != 4 || partes.any { p -> p.isEmpty() || !p.all { c -> c.isDigit() } }) return false
+        val a = partes[0].toIntOrNull() ?: return false
+        val b = partes[1].toIntOrNull() ?: return false
+        return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b in 16..31) || (a == 169 && b == 254)
+    }
+
+    fun codificar(q: String): String = URLEncoder.encode(q, "UTF-8")
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] Paginas.kt =====
+package com.optimo.navegador
+
+/** Colores como cadenas "#RRGGBB" para las paginas internas. */
+class Colores(
+    val fondo: String,
+    val texto: String,
+    val superficie: String,
+    val acento: String,
+    val tenue: String
+)
+
+/** Paginas internas (inicio y error) generadas como HTML estatico, sin JavaScript. */
+object Paginas {
+
+    fun esc(s: String): String =
+        s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+            .replace("\"", "&quot;").replace("'", "&#39;")
+
+    private fun estilo(c: Colores): String =
+        "*{box-sizing:border-box}" +
+            "body{margin:0;padding:24px 20px;background:" + c.fondo + ";color:" + c.texto +
+            ";font-family:sans-serif;text-align:center}" +
+            "h1{font-size:34px;margin:56px 0 4px;letter-spacing:1px;color:" + c.acento + "}" +
+            "p{color:" + c.tenue + ";margin:6px 0 22px}" +
+            "form{max-width:520px;margin:0 auto 28px}" +
+            "input{width:100%;padding:14px 18px;font-size:17px;border:0;border-radius:28px;" +
+            "background:" + c.superficie + ";color:" + c.texto + ";outline:none}" +
+            ".g{display:flex;flex-wrap:wrap;justify-content:center;max-width:520px;margin:0 auto}" +
+            ".a{width:25%;min-width:76px;padding:10px 4px;text-decoration:none;color:" + c.texto + "}" +
+            ".i{display:block;width:48px;height:48px;line-height:48px;margin:0 auto 6px;border-radius:50%;" +
+            "background:" + c.superficie + ";color:" + c.acento + ";font-size:22px;font-weight:bold}" +
+            ".t{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+            "a.b{display:inline-block;margin-top:8px;padding:12px 26px;border-radius:24px;" +
+            "background:" + c.acento + ";color:" + c.fondo + ";text-decoration:none;font-weight:bold}"
+
+    private fun cabecera(c: Colores, titulo: String): String =
+        "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">" +
+            "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">" +
+            "<title>" + esc(titulo) + "</title><style>" + estilo(c) + "</style></head><body>"
+
+    /** Titulo de la pagina de error: el historial lo usa para no guardar paginas de error. */
+    const val TITULO_ERROR = "No se pudo cargar la página"
+
+    val ATAJOS_POR_DEFECTO: List<Pair<String, String>> = listOf(
+        Pair("Wikipedia", "https://es.wikipedia.org/"),
+        Pair("YouTube", "https://m.youtube.com/"),
+        Pair("GitHub", "https://github.com/"),
+        Pair("OpenStreetMap", "https://www.openstreetmap.org/")
+    )
+
+    /** Pagina de nueva pestaña: buscador y accesos directos (marcadores). */
+    fun inicio(c: Colores, motor: Motor, atajos: List<Pair<String, String>>): String {
+        val sb = StringBuilder()
+        sb.append(cabecera(c, "Optimo"))
+        sb.append("<h1>Optimo</h1><p>Navega rápido y con control.</p>")
+        sb.append("<form action=\"").append(esc(motor.accion())).append("\" method=\"get\">")
+        sb.append("<input type=\"search\" name=\"").append(esc(motor.parametro()))
+        sb.append("\" placeholder=\"Buscar con ").append(esc(motor.nombre))
+        sb.append("\" autocomplete=\"off\"></form><div class=\"g\">")
+        var n = 0
+        for ((titulo, url) in atajos) {
+            if (n >= 8) break
+            if (!(url.startsWith("http://") || url.startsWith("https://"))) continue
+            val nombre = if (titulo.isNotBlank()) titulo.trim() else Omnibox.hostDe(url)
+            val inicial = nombre.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
+            sb.append("<a class=\"a\" href=\"").append(esc(url)).append("\">")
+            sb.append("<span class=\"i\">").append(esc(inicial)).append("</span>")
+            sb.append("<span class=\"t\">").append(esc(nombre)).append("</span></a>")
+            n++
+        }
+        sb.append("</div></body></html>")
+        return sb.toString()
+    }
+
+    /** Pagina de error de carga con enlace para reintentar. */
+    fun error(c: Colores, url: String, descripcion: String): String {
+        val sb = StringBuilder()
+        sb.append(cabecera(c, TITULO_ERROR))
+        sb.append("<h1>No se pudo cargar</h1>")
+        sb.append("<p>").append(esc(url)).append("</p>")
+        sb.append("<p>").append(esc(descripcion)).append("</p>")
+        sb.append("<p>Comprueba tu conexión o la dirección e inténtalo de nuevo.</p>")
+        sb.append("<a class=\"b\" href=\"").append(esc(url)).append("\">Reintentar</a>")
+        sb.append("</body></html>")
+        return sb.toString()
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] ReglasUsuario.kt =====
+package com.optimo.navegador
+
+import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+
+/** Regla «ocultar elemento»: en el sitio [host] (y subdominios) se oculta lo que encaje con [sel]. */
+class ReglaOcultar(val host: String, val sel: String)
+
+/**
+ * Reglas que añade el usuario al mantener pulsado un anuncio. Se guardan en un JSON pequeño.
+ *  - Ocultar elemento: selector CSS por sitio.
+ *  - Bloquear dominio: vale para todas las webs y gana a las excepciones de las listas.
+ * Las lecturas (desde hilos de red) usan instantáneas inmutables; las escrituras van en el hilo principal.
+ */
+object ReglasUsuario {
+
+    @Volatile
+    private var ocultar: List<ReglaOcultar> = emptyList()
+
+    @Volatile
+    private var dominios: Set<String> = emptySet()
+
+    private var archivo: File? = null
+
+    fun iniciar(c: Context) {
+        archivo = File(c.applicationContext.filesDir, "reglas_usuario.json")
+        cargar()
+    }
+
+    val total: Int get() = ocultar.size + dominios.size
+
+    fun listaOcultar(): List<ReglaOcultar> = ocultar
+
+    fun listaDominios(): List<String> = dominios.sorted()
+
+    /** Sitio normalizado: minúsculas y sin «www.» (la regla vale también para sus subdominios). */
+    fun clave(host: String): String = host.lowercase().removePrefix("www.")
+
+    fun agregarOcultar(host: String, sel: String): Boolean {
+        val h = clave(host)
+        if (h.isEmpty() || sel.isBlank()) return false
+        if (ocultar.any { it.host == h && it.sel == sel }) return false
+        ocultar = ocultar + ReglaOcultar(h, sel)
+        guardar()
+        return true
+    }
+
+    fun agregarDominio(dominio: String): Boolean {
+        val d = UtilDominio.normalizar(dominio.removePrefix("www.")) ?: return false
+        if (dominios.contains(d)) return false
+        dominios = dominios + d
+        guardar()
+        return true
+    }
+
+    fun quitarOcultar(r: ReglaOcultar) {
+        ocultar = ocultar.filter { it !== r }
+        guardar()
+    }
+
+    fun quitarDominio(d: String) {
+        dominios = dominios - d
+        guardar()
+    }
+
+    /** Selectores de ocultación que aplican a la página en [host]. */
+    fun selectoresPara(host: String): List<String> {
+        val h = host.lowercase()
+        return ocultar.filter { h == it.host || h.endsWith("." + it.host) }.map { it.sel }
+    }
+
+    fun hostsConReglas(): List<String> = ocultar.map { it.host }.distinct()
+
+    /** True si [host] o alguno de sus dominios padre está en los dominios bloqueados por el usuario. */
+    fun bloqueaDominio(host: String): Boolean {
+        val set = dominios
+        if (set.isEmpty()) return false
+        var h = host.lowercase()
+        while (true) {
+            if (set.contains(h)) return true
+            val i = h.indexOf('.')
+            if (i < 0) return false
+            h = h.substring(i + 1)
+            if (h.indexOf('.') < 0) return false
+        }
+    }
+
+    private fun cargar() {
+        try {
+            val f = archivo ?: return
+            val texto = AlmacenSeguro.leerTexto(f) ?: return
+            val j = JSONObject(texto)
+            val o = ArrayList<ReglaOcultar>()
+            j.optJSONArray("ocultar")?.let {
+                for (i in 0 until it.length()) {
+                    val x = it.getJSONObject(i)
+                    o.add(ReglaOcultar(x.getString("host"), x.getString("sel")))
+                }
+            }
+            val d = HashSet<String>()
+            j.optJSONArray("dominios")?.let { for (i in 0 until it.length()) d.add(it.getString(i)) }
+            ocultar = o
+            dominios = d
+        } catch (e: Exception) {
+            // Archivo dañado: se empieza sin reglas.
+        }
+    }
+
+    private fun guardar() {
+        try {
+            val f = archivo ?: return
+            val j = JSONObject()
+            val o = JSONArray()
+            for (r in ocultar) o.put(JSONObject().put("host", r.host).put("sel", r.sel))
+            j.put("ocultar", o)
+            val d = JSONArray()
+            for (x in dominios.sorted()) d.put(x)
+            j.put("dominios", d)
+            AlmacenSeguro.escribirTexto(f, j.toString())
+        } catch (e: Exception) {
+            // Sin espacio o sin permiso: se pierde solo esta escritura.
+        }
+    }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] AndroidManifest.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission
+        android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
+
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+
+    <application
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Optimo"
+        android:allowBackup="false"
+        android:usesCleartextTraffic="true"> <!-- http solo tras confirmacion (ver MainActivity.cargarUrl); la red local y los sitios que no ofrecen https lo necesitan -->
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboardHidden|keyboard|navigation|density|layoutDirection|fontScale">
+
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="http" />
+                <data android:scheme="https" />
+            </intent-filter>
+
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
+        </activity>
+    </application>
+
+</manifest>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] build.gradle =====
+plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace 'com.optimo.navegador'
+    compileSdk 34
+
+    defaultConfig {
+        applicationId 'com.optimo.navegador'
+        minSdk 26
+        targetSdk 34
+        versionCode 4
+        versionName '1.4.0'
+    }
+
+    // Firma propia de Optimo: el workflow de Fusion genera apk-build/debug.keystore
+    // la primera vez que compila en el repositorio de ESTE proyecto, asi que la clave
+    // es distinta de la de cualquier otra app y queda fija entre builds.
+    signingConfigs {
+        debug {
+            storeFile file("../apk-build/debug.keystore")
+            storePassword "android"
+            keyAlias "androiddebugkey"
+            keyPassword "android"
+        }
+    }
+
+    buildTypes {
+        debug {
+            signingConfig signingConfigs.debug
+        }
+        release {
+            minifyEnabled false
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+}
+
+// Una sola dependencia: androidx.webkit, para inyectar scripts al inicio del documento (anuncios).
+// El resto son APIs del sistema (WebView, DownloadManager...).
+dependencies {
+    implementation 'androidx.webkit:webkit:1.11.0'
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/adsbygoogle.js =====
+(function(){ var a=window.adsbygoogle=window.adsbygoogle||[]; a.loaded=true; a.push=function(){ return 0; }; })();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/elegir.js =====
+function(x,y){
+  try{
+    var vw=window.innerWidth, vh=window.innerHeight;
+    var el=document.elementFromPoint(x,y);
+    if(!el||el===document.body||el===document.documentElement) return null;
+    function esc(s){ return (window.CSS&&CSS.escape)?CSS.escape(s):String(s).replace(/[^a-zA-Z0-9_-]/g,'\\$&'); }
+    function cuenta(s){ try{ return document.querySelectorAll(s).length; }catch(e){ return 0; } }
+    function host(u){ try{ return new URL(u,location.href).hostname; }catch(e){ return ''; } }
+    function pequeno(n){ var r=n.getBoundingClientRect(); return r.width>0&&r.height>0&&r.width*r.height<=0.6*vw*vh; }
+    function meta(n){ return (n.id||'')+' '+(typeof n.className==='string'?n.className:'')+' '+(n.getAttribute('data-ad-slot')||n.getAttribute('data-ad-unit')||''); }
+    var AD=/(^|[\s_-])(ad|ads|adv|advert|advertisement|banner|sponsor|sponsored|publicidad|promo|dfp|gpt|taboola|outbrain)([\s_-]|$)|adsbygoogle|doubleclick|google_ads|adslot/i;
+
+    // El contenedor de anuncio más externo (pero no enorme) que rodea lo tocado.
+    var obj=null, n=el;
+    for(var d=0; n&&n!==document.body&&n!==document.documentElement&&d<8; d++, n=n.parentElement){
+      if((n.tagName==='IFRAME'||n.tagName==='INS'||AD.test(meta(n)))&&pequeno(n)) obj=n;
+    }
+    if(!obj){ obj=el; if(!pequeno(obj)) return null; }
+
+    // Dominio del recurso (iframe, imagen o vídeo), si es de otro sitio.
+    var src='';
+    if(obj.tagName==='IFRAME') src=obj.src||'';
+    if(!src) src=el.currentSrc||el.src||'';
+    if(!src&&obj.querySelector){ var q=obj.querySelector('iframe[src],img[src],video[src],source[src]'); if(q) src=q.currentSrc||q.src||''; }
+    var dom=host(src);
+    if(dom===location.hostname) dom='';
+
+    // Selector: por clases/id si es estable; posicional si el anterior coincide con demasiados elementos.
+    function ruta(n0,posicional){
+      var p=[], m=n0;
+      for(var d=0; m&&m.nodeType===1&&m!==document.body&&m!==document.documentElement&&d<(posicional?12:5); d++, m=m.parentElement){
+        var t=m.tagName.toLowerCase();
+        if(m.id&&!/\d{4,}/.test(m.id)){ p.unshift(t+'#'+esc(m.id)); break; }
+        var cl=posicional?[]:(typeof m.className==='string'?m.className:'').trim().split(/\s+/).filter(function(c){ return c&&!/\d{3,}/.test(c); }).slice(0,2);
+        if(cl.length){ t+='.'+cl.map(esc).join('.'); }
+        else { var i=1, s=m; while((s=s.previousElementSibling)){ if(s.tagName===m.tagName) i++; } t+=':nth-of-type('+i+')'; }
+        p.unshift(t);
+        if(!posicional&&cuenta(p.join('>'))===1) break;
+      }
+      return p.join('>');
+    }
+    var sel='';
+    if(obj.tagName==='IFRAME'){ var h2=host(obj.src||''); if(h2&&h2!==location.hostname) sel='iframe[src*="'+h2+'"]'; }
+    if(!sel) sel=ruta(obj,false);
+    if(cuenta(sel)>6) sel=ruta(obj,true);
+    var r=obj.getBoundingClientRect();
+    return JSON.stringify({sel:sel,dom:dom,tag:obj.tagName.toLowerCase(),w:Math.round(r.width),h:Math.round(r.height),n:cuenta(sel)});
+  }catch(e){ return null; }
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/gpt.js =====
+(function(){
+  var w=window, q=(w.googletag&&w.googletag.cmd)||[], chain;
+  chain=new Proxy(function(){},{
+    get:function(t,p){ if(p==='then'||p===Symbol.toPrimitive) return undefined; if(p==='toString') return function(){return ''}; return chain; },
+    apply:function(){ return chain; },
+    construct:function(){ return chain; }
+  });
+  var cmd={push:function(){ for(var i=0;i<arguments.length;i++){ try{ if(typeof arguments[i]==='function') arguments[i].call(w); }catch(e){} } return 0; }};
+  var g={cmd:cmd,apiReady:true,pubadsReady:true,_loaded_:true,
+    pubads:function(){return chain}, companionAds:function(){return chain}, content:function(){return chain},
+    defineSlot:function(){return chain}, defineOutOfPageSlot:function(){return chain}, sizeMapping:function(){return chain},
+    enableServices:function(){}, display:function(){}, destroySlots:function(){return true}, openConsole:function(){},
+    getVersion:function(){return 'antiads-stub'}, setAdIframeTitle:function(){}};
+  w.googletag=new Proxy(g,{get:function(t,p){ if(p in t) return t[p]; if(p==='then') return undefined; return chain; }});
+  for(var i=0;i<q.length;i++){ cmd.push(q[i]); }
+})();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/ima.js =====
+(function(){
+  var w=window; w.google=w.google||{};
+  function lenient(o){ return new Proxy(o,{get:function(t,p){ if(p in t) return t[p]; if(p==='then') return undefined; return function(){ return undefined; }; }}); }
+  function Err(){ this.getErrorCode=function(){return 1009}; this.getVastErrorCode=function(){return 1009}; this.getMessage=function(){return 'AntiAds: sin anuncios'}; this.getType=function(){return 'adError'}; this.getInnerError=function(){return null}; this.toString=function(){return 'AdError 1009'}; }
+  function Ev(t){ this.type=t; this.getError=function(){return new Err()}; this.getAd=function(){return null}; this.getAdData=function(){return {}}; this.getUserRequestContext=function(){return null}; }
+  function Em(){ this._l={}; }
+  Em.prototype.addEventListener=function(t,f){ (this._l[t]=this._l[t]||[]).push(f); };
+  Em.prototype.removeEventListener=function(t,f){ var a=this._l[t]||[], i=a.indexOf(f); if(i>=0) a.splice(i,1); };
+  Em.prototype._fire=function(t){ var a=(this._l[t]||[]).slice(), e=new Ev(t); for(var i=0;i<a.length;i++){ try{ a[i](e); }catch(x){} } };
+  function Settings(){}
+  Settings.prototype=lenient({});
+  function Loader(){ Em.call(this); }
+  Loader.prototype=Object.create(Em.prototype);
+  Loader.prototype.requestAds=function(){ var s=this; setTimeout(function(){ s._fire('adError'); },0); };
+  Loader.prototype.contentComplete=function(){};
+  Loader.prototype.destroy=function(){};
+  Loader.prototype.getSettings=function(){ return new Settings(); };
+  function Container(){}
+  Container.prototype.initialize=function(){}; Container.prototype.destroy=function(){};
+  function Plain(){}
+  w.google.ima=lenient({
+    AdDisplayContainer:Container, AdsLoader:Loader, AdsRequest:Plain, AdsRenderingSettings:Plain, ImaSdkSettings:Settings,
+    settings:new Settings(), VERSION:'3.0.0',
+    AdsManagerLoadedEvent:{Type:{ADS_MANAGER_LOADED:'adsManagerLoaded'}},
+    AdErrorEvent:{Type:{AD_ERROR:'adError'}},
+    AdEvent:{Type:{ALL_ADS_COMPLETED:'allAdsCompleted',CONTENT_PAUSE_REQUESTED:'contentPauseRequested',CONTENT_RESUME_REQUESTED:'contentResumeRequested',LOADED:'loaded',STARTED:'started',COMPLETE:'complete',SKIPPED:'skip',AD_ERROR:'adError'}},
+    ViewMode:{NORMAL:'normal',FULLSCREEN:'fullscreen'},
+    AdError:{ErrorCode:{VAST_EMPTY_RESPONSE:1009,UNKNOWN_AD_RESPONSE:1010}}
+  });
+})();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/reglas.json =====
+{
+  "version": 1,
+  "vast": [
+    "/gampad/ads",
+    "output=vast",
+    "output=xml_vast",
+    "output=vmap",
+    "/vast/",
+    "/vast?",
+    "vast.xml",
+    "ad_type=video"
+  ],
+  "stubs": [
+    {
+      "patron": "/tag/js/gpt.js",
+      "stub": "gpt"
+    },
+    {
+      "patron": "googletagservices.com/tag/js/gpt",
+      "stub": "gpt"
+    },
+    {
+      "patron": "/pubads_impl",
+      "stub": "gpt"
+    },
+    {
+      "patron": "imasdk.googleapis.com/js/sdkloader/ima3",
+      "stub": "ima"
+    },
+    {
+      "patron": "/pagead/js/adsbygoogle.js",
+      "stub": "adsbygoogle"
+    }
+  ],
+  "juguete": [
+    "/pre_videos/"
+  ],
+  "permitir": [
+    "/delivery/js/abp"
+  ],
+  "sitios": [
+    {
+      "host": "*",
+      "tecnicas": [
+        "css",
+        "hls"
+      ]
+    },
+    {
+      "host": "youtube.com",
+      "tecnicas": [
+        "yt",
+        "skip",
+        "css"
+      ]
+    },
+    {
+      "host": "youtube-nocookie.com",
+      "tecnicas": [
+        "yt",
+        "skip"
+      ]
+    }
+  ]
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/skip_generico.js =====
+(function(){
+  var RE=/^\s*(skip( ad| ads)?|saltar( anuncio| publicidad)?|omitir( anuncio)?|close ad|cerrar anuncio)\s*[>»]*\s*$/i;
+  var AD=/(^|[\s_-])(ad|ads|advert|preroll|pre-roll|vast|ima|sponsor)([\s_-]|$)/i;
+  setInterval(function(){
+    if(document.hidden) return;
+    try{
+      var bs=document.querySelectorAll('button,a,div[role=button],span[role=button]');
+      for(var i=0;i<bs.length;i++){
+        var b=bs[i], t=(b.textContent||b.getAttribute('aria-label')||'').trim();
+        if(!t||t.length>24||!RE.test(t)) continue;
+        var n=b, enAnuncio=false;
+        for(var d=0;n&&d<6;d++,n=n.parentElement){ if(AD.test((n.className&&n.className.toString())||'')||AD.test(n.id||'')){ enAnuncio=true; break; } }
+        if(enAnuncio) b.click();
+      }
+    }catch(e){}
+  },1000);
+})();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/skip_yt.js =====
+(function(){
+  var BT=['.ytp-skip-ad-button','.ytp-ad-skip-button','.ytp-ad-skip-button-modern','.ytp-ad-skip-button-container button'];
+  var tocado=false, mudoAntes=false;
+  setInterval(function(){
+    if(document.hidden) return;
+    try{
+      var p=document.querySelector('.html5-video-player');
+      var anuncio=!!p&&(p.classList.contains('ad-showing')||p.classList.contains('ad-interrupting'));
+      var v=document.querySelector('video.html5-main-video')||document.querySelector('video');
+      if(anuncio&&v){
+        if(!tocado){ tocado=true; mudoAntes=v.muted; }
+        v.muted=true;
+        try{ v.playbackRate=16; }catch(e){}
+        if(isFinite(v.duration)&&v.duration>0&&v.currentTime<v.duration-0.2){ v.currentTime=v.duration; }
+        for(var i=0;i<BT.length;i++){ var b=document.querySelector(BT[i]); if(b) b.click(); }
+        var c=document.querySelector('.ytp-ad-overlay-close-button'); if(c) c.click();
+      } else if(tocado&&v){
+        tocado=false; v.muted=mudoAntes;
+        try{ v.playbackRate=1; }catch(e){}
+      }
+    }catch(e){}
+  },500);
+})();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/vacio.mp4 =====
+data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAMvbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAASwAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAgAAAll0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAASwAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAEsAAAAAAABAAAAAAHRbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAAAoAAAADABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABfG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAATxzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMAUDxImSABAAVoy4PLIAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAET1AABE9QAAABhzdHRzAAAAAAAAAAEAAAADAAAEAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAADAAAAAQAAACBzdHN6AAAAAAAAAAAAAAADAAACgwAAAAkAAAAKAAAAFHN0Y28AAAAAAAAAAQAAA18AAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYwLjE2LjEwMAAAAAhmcmVlAAACnm1kYXQAAAJxBgX//23cRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY0IHIzMTA4IDMxZTE5ZjkgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDIzIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MyBkZWJsb2NrPTE6MDowIGFuYWx5c2U9MHgxOjB4MTExIG1lPWhleCBzdWJtZT03IHBzeT0xIHBzeV9yZD0xLjAwOjAuMDAgbWl4ZWRfcmVmPTEgbWVfcmFuZ2U9MTYgY2hyb21hX21lPTEgdHJlbGxpcz0xIDh4OGRjdD0wIGNxbT0wIGRlYWR6b25lPTIxLDExIGZhc3RfcHNraXA9MSBjaHJvbWFfcXBfb2Zmc2V0PS0yIHRocmVhZHM9MSBsb29rYWhlYWRfdGhyZWFkcz0xIHNsaWNlZF90aHJlYWRzPTAgbnI9MCBkZWNpbWF0ZT0xIGludGVybGFjZWQ9MCBibHVyYXlfY29tcGF0PTAgY29uc3RyYWluZWRfaW50cmE9MCBiZnJhbWVzPTAgd2VpZ2h0cD0wIGtleWludD0yNTAga2V5aW50X21pbj0xMCBzY2VuZWN1dD00MCBpbnRyYV9yZWZyZXNoPTAgcmNfbG9va2FoZWFkPTQwIHJjPWNyZiBtYnRyZWU9MSBjcmY9MjMuMCBxY29tcD0wLjYwIHFwbWluPTAgcXBtYXg9NjkgcXBzdGVwPTQgaXBfcmF0aW89MS40MCBhcT0xOjEuMDAAgAAAAApliIQP8mKAAMPuAAAABUGaOB3qAAAABkGaVAb6gA==
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/yt_prune.js =====
+(function(){
+  var K=['adPlacements','playerAds','adSlots','adBreakHeartbeatParams'];
+  function prune(o){
+    if(o&&typeof o==='object'){
+      for(var i=0;i<K.length;i++){ if(K[i] in o){ try{ delete o[K[i]]; }catch(e){} } }
+      if(o.playerResponse) prune(o.playerResponse);
+      if(o.response) prune(o.response);
+    }
+    return o;
+  }
+  var pj=JSON.parse;
+  JSON.parse=function(){ return prune(pj.apply(this,arguments)); };
+  if(window.Response&&Response.prototype){
+    var rj=Response.prototype.json;
+    Response.prototype.json=function(){ return rj.apply(this,arguments).then(prune); };
+    var rt=Response.prototype.text;
+    Response.prototype.text=function(){
+      return rt.apply(this,arguments).then(function(t){
+        try{ if(t&&t.charAt(0)==='{'&&t.indexOf('adPlacements')>=0) return JSON.stringify(prune(pj(t))); }catch(e){}
+        return t;
+      });
+    };
+  }
+  var v;
+  try{ Object.defineProperty(window,'ytInitialPlayerResponse',{get:function(){return v;},set:function(x){ v=prune(x); },configurable:true}); }catch(e){}
+})();
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] assets/anuncios/yt.css =====
+#masthead-ad,#player-ads,ytd-ad-slot-renderer,ytd-in-feed-ad-layout-renderer,ytd-display-ad-renderer,ytd-promoted-sparkles-web-renderer,ytd-banner-promo-renderer,.ytp-ad-overlay-container,.ytp-ad-text-overlay,ytm-promoted-sparkles-web-renderer,ad-slot-renderer{display:none!important}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/drawable/ic_launcher_foreground.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="9"
+        android:pathData="M54,54m-21,0a21,21 0 1,1 42,0a21,21 0 1,1 -42,0" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,54m-6,0a6,6 0 1,1 12,0a6,6 0 1,1 -12,0" />
+</vector>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/mipmap-anydpi-v26/ic_launcher_round.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/optimo_icono_fondo" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/mipmap-anydpi-v26/ic_launcher.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/optimo_icono_fondo" />
+    <foreground android:drawable="@drawable/ic_launcher_foreground" />
+</adaptive-icon>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/values-night/themes.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Optimo" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/values/colors.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="optimo_icono_fondo">#00897B</color>
+</resources>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/values/strings.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">OptimoAntiAd</string>
+</resources>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] res/values/themes.xml =====
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Optimo" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] _raiz/build.gradle =====
+// Versiones alineadas con la combinacion que el pipeline de Fusion/Actions ya compilo con exito.
+plugins {
+    id 'com.android.application' version '8.5.0' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+}
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] _raiz/gradle.properties =====
+org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+kotlin.code.style=official
+android.useAndroidX=true
+org.gradle.caching=true
+org.gradle.parallel=true
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] _raiz/README.md =====
+# Optimo
+
+Navegador Android ligero sobre el WebView del sistema (motor Chromium). Paquete `com.optimo.navegador`,
+pensado para compilarse desde Fusion. Una sola dependencia (androidx.webkit); el resto son APIs del sistema.
+
+## Funciones
+- Pestañas normales y privadas (la privada usa un perfil de WebView aislado, con cookies, almacenamiento y caché propios que se destruyen al cerrar la última pestaña privada; no guarda historial y bloquea capturas de pantalla).
+- Omnibox con busqueda (DuckDuckGo, Google, Bing, Brave, Ecosia) y HTTPS primero con respaldo a http.
+- Marcadores, historial, pagina de inicio con accesos directos, sesion restaurada al reabrir.
+- Descargas (DownloadManager), buscar en la pagina, compartir, abrir enlaces de otras apps y "compartir con Optimo".
+- Bloqueo de anuncios/rastreadores por dominio mas las listas descargables de AntiAds (OISD, HaGeZi, AdAway, EasyList... en `Listas.kt`, con cache compilada) reglas propias (mantener pulsado un anuncio: ocultar elemento por sitio o bloquear dominio; `ReglasUsuario.kt`) y tecnicas extra portadas de AntiAds (`MotorAnuncios.kt`, `assets/anuncios/`): anuncio de juguete (MP4 valido), VAST vacio, scripts sustitutos GPT/IMA/AdSense, CSS de huecos, YouTube (datos de anuncios y saltador); se activan una a una en Ajustes, versión de escritorio, modo oscuro de paginas (experimental).
+- Permisos de camara, microfono y ubicacion con confirmacion; subida de archivos; pantalla completa de video.
+- Certificados no válidos: bloqueados sin opción de saltarlos (solo equipos de la red local, y tras confirmar).
+- Sitios sin HTTPS: nunca se abren por http sin confirmación; descargas sin cifrar bloqueadas; contenido mixto bloqueado.
+- Datos locales cifrados (marcadores, historial, sesión y reglas) con AES-256-GCM y clave en el Keystore (`AlmacenSeguro.kt`).
+- Botón ⛶ en el extremo derecho de la barra de direcciones: página a pantalla completa (sin barras de Optimo ni del sistema); se sale pulsando atrás dos veces.
+- Compatible con el autorrelleno de La Bóveda (selecciónala como servicio de autorrelleno de Android).
+
+## Firma
+El workflow de Fusion genera `apk-build/debug.keystore` la primera vez que compila en el repositorio de este
+proyecto y lo conserva: firma propia, distinta de cualquier otra app, estable entre builds.
+
+## Estructura
+`app/src/main/java/com/optimo/navegador/`: `MainActivity.kt` (interfaz, pestañas, menus, clientes WebView),
+`Omnibox.kt`, `AdBlock.kt`, `Paginas.kt` (logica pura), `Almacen.kt` (marcadores, historial, ajustes), `AlmacenSeguro.kt` (cifrado local), `Modelo.kt`.
+
+=====[FUSION:FIN]=====
+=====[FUSION:ARCHIVO] _raiz/settings.gradle =====
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+dependencyResolutionManagement {
+    repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+rootProject.name = 'Optimo'
+
+include ':app'
+
+=====[FUSION:FIN]=====
