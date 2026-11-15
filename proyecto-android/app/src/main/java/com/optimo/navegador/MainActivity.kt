@@ -126,6 +126,8 @@ class MainActivity : Activity() {
         paleta = Paleta(noche)
         ajustes = Ajustes(this)
         anuncios = MotorAnuncios(this, ajustes)
+        ReglasUsuario.iniciar(this)
+        ListasManager.iniciar(this, ajustes)
         marcadores = ListaPersistente(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
         uaEscritorio = calcularUaEscritorio()
@@ -543,6 +545,7 @@ class MainActivity : Activity() {
         w.setFindListener { ordinal, total, _ ->
             contadorBuscar.text = if (total == 0) "0/0" else "${ordinal + 1}/$total"
         }
+        w.setOnTouchListener { v, ev -> alTocar(v as WebView, p, ev) }
         w.setOnLongClickListener { v -> menuContextual(v as WebView, p) }
         aplicarAjustesWeb(w)
         anuncios.instalar(w)
@@ -793,6 +796,7 @@ class MainActivity : Activity() {
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
+            add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
         }
         add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
         add("Ir a la página de inicio") { mostrarInicio(p) }
@@ -815,7 +819,9 @@ class MainActivity : Activity() {
             reinstalarAnuncios()
             mostrarAjustes()
         }
+        add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
+        add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
         add("Usar HTTPS primero: " + si(ajustes.httpsPrimero)) {
             ajustes.httpsPrimero = !ajustes.httpsPrimero
             mostrarAjustes()
@@ -839,6 +845,74 @@ class MainActivity : Activity() {
         add("Borrar historial, caché y cookies") { confirmarBorrado() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
+    }
+
+    private fun mostrarListas() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Elegir listas…") { elegirListas() }
+        add("Añadir lista por URL (https)…") { anadirLista() }
+        add("Actualizar ahora") { actualizarListas(false) }
+        add("Actualizar solo con Wi-Fi: " + si(ajustes.soloWifi)) {
+            ajustes.soloWifi = !ajustes.soloWifi
+            mostrarListas()
+        }
+        if (ajustes.propias().isNotEmpty()) add("Quitar una lista añadida…") { quitarLista() }
+        opciones(ListasManager.resumen(), items)
+    }
+
+    private fun actualizarListas(forzarCompilar: Boolean) {
+        toast("Actualizando listas…")
+        ListasManager.actualizarAsync(forzarCompilar) { mensaje -> toast(mensaje) }
+    }
+
+    private fun elegirListas() {
+        val todas = ListasManager.todas()
+        val nombres = Array(todas.size) { i -> todas[i].nombre + " · " + todas[i].tam }
+        val activas = ajustes.listasActivas()
+        val marcadas = BooleanArray(todas.size) { i -> activas.contains(todas[i].id) }
+        nuevoDialogo()
+            .setTitle("Listas de bloqueo")
+            .setMultiChoiceItems(nombres, marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Aplicar") { _, _ ->
+                val nuevas = HashSet<String>()
+                for (i in todas.indices) if (marcadas[i]) nuevas.add(todas[i].id)
+                ajustes.ponerListasActivas(nuevas)
+                actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun anadirLista() {
+        val campo = android.widget.EditText(this)
+        campo.hint = "https://…"
+        campo.setSingleLine(true)
+        nuevoDialogo()
+            .setTitle("Añadir lista por URL")
+            .setView(campo)
+            .setPositiveButton("Añadir") { _, _ ->
+                val lista = ajustes.agregarPropia(campo.text.toString())
+                if (lista == null) toast("URL no válida: debe empezar por https://")
+                else actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun quitarLista() {
+        val propias = ajustes.propias()
+        val nombres = Array(propias.size) { i -> propias[i].nombre }
+        nuevoDialogo()
+            .setTitle("Quitar lista")
+            .setItems(nombres) { _, i ->
+                ajustes.quitarPropia(propias[i].id)
+                actualizarListas(true)
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun reinstalarAnuncios() {
@@ -901,10 +975,10 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.1.0")
+            .setTitle("Optimo 1.3.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
-                    "• Bloqueador de anuncios y rastreadores por dominio (" + AdBlock.TOTAL + " dominios), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes).\n" +
+                    "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
                     "• HTTPS primero, con respaldo a http si el sitio no lo ofrece.\n" +
                     "• Pestaña privada: no guarda historial ni caché. Por una limitación de WebView, comparte las cookies con el resto de pestañas.\n" +
                     "• El modo oscuro de páginas es experimental y funciona mejor con el sistema en modo oscuro."
@@ -1063,13 +1137,13 @@ class MainActivity : Activity() {
         when (r.type) {
             WebView.HitTestResult.SRC_ANCHOR_TYPE -> {
                 if (extra == null) return false
-                menuEnlace(extra, null, p.privada)
+                menuEnlace(extra, null, p.privada, v, p)
                 return true
             }
             WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE -> {
                 val msg = Handler(Looper.getMainLooper()) { m ->
                     val enlace = m.data.getString("url")
-                    if (enlace != null) menuEnlace(enlace, extra, p.privada)
+                    if (enlace != null) menuEnlace(enlace, extra, p.privada, v, p)
                     true
                 }.obtainMessage()
                 v.requestFocusNodeHref(msg)
@@ -1077,14 +1151,14 @@ class MainActivity : Activity() {
             }
             WebView.HitTestResult.IMAGE_TYPE -> {
                 if (extra == null) return false
-                menuEnlace(null, extra, p.privada)
+                menuEnlace(null, extra, p.privada, v, p)
                 return true
             }
         }
         return false
     }
 
-    private fun menuEnlace(enlace: String?, imagen: String?, privada: Boolean) {
+    private fun menuEnlace(enlace: String?, imagen: String?, privada: Boolean, web: WebView, p: Pestana) {
         val items = ArrayList<Pair<String, () -> Unit>>()
         fun add(t: String, a: () -> Unit) {
             items.add(Pair(t, a))
@@ -1100,7 +1174,130 @@ class MainActivity : Activity() {
                 descargar(imagen, actual?.web?.settings?.userAgentString, null, null)
             }
         }
+        add("Bloquear este anuncio…") { bloquearAnuncio(web, p, imagen, p.toqueX, p.toqueY) }
         opciones(enlace ?: imagen, items)
+    }
+
+    // ---------------------------------------------------------------- reglas propias contra anuncios
+
+    /** Registra la última pulsación y, en modo «elegir», convierte el siguiente toque en la selección. */
+    private fun alTocar(v: WebView, p: Pestana, ev: android.view.MotionEvent): Boolean {
+        if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+            p.toqueX = ev.x
+            p.toqueY = ev.y
+        }
+        if (!p.eligiendo) return false
+        when (ev.actionMasked) {
+            android.view.MotionEvent.ACTION_UP -> {
+                p.eligiendo = false
+                bloquearAnuncio(v, p, null, ev.x, ev.y)
+                return true
+            }
+            android.view.MotionEvent.ACTION_MOVE -> {
+                val holgura = android.view.ViewConfiguration.get(this).scaledTouchSlop
+                if (Math.abs(ev.x - p.toqueX) > holgura || Math.abs(ev.y - p.toqueY) > holgura) {
+                    p.eligiendo = false
+                    toast("Selección cancelada")
+                    return false
+                }
+                return true
+            }
+            android.view.MotionEvent.ACTION_CANCEL -> {
+                p.eligiendo = false
+                return false
+            }
+        }
+        return true
+    }
+
+    private fun iniciarSeleccion(p: Pestana) {
+        p.eligiendo = true
+        toast("Toca el anuncio que quieres bloquear")
+    }
+
+    /** Identifica el anuncio en (x, y) —píxeles de pantalla— y ofrece ocultarlo y/o bloquear su dominio. */
+    @Suppress("DEPRECATION")
+    private fun bloquearAnuncio(web: WebView, p: Pestana, imagen: String?, x: Float, y: Float) {
+        val escala = if (web.scale > 0f) web.scale else resources.displayMetrics.density
+        web.evaluateJavascript(anuncios.scriptElegir(x / escala, y / escala)) { crudo ->
+            var datos: org.json.JSONObject? = null
+            try {
+                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
+                if (v is String) datos = org.json.JSONObject(v)
+            } catch (e: Exception) {
+                datos = null
+            }
+            if (datos == null) {
+                toast("No he encontrado un anuncio ahí. Prueba «Bloquear un anuncio (tocar)» en el menú")
+                return@evaluateJavascript
+            }
+            ofrecerReglas(web, p, imagen, datos)
+        }
+    }
+
+    private fun ofrecerReglas(web: WebView, p: Pestana, imagen: String?, d: org.json.JSONObject) {
+        val paginaHost = (try { Uri.parse(web.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
+        val sel = d.optString("sel")
+        if (paginaHost.isEmpty() || sel.isEmpty()) {
+            toast("No se pudo crear la regla para esta página")
+            return
+        }
+        var dom = d.optString("dom").lowercase().removePrefix("www.")
+        if (dom.isEmpty() && imagen != null) {
+            dom = (try { Uri.parse(imagen).host } catch (e: Exception) { null } ?: "").lowercase().removePrefix("www.")
+        }
+        // Nunca se ofrece bloquear el propio dominio de la página (o uno emparentado): rompería el sitio entero.
+        val propio = dom.isEmpty() || dom == paginaHost || paginaHost.endsWith(".$dom") || dom.endsWith(".$paginaHost") ||
+            UtilDominio.normalizar(dom) == null
+        val sitio = ReglasUsuario.clave(paginaHost)
+        val n = d.optInt("n", 1)
+        val etiquetas = ArrayList<String>()
+        etiquetas.add("Ocultar en $sitio (" + d.optString("tag") + " " + d.optInt("w") + "×" + d.optInt("h") +
+            (if (n > 1) ", $n elementos" else "") + ")\n" + sel)
+        if (!propio) etiquetas.add("Bloquear el dominio $dom en todas partes")
+        val marcadas = BooleanArray(etiquetas.size) { i -> i == 0 }
+        nuevoDialogo()
+            .setTitle("Bloquear este anuncio")
+            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Añadir") { _, _ ->
+                var hecho = false
+                if (marcadas[0] && ReglasUsuario.agregarOcultar(sitio, sel)) {
+                    hecho = true
+                    reinstalarAnuncios()
+                    anuncios.aplicarAhora(web, paginaHost)
+                }
+                if (marcadas.size > 1 && marcadas[1] && ReglasUsuario.agregarDominio(dom)) hecho = true
+                toast(if (hecho) "Regla añadida. Recarga la página para ver el efecto completo" else "No se añadió nada")
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun mostrarReglasUsuario() {
+        val ocultar = ReglasUsuario.listaOcultar()
+        val dominios = ReglasUsuario.listaDominios()
+        if (ocultar.isEmpty() && dominios.isEmpty()) {
+            toast("Aún no has añadido reglas")
+            return
+        }
+        val etiquetas = ArrayList<String>()
+        for (r in ocultar) etiquetas.add("Ocultar en " + r.host + ": " + r.sel)
+        for (dd in dominios) etiquetas.add("Bloquear dominio: $dd")
+        val marcadas = BooleanArray(etiquetas.size)
+        nuevoDialogo()
+            .setTitle("Reglas añadidas (marca para borrar)")
+            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Borrar marcadas") { _, _ ->
+                var borradas = 0
+                for (i in ocultar.indices) if (marcadas[i]) { ReglasUsuario.quitarOcultar(ocultar[i]); borradas++ }
+                for (j in dominios.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarDominio(dominios[j]); borradas++ }
+                if (borradas > 0) {
+                    reinstalarAnuncios()
+                    toast("$borradas regla(s) borradas. Recarga las páginas abiertas")
+                }
+            }
+            .setNegativeButton("Cerrar", null)
+            .show()
     }
 
     // ---------------------------------------------------------------- descargas, externos, intents
