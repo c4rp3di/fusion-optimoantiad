@@ -34,6 +34,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.webkit.CookieManager
@@ -60,6 +61,9 @@ import android.widget.ListView
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.webkit.ProfileStore
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import java.io.File
 
@@ -77,6 +81,9 @@ class MainActivity : Activity() {
         private const val REQ_UBICACION = 103
         private const val REQ_ALMACENAMIENTO = 104
         private const val MAX_PESTANAS = 20
+
+        /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
+        private const val PERFIL_PRIVADO = "optimo_privado"
     }
 
     private lateinit var paleta: Paleta
@@ -90,8 +97,16 @@ class MainActivity : Activity() {
     private var actual: Pestana? = null
     private var siguienteId = 1
 
+    /** Hosts a los que el usuario confirmó entrar por http (solo hasta cerrar la app). */
     private val httpPermitido = HashSet<String>()
+
+    /** Equipos de la red local con certificado no válido a los que el usuario confirmó continuar. */
     private val sslPermitido = HashSet<String>()
+
+    /** El WebView del sistema admite perfiles separados (necesario para aislar las pestañas privadas). */
+    private val perfilesOk: Boolean by lazy {
+        try { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) } catch (e: Throwable) { false }
+    }
 
     // Vistas
     private lateinit var principal: LinearLayout
@@ -108,6 +123,12 @@ class MainActivity : Activity() {
     private lateinit var btnRecargar: TextView
     private lateinit var btnMarcador: TextView
     private lateinit var btnPestanas: TextView
+    private lateinit var barraSuperior: LinearLayout
+    private lateinit var barraInferior: LinearLayout
+
+    // Modo «página completa»: oculta barras de Optimo y del sistema; se sale con doble pulsación de atrás.
+    private var paginaCompleta = false
+    private var ultimoAtras = 0L
 
     // Estado de peticiones pendientes
     private var selectorArchivos: ValueCallback<Array<Uri>>? = null
@@ -125,6 +146,7 @@ class MainActivity : Activity() {
             Configuration.UI_MODE_NIGHT_YES
         paleta = Paleta(noche)
         ajustes = Ajustes(this)
+        borrarPerfilPrivado()
         anuncios = MotorAnuncios(this, ajustes)
         ReglasUsuario.iniciar(this)
         ListasManager.iniciar(this, ajustes)
@@ -140,12 +162,15 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
         setIntent(intent)
+        salirPaginaCompleta()
         procesarIntent(intent)
     }
 
     override fun onResume() {
         super.onResume()
         actual?.web?.onResume()
+        // Al volver de otra app el sistema puede haber mostrado sus barras.
+        if (paginaCompleta && vistaCompleta == null) ajustarBarrasSistema(true)
     }
 
     override fun onPause() {
@@ -172,6 +197,17 @@ class MainActivity : Activity() {
     override fun onBackPressed() {
         if (vistaCompleta != null) {
             quitarPantallaCompleta()
+            return
+        }
+        if (paginaCompleta) {
+            val ahora = android.os.SystemClock.elapsedRealtime()
+            if (ahora - ultimoAtras <= 2000L) {
+                ultimoAtras = 0L
+                salirPaginaCompleta()
+            } else {
+                ultimoAtras = ahora
+                toast("Pulsa atrás otra vez para salir de pantalla completa")
+            }
             return
         }
         if (barraBuscar.visibility == View.VISIBLE) {
@@ -315,6 +351,8 @@ class MainActivity : Activity() {
             if (!tiene) actualizarUi()
         }
         barraSup.addView(omnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
+        barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(40.dp(), 40.dp()))
+        barraSuperior = barraSup
         principal.addView(
             barraSup,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -381,6 +419,7 @@ class MainActivity : Activity() {
         barraInf.setOrientation(LinearLayout.HORIZONTAL)
         barraInf.setGravity(Gravity.CENTER_VERTICAL)
         barraInf.setBackgroundColor(paleta.barra)
+        barraInferior = barraInf
 
         btnAtras = boton("←") {
             val w = actual?.web
@@ -449,6 +488,7 @@ class MainActivity : Activity() {
 
     private fun actualizarUi() {
         val p = actual ?: return
+        aplicarPantallaSegura(p.privada)
         if (!omnibox.hasFocus()) {
             omnibox.setText(if (p.inicio) "" else p.url)
         }
@@ -493,10 +533,33 @@ class MainActivity : Activity() {
         imm.showSoftInput(v, InputMethodManager.SHOW_IMPLICIT)
     }
 
+    /** Con una pestaña privada visible no se permiten capturas de pantalla ni miniatura en «recientes». */
+    private fun aplicarPantallaSegura(privada: Boolean) {
+        if (privada) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+    }
+
+    private fun hayPrivadas(): Boolean {
+        for (q in pestanas) {
+            if (q.privada) return true
+        }
+        return false
+    }
+
+    /** Los diálogos son ventanas aparte: si hay pestañas privadas abiertas (p. ej. el selector de pestañas) también son seguros. */
     private fun nuevoDialogo(): AlertDialog.Builder {
         val tema = if (paleta.oscuro) android.R.style.Theme_Material_Dialog_Alert
         else android.R.style.Theme_Material_Light_Dialog_Alert
-        return AlertDialog.Builder(this, tema)
+        return object : AlertDialog.Builder(this@MainActivity, tema) {
+            override fun create(): AlertDialog {
+                val d = super.create()
+                if (hayPrivadas()) d.window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                return d
+            }
+        }
     }
 
     private fun opciones(titulo: String?, items: List<Pair<String, () -> Unit>>) {
@@ -519,6 +582,8 @@ class MainActivity : Activity() {
         val existente = p.web
         if (existente != null) return existente
         val w = WebView(this)
+        // Debe ir antes que cualquier otra llamada al WebView: la pestaña privada usa su propio perfil aislado.
+        if (p.privada && perfilesOk) WebViewCompat.setProfile(w, PERFIL_PRIVADO)
         w.setBackgroundColor(paleta.fondo)
         val s = w.settings
         s.javaScriptEnabled = true
@@ -535,12 +600,13 @@ class MainActivity : Activity() {
         s.allowContentAccess = false
         s.setGeolocationEnabled(true)
         s.safeBrowsingEnabled = true
+        s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.cacheMode = if (p.privada) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
         if (p.escritorio) s.userAgentString = uaEscritorio
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
-            descargar(url, ua, disposicion, mime)
+            descargar(url, ua, disposicion, mime, p.privada)
         }
         w.setFindListener { ordinal, total, _ ->
             contadorBuscar.text = if (total == 0) "0/0" else "${ordinal + 1}/$total"
@@ -561,10 +627,45 @@ class MainActivity : Activity() {
         } else if (Build.VERSION.SDK_INT >= 29) {
             w.settings.forceDark = if (oscuro) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
-        CookieManager.getInstance().setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+    }
+
+    /** Gestor de cookies del perfil al que pertenece el WebView (el privado tiene el suyo). */
+    private fun gestorCookies(w: WebView): CookieManager {
+        if (perfilesOk) {
+            try {
+                return WebViewCompat.getProfile(w).cookieManager
+            } catch (e: Throwable) {
+                // Se usa el gestor general.
+            }
+        }
+        return CookieManager.getInstance()
+    }
+
+    private fun gestorCookiesPrivado(): CookieManager? {
+        if (!perfilesOk) return null
+        return try {
+            ProfileStore.getInstance().getOrCreateProfile(PERFIL_PRIVADO).cookieManager
+        } catch (e: Throwable) {
+            null
+        }
+    }
+
+    /** Borra cookies, almacenamiento y caché de las pestañas privadas (el perfil entero). No hace nada si sigue en uso. */
+    private fun borrarPerfilPrivado() {
+        if (!perfilesOk) return
+        try {
+            ProfileStore.getInstance().deleteProfile(PERFIL_PRIVADO)
+        } catch (e: Throwable) {
+            // En uso o inexistente: se reintenta al cerrar la última pestaña privada o al arrancar.
+        }
     }
 
     private fun crearPestana(privada: Boolean, url: String?, cargada: Boolean): Pestana? {
+        if (privada && !perfilesOk) {
+            toast("Tu WebView no admite pestañas privadas aisladas. Actualiza «Android System WebView».")
+            return null
+        }
         if (pestanas.size >= MAX_PESTANAS) {
             toast("Has alcanzado el máximo de pestañas")
             return null
@@ -606,7 +707,7 @@ class MainActivity : Activity() {
             if (pend != null) {
                 p.inicio = false
                 p.url = pend
-                w.loadUrl(pend)
+                cargarUrl(p, w, pend)
             } else {
                 mostrarInicio(p)
             }
@@ -641,7 +742,13 @@ class MainActivity : Activity() {
             for (q in pestanas) {
                 if (q.privada) quedan = true
             }
-            if (!quedan) actual?.web?.clearCache(true)
+            if (!quedan) {
+                // Última pestaña privada: se destruye su perfil (cookies, almacenamiento y caché).
+                borrarPerfilPrivado()
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (!hayPrivadas()) borrarPerfilPrivado()
+                }, 1500L)
+            }
         }
     }
 
@@ -651,8 +758,54 @@ class MainActivity : Activity() {
         p.inicio = false
         p.url = url
         p.titulo = ""
-        webDe(p).loadUrl(url)
+        cargarUrl(p, webDe(p), url)
         if (p === actual) actualizarUi()
+    }
+
+    /**
+     * Punto único para cargar una URL. Un sitio por http (salvo la red local) nunca se abre sin más:
+     * con «HTTPS primero» se intenta https y, si falla, se pregunta; sin él, se pregunta directamente.
+     */
+    private fun cargarUrl(p: Pestana, w: WebView, url: String, esEnlace: Boolean = false) {
+        val sinCifrar = url.startsWith("http://", ignoreCase = true)
+        val host = Omnibox.hostDe(url).lowercase()
+        if (!sinCifrar || httpPermitido.contains(host) || Omnibox.esLocal(host)) {
+            w.loadUrl(url)
+            return
+        }
+        if (ajustes.httpsPrimero) {
+            p.mejoradoDesde = url
+            w.loadUrl("https://" + url.substring(7))
+        } else {
+            preguntarHttp(p, w, url, null, esEnlace)
+        }
+    }
+
+    private fun preguntarHttp(p: Pestana, w: WebView, url: String, motivo: String?, esEnlace: Boolean) {
+        val host = Omnibox.hostDe(url).lowercase()
+        val aviso = StringBuilder()
+        aviso.append(host).append(" no ofrece una conexión cifrada (HTTPS).")
+        if (motivo != null) aviso.append(" (").append(motivo).append(")")
+        aviso.append("\n\nSi continúas, lo que veas o envíes puede ser leído o modificado por terceros. No escribas contraseñas ni datos personales.")
+        val volver: () -> Unit = {
+            if (!esEnlace) mostrarBloqueoHttp(w, url, motivo)
+        }
+        nuevoDialogo()
+            .setTitle("Conexión sin cifrar")
+            .setMessage(aviso.toString())
+            .setPositiveButton("Volver") { _, _ -> volver() }
+            .setNegativeButton("Continuar sin cifrar") { _, _ ->
+                httpPermitido.add(host)
+                w.loadUrl(url)
+            }
+            .setOnCancelListener { volver() }
+            .show()
+    }
+
+    private fun mostrarBloqueoHttp(w: WebView, url: String, motivo: String?) {
+        val destino = if (motivo != null) "https://" + url.substring(7) else url
+        val texto = motivo ?: "Conexión sin cifrar bloqueada."
+        w.loadDataWithBaseURL(destino, Paginas.error(paleta.colores, destino, texto), "text/html", "utf-8", destino)
     }
 
     private fun mostrarInicio(p: Pestana) {
@@ -975,12 +1128,13 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.3.0")
+            .setTitle("Optimo 1.4.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
-                    "• HTTPS primero, con respaldo a http si el sitio no lo ofrece.\n" +
-                    "• Pestaña privada: no guarda historial ni caché. Por una limitación de WebView, comparte las cookies con el resto de pestañas.\n" +
+                    "• HTTPS primero. Si el sitio no lo ofrece, solo se abre por http si lo confirmas. Los certificados no válidos se bloquean (solo la red local permite continuar, tras confirmar).\n" +
+                    "• Pestaña privada: perfil aislado (cookies, almacenamiento y caché propios, que se borran al cerrar la última pestaña privada), sin historial y sin capturas de pantalla.\n" +
+                    "• Marcadores, historial, sesión y reglas se guardan cifrados con una clave del Keystore del dispositivo.\n" +
                     "• El modo oscuro de páginas es experimental y funciona mejor con el sistema en modo oscuro."
             )
             .setPositiveButton("Cerrar", null)
@@ -1171,7 +1325,7 @@ class MainActivity : Activity() {
         if (imagen != null) {
             add("Abrir imagen en pestaña nueva") { nuevaPestana(imagen, privada) }
             add("Descargar imagen") {
-                descargar(imagen, actual?.web?.settings?.userAgentString, null, null)
+                descargar(imagen, actual?.web?.settings?.userAgentString, null, null, actual?.privada == true)
             }
         }
         add("Bloquear este anuncio…") { bloquearAnuncio(web, p, imagen, p.toqueX, p.toqueY) }
@@ -1302,15 +1456,22 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- descargas, externos, intents
 
-    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?) {
+    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false) {
         if (!(url.startsWith("http://") || url.startsWith("https://"))) {
             toast("Este tipo de descarga no es compatible")
             return
         }
+        if (url.startsWith("http://")) {
+            val h = Omnibox.hostDe(url).lowercase()
+            if (!httpPermitido.contains(h) && !Omnibox.esLocal(h)) {
+                toast("Descarga sin cifrar bloqueada")
+                return
+            }
+        }
         if (Build.VERSION.SDK_INT < 29 &&
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
         ) {
-            pendienteDescarga = { descargar(url, ua, disposicion, mime) }
+            pendienteDescarga = { descargar(url, ua, disposicion, mime, privada) }
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
             return
         }
@@ -1319,7 +1480,9 @@ class MainActivity : Activity() {
             val pet = DownloadManager.Request(Uri.parse(url))
             if (!mime.isNullOrEmpty()) pet.setMimeType(mime)
             if (!ua.isNullOrEmpty()) pet.addRequestHeader("User-Agent", ua)
-            val cookie = CookieManager.getInstance().getCookie(url)
+            // La descarga desde una pestaña privada usa las cookies del perfil privado, nunca las de las normales.
+            val gestor = if (privada) gestorCookiesPrivado() else CookieManager.getInstance()
+            val cookie = gestor?.getCookie(url)
             if (!cookie.isNullOrEmpty()) pet.addRequestHeader("Cookie", cookie)
             pet.setTitle(nombre)
             pet.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
@@ -1396,17 +1559,20 @@ class MainActivity : Activity() {
             arr.put(if (p.inicio) "" else p.url)
             n++
         }
-        getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE).edit()
-            .putString("urls", arr.toString())
-            .putInt("activa", activa)
-            .apply()
+        val cifrada = AlmacenSeguro.cifrarTexto(arr.toString(), "sesion")
+        val ed = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE).edit()
+        ed.remove("urls") // formato antiguo, en texto plano
+        if (cifrada != null) ed.putString("urls_c", cifrada) else ed.remove("urls_c")
+        ed.putInt("activa", activa)
+        ed.apply()
     }
 
     private fun restaurarSesion() {
         var restaurada = false
         try {
             val sp = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE)
-            val texto = sp.getString("urls", null)
+            val cifrada = sp.getString("urls_c", null)
+            val texto = if (cifrada != null) AlmacenSeguro.descifrarTexto(cifrada, "sesion") else sp.getString("urls", null)
             if (texto != null) {
                 val arr = JSONArray(texto)
                 val n = minOf(arr.length(), 10)
@@ -1467,7 +1633,28 @@ class MainActivity : Activity() {
         vistaCompleta = null
         callbackCompleta?.onCustomViewHidden()
         callbackCompleta = null
-        ajustarBarrasSistema(false)
+        ajustarBarrasSistema(paginaCompleta)
+    }
+
+    private fun entrarPaginaCompleta() {
+        if (paginaCompleta) return
+        paginaCompleta = true
+        ultimoAtras = 0L
+        omnibox.clearFocus()
+        ocultarTeclado(omnibox)
+        cerrarBusqueda()
+        barraSuperior.visibility = View.GONE
+        barraInferior.visibility = View.GONE
+        ajustarBarrasSistema(true)
+        toast("Pantalla completa: pulsa atrás dos veces para salir")
+    }
+
+    private fun salirPaginaCompleta() {
+        if (!paginaCompleta) return
+        paginaCompleta = false
+        barraSuperior.visibility = View.VISIBLE
+        barraInferior.visibility = View.VISIBLE
+        if (vistaCompleta == null) ajustarBarrasSistema(false)
     }
 
     // ---------------------------------------------------------------- clientes del WebView
@@ -1479,12 +1666,11 @@ class MainActivity : Activity() {
             val uri = request.url
             val esquema = uri.scheme?.lowercase() ?: return false
             if (esquema == "http" || esquema == "https") {
-                val host = uri.host ?: ""
-                if (esquema == "http" && request.isForMainFrame && ajustes.httpsPrimero &&
+                val host = (uri.host ?: "").lowercase()
+                if (esquema == "http" && request.isForMainFrame &&
                     !httpPermitido.contains(host) && !Omnibox.esLocal(host)
                 ) {
-                    p.mejoradoDesde = uri.toString()
-                    view.loadUrl(uri.buildUpon().scheme("https").build().toString())
+                    cargarUrl(p, view, uri.toString(), true)
                     return true
                 }
                 return false
@@ -1544,11 +1730,12 @@ class MainActivity : Activity() {
             if (descripcion.contains("ERR_ABORTED")) return
             val original = p.mejoradoDesde
             if (original != null && fallida.startsWith("https://") &&
-                Omnibox.hostDe(original) == (request.url.host ?: "")
+                Omnibox.hostDe(original).equals(request.url.host ?: "", ignoreCase = true) &&
+                !descripcion.contains("ERR_CERT") && !descripcion.contains("ERR_SSL")
             ) {
+                // El sitio no responde por https: se ofrece http, pero solo si la persona lo confirma.
                 p.mejoradoDesde = null
-                httpPermitido.add(request.url.host ?: "")
-                view.loadUrl(original)
+                preguntarHttp(p, view, original, descripcion, false)
                 return
             }
             view.loadDataWithBaseURL(
@@ -1562,11 +1749,9 @@ class MainActivity : Activity() {
 
         override fun onReceivedSslError(view: WebView?, handler: SslErrorHandler?, error: SslError?) {
             if (handler == null) return
-            val host = Omnibox.hostDe(error?.url ?: "")
-            if (sslPermitido.contains(host)) {
-                handler.proceed()
-                return
-            }
+            val urlError = error?.url ?: ""
+            val host = Omnibox.hostDe(urlError).lowercase()
+            val esPrincipal = host.isNotEmpty() && host == Omnibox.hostDe(p.url).lowercase()
             val motivo = when (error?.primaryError) {
                 SslError.SSL_EXPIRED -> "El certificado ha caducado."
                 SslError.SSL_UNTRUSTED -> "El certificado no es de una entidad de confianza."
@@ -1574,11 +1759,40 @@ class MainActivity : Activity() {
                 SslError.SSL_NOTYETVALID -> "El certificado aún no es válido."
                 else -> "El certificado no es válido."
             }
+            // Un fallo de certificado jamás debe acabar degradado a http.
+            if (esPrincipal) p.mejoradoDesde = null
+
+            // Internet: nunca se continúa con un certificado inválido (sin excepción ni botón para saltarlo).
+            if (!Omnibox.esLocal(host)) {
+                handler.cancel()
+                if (esPrincipal && view != null) {
+                    view.post {
+                        view.loadDataWithBaseURL(
+                            urlError,
+                            Paginas.error(paleta.colores, urlError, motivo + " La conexión se ha bloqueado por seguridad."),
+                            "text/html",
+                            "utf-8",
+                            urlError
+                        )
+                    }
+                }
+                return
+            }
+
+            // Red local (router, NAS...): certificados autofirmados habituales; solo la página principal y tras confirmar.
+            if (sslPermitido.contains(host)) {
+                handler.proceed()
+                return
+            }
+            if (!esPrincipal) {
+                handler.cancel()
+                return
+            }
             nuevoDialogo()
-                .setTitle("La conexión no es privada")
-                .setMessage(host + "\n\n" + motivo + "\n\nSi continúas, tus datos podrían ser interceptados.")
+                .setTitle("Certificado no válido")
+                .setMessage(host + "\n\n" + motivo + "\n\nEs un equipo de tu red local. Continúa solo si lo reconoces.")
                 .setPositiveButton("Volver") { _, _ -> handler.cancel() }
-                .setNegativeButton("Continuar (no seguro)") { _, _ ->
+                .setNegativeButton("Continuar (equipo local)") { _, _ ->
                     sslPermitido.add(host)
                     handler.proceed()
                 }
@@ -1738,3 +1952,4 @@ class MainActivity : Activity() {
         }
     }
 }
+
