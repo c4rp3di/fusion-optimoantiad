@@ -121,12 +121,20 @@ object Omnibox {
         return true
     }
 
-    /** Hosts a los que se accede por http por defecto (red local). */
+    /** Hosts a los que se accede por http por defecto: red local (localhost, .local e IP de rangos privados). */
     fun esLocal(host: String): Boolean {
-        if (host == "localhost" || host.startsWith("[") || host.endsWith(".local")) return true
-        val partes = host.split('.')
-        return partes.size == 4 && partes.all { p -> p.isNotEmpty() && p.all { it.isDigit() } }
+        val h = host.lowercase()
+        if (h == "localhost" || h.endsWith(".localhost") || h.endsWith(".local")) return true
+        if (h.startsWith("[")) {
+            return h == "[::1]" || h.startsWith("[fe80:") || h.startsWith("[fc") || h.startsWith("[fd")
+        }
+        val partes = h.split('.')
+        if (partes.size != 4 || partes.any { p -> p.isEmpty() || !p.all { c -> c.isDigit() } }) return false
+        val a = partes[0].toIntOrNull() ?: return false
+        val b = partes[1].toIntOrNull() ?: return false
+        return a == 10 || a == 127 || (a == 192 && b == 168) || (a == 172 && b in 16..31) || (a == 169 && b == 254)
     }
 
     fun codificar(q: String): String = URLEncoder.encode(q, "UTF-8")
 }
+
