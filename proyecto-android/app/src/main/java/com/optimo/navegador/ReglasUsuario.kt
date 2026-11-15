@@ -90,8 +90,8 @@ object ReglasUsuario {
     private fun cargar() {
         try {
             val f = archivo ?: return
-            if (!f.exists()) return
-            val j = JSONObject(f.readText())
+            val texto = AlmacenSeguro.leerTexto(f) ?: return
+            val j = JSONObject(texto)
             val o = ArrayList<ReglaOcultar>()
             j.optJSONArray("ocultar")?.let {
                 for (i in 0 until it.length()) {
@@ -118,14 +118,10 @@ object ReglasUsuario {
             val d = JSONArray()
             for (x in dominios.sorted()) d.put(x)
             j.put("dominios", d)
-            val tmp = File(f.path + ".tmp")
-            tmp.writeText(j.toString())
-            if (!tmp.renameTo(f)) {
-                f.writeText(j.toString())
-                tmp.delete()
-            }
+            AlmacenSeguro.escribirTexto(f, j.toString())
         } catch (e: Exception) {
             // Sin espacio o sin permiso: se pierde solo esta escritura.
         }
     }
 }
+
