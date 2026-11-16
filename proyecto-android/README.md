@@ -17,6 +17,7 @@ pensado para compilarse desde Fusion. Una sola dependencia (androidx.webkit); el
 - Marcadores con carpetas anidadas: botón 🔖 junto a ⛶ (tocar abre; mantener pulsado edita, mueve, renombra o elimina). Mantén pulsada ☆ para guardar la página eligiendo nombre y carpeta. Al eliminar una carpeta, su contenido pasa a la carpeta superior.
 - ✕ dentro de la barra de direcciones (al escribir) para borrar el texto de golpe.
 - Compatible con el autorrelleno de La Bóveda (selecciónala como servicio de autorrelleno de Android).
+- Herramientas de desarrollo en el móvil (el «F12» sin PC): menú ⋮ › «Herramientas de desarrollo». Ver 1.8.0.
 
 ## Firma
 El workflow de Fusion genera `apk-build/debug.keystore` la primera vez que compila en el repositorio de este
@@ -24,7 +25,7 @@ proyecto y lo conserva: firma propia, distinta de cualquier otra app, estable en
 
 ## Estructura
 `app/src/main/java/com/optimo/navegador/`: `MainActivity.kt` (interfaz, pestañas, menus, clientes WebView),
-`Omnibox.kt`, `AdBlock.kt`, `Paginas.kt` (logica pura), `Almacen.kt` (marcadores, historial, ajustes), `AlmacenSeguro.kt` (cifrado local), `Marcadores.kt` (marcadores y carpetas), `Modelo.kt`, `ServicioSegundoPlano.kt` (reproducción con la pantalla bloqueada).
+`Omnibox.kt`, `AdBlock.kt`, `Paginas.kt` (logica pura), `Almacen.kt` (marcadores, historial, ajustes), `AlmacenSeguro.kt` (cifrado local), `Marcadores.kt` (marcadores y carpetas), `Modelo.kt`, `ServicioSegundoPlano.kt` (reproducción con la pantalla bloqueada), `PanelDev.kt` / `DevAgente.kt` / `DevDatos.kt` (herramientas de desarrollo).
 
 
 ## 1.6.0 — Integración con Optimo Play
@@ -98,6 +99,38 @@ En 1.7.4 la carátula ya llegaba al panel de control y a la pantalla de bloqueo,
 - Si ninguna imagen sirve, se quita la anterior (mejor ninguna que la de otro vídeo).
 - El título de respaldo (`document.title`) se limpia: sin « - YouTube» ni el contador «(3)».
 - Los datos se consultan cada ~8 s (antes ~12 s) para que el cambio de canción se note antes.
+
+## 1.8.0 — Herramientas de desarrollo (el «F12» del móvil)
+
+Menú ⋮ › «Herramientas de desarrollo» abre un panel acoplado **debajo de la página** (la página sigue visible y se puede usar arriba).
+⬍ alterna entre mitad y casi pantalla completa; ✕ o atrás lo cierra. Pestañas:
+- **Consola**: errores y avisos de la página y del navegador (fallos de carga, CSP, contenido mixto, con archivo:línea), `console.*` con objetos
+  legibles, y una línea para ejecutar JavaScript en la página (con historial ↑; muestra el resultado y espera promesas). Filtro por nivel y texto.
+- **Elementos**: árbol DOM por niveles; «🎯 Elegir» (tocas un elemento de la página y se localiza en el árbol); el elemento elegido se resalta en la página.
+  Detalle (selector CSS, atributos, caja, HTML), Estilos (en línea, reglas aplicadas, calculados con filtro) y edición en vivo: atributos, HTML,
+  texto, estilo en línea, eliminar, y CSS inyectado.
+- **Red**: fetch, XHR, WebSocket y recursos (scripts, CSS, imágenes, fuentes, documentos) con estado, tamaño y tiempo; cabeceras de petición y
+  respuesta y cuerpo (texto/JSON) de fetch/XHR; peticiones **bloqueadas por Optimo** (⛔) y errores HTTP; copiar URL o cURL.
+- **Almacén**: cookies (incluidas las HttpOnly, que JS no ve), localStorage y sessionStorage (ver, editar, borrar, añadir), IndexedDB, Cache Storage
+  y service workers (solo lectura).
+- **Info**: tiempos de carga, memoria, viewport, nodos, versión de WebView; **código fuente** de la página y de sus scripts/hojas de estilo.
+
+Cómo funciona: un agente JS (`assets/devtools/agente.js`) vive en la página y la app le **pregunta** con `evaluateJavascript` (no hay
+`addJavascriptInterface`, así que ninguna página puede llamar a la app). Lo que el agente no puede ver lo aporta la app: mensajes del WebView
+(`onConsoleMessage`), bloqueos (`shouldInterceptRequest`), errores HTTP/red y cookies (`CookieManager`).
+- Ajustes › «Herramientas de desarrollo: captura desde el inicio» (desactivado por defecto): inyecta el agente al inicio de cada documento para
+  capturar consola y red desde el primer momento. Desactivado, el agente se inyecta al abrir el panel (la consola nativa y los bloqueos sí se
+  registran siempre; fetch/XHR anteriores a abrir el panel no se ven, y los recursos sí por Resource Timing).
+- Los datos viven solo en memoria de la pestaña (nada se guarda en disco) y el agente solo actúa en el documento principal, no en iframes.
+
+Límites conocidos (frente al F12 de PC):
+- Sin puntos de ruptura ni depurador paso a paso, ni pestañas de rendimiento/memoria detalladas.
+- Reglas CSS de hojas de **otro dominio** sin CORS no se pueden leer desde JS (se avisa en Estilos); el shadow DOM y los iframes no se expanden.
+- Cuerpo de respuesta solo para fetch/XHR de tipo texto, JSON o HTML (hasta 20 000 caracteres); no para imágenes ni scripts cargados por etiqueta.
+- Peticiones de Web Workers o service workers no aparecen en Red.
+- En páginas con CSP que prohíbe `eval`, el resultado de la consola se muestra como JSON sin formato.
+- **No se ha podido compilar ni probar en dispositivo** (no hay SDK de Android en el entorno de desarrollo): el agente JS sí se probó con Node, el
+  código Kotlin está revisado a mano. Si Fusion da errores de compilación o algo no se comporta, pasa el log y se corrige.
 
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
