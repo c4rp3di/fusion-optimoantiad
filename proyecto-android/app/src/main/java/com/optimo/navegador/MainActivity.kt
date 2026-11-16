@@ -160,6 +160,7 @@ class MainActivity : Activity() {
         restaurarSesion()
         procesarIntent(intent)
         ServicioSegundoPlano.manejador = { orden -> controlarMedios(orden) }
+        registrarEscuchaAudio()
         if (ajustes.segundoPlano && !ajustes.notifPedido) {
             ajustes.notifPedido = true
             pedirPermisoNotificaciones()
@@ -178,12 +179,24 @@ class MainActivity : Activity() {
         // De vuelta en primer plano: ya no hace falta el servicio de segundo plano.
         if (ServicioSegundoPlano.corriendo) ServicioSegundoPlano.detener(this)
         actual?.web?.onResume()
+        marcarFondo(false)
         // Al volver de otra app el sistema puede haber mostrado sus barras.
         if (paginaCompleta && vistaCompleta == null) ajustarBarrasSistema(true)
     }
 
+    override fun onStart() {
+        super.onStart()
+        enPantalla = true
+    }
+
+    override fun onStop() {
+        super.onStop()
+        enPantalla = false
+    }
+
     override fun onPause() {
         super.onPause()
+        marcarFondo(true)
         iniciarSegundoPlano()
         guardarSesion()
         marcadores.guardarAhora()
@@ -207,8 +220,7 @@ class MainActivity : Activity() {
     /** Si suena audio al salir de la app o bloquear la pantalla, arranca el servicio que mantiene la reproducción. */
     private fun iniciarSegundoPlano() {
         if (!ajustes.segundoPlano || isChangingConfigurations) return
-        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
-        if (!am.isMusicActive) return
+        if (!audioReciente()) return
         val p = actual
         val nombre = if (p == null || p.privada) {
             "Optimo" + (if (p != null && p.privada) " (pestaña privada)" else "")
@@ -220,9 +232,80 @@ class MainActivity : Activity() {
     private fun controlarMedios(orden: String) {
         val w = actual?.web ?: return
         val js = when (orden) {
-            "pausar" -> "(function(){var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){try{v[i].pause();}catch(e){}}})()"
-            "reanudar" -> "(function(){var v=document.querySelector('video,audio');if(v){try{v.play();}catch(e){}}})()"
+            "pausar" -> "window.__optimoPausa=1;(function(){var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){try{v[i].pause();}catch(e){}}})()"
+            "reanudar" -> "window.__optimoPausa=0;(function(){var v=document.querySelector('video,audio');if(v){try{v.play();}catch(e){}}})()"
+            "ocultar" -> {
+                // El audio terminó y la app sigue fuera de pantalla: el WebView vuelve a ocultarse de verdad.
+                if (!enPantalla && w is WebViewFondo) w.ocultarAhora()
+                return
+            }
             else -> return
+        }
+        w.evaluateJavascript(js, null)
+    }
+
+    // ---------------------------------------------------------------- segundo plano: estado del audio
+
+    private var enPantalla = false
+    private var ultimoAudioMs = 0L
+    private var escuchaAudio: android.media.AudioManager.AudioPlaybackCallback? = null
+
+    /**
+     * True si suena audio o sonó hace un instante. Cubre la carrera de salir de la app: si la página se pausa justo
+     * al ocultarse, el servicio debe arrancar igualmente.
+     */
+    private fun audioReciente(): Boolean {
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        val ahora = android.os.SystemClock.uptimeMillis()
+        if (am.isMusicActive) {
+            ultimoAudioMs = ahora
+            return true
+        }
+        return ahora - ultimoAudioMs < 2000L
+    }
+
+    private fun registrarEscuchaAudio() {
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            val cb = object : android.media.AudioManager.AudioPlaybackCallback() {
+                override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
+                    if (am.isMusicActive) ultimoAudioMs = android.os.SystemClock.uptimeMillis()
+                }
+            }
+            am.registerAudioPlaybackCallback(cb, Handler(Looper.getMainLooper()))
+            escuchaAudio = cb
+        } catch (e: Exception) {
+            escuchaAudio = null
+        }
+    }
+
+    private fun quitarEscuchaAudio() {
+        val cb = escuchaAudio ?: return
+        try {
+            val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            am.unregisterAudioPlaybackCallback(cb)
+        } catch (e: Exception) {
+        }
+        escuchaAudio = null
+    }
+
+    /** Ajusta un WebView al ajuste «Seguir sonando» (ignorar el aviso de ventana oculta y prioridad del renderer). */
+    private fun aplicarFondo(w: WebView) {
+        if (w is WebViewFondo) w.activo = ajustes.segundoPlano
+        try {
+            w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, !ajustes.segundoPlano)
+        } catch (e: Exception) {
+        }
+    }
+
+    /** Avisa a la página de que la app sale o vuelve: el script de segundo plano reanuda un vídeo pausado al salir. */
+    private fun marcarFondo(enFondo: Boolean) {
+        val w = actual?.web ?: return
+        if (!ajustes.segundoPlano) return
+        val js = if (enFondo) {
+            "window.__optimoBg=1;window.__optimoBgDesde=Date.now();window.__optimoPausa=0;window.__optimoIntentos=0;"
+        } else {
+            "window.__optimoBg=0;window.__optimoPausa=0;"
         }
         w.evaluateJavascript(js, null)
     }
@@ -237,6 +320,7 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         ServicioSegundoPlano.manejador = null
+        quitarEscuchaAudio()
         for (p in pestanas) {
             val w = p.web
             if (w != null) {
@@ -672,7 +756,8 @@ class MainActivity : Activity() {
     private fun webDe(p: Pestana): WebView {
         val existente = p.web
         if (existente != null) return existente
-        val w = WebView(this)
+        val w = WebViewFondo(this)
+        w.audioActivo = { audioReciente() }
         // Debe ir antes que cualquier otra llamada al WebView: la pestaña privada usa su propio perfil aislado.
         if (p.privada && perfilesOk) WebViewCompat.setProfile(w, PERFIL_PRIVADO)
         w.setBackgroundColor(paleta.fondo)
@@ -694,6 +779,7 @@ class MainActivity : Activity() {
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.cacheMode = if (p.privada) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
         if (p.escritorio) s.userAgentString = uaEscritorio
+        aplicarFondo(w)
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
@@ -1118,6 +1204,7 @@ class MainActivity : Activity() {
         }
         add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
             ajustes.segundoPlano = !ajustes.segundoPlano
+            for (q in pestanas) q.web?.let { aplicarFondo(it) }
             if (ajustes.segundoPlano) pedirPermisoNotificaciones()
             reinstalarAnuncios()
             toast("Recarga la página de YouTube para aplicarlo")
