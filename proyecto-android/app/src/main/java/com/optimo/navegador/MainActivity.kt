@@ -82,6 +82,24 @@ class MainActivity : Activity() {
         private const val REQ_ALMACENAMIENTO = 104
         private const val REQ_NOTIFICACIONES = 105
         private const val MAX_PESTANAS = 20
+        private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
+
+        /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
+        private const val JS_SUENA =
+            "(function(){try{var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
+                "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
+
+        /** Título, artista e imagen de lo que suena: mediaSession de la página, o og:image / póster como respaldo. */
+        private const val JS_META =
+            "(function(){try{var r={t:'',a:'',i:''};var m=navigator.mediaSession&&navigator.mediaSession.metadata;" +
+                "if(m){r.t=m.title||'';r.a=m.artist||'';var al=m.artwork||[],best='',bw=-1,small='',sw=1e9;" +
+                "for(var k=0;k<al.length;k++){var src=al[k].src;if(!src)continue;" +
+                "var s=parseInt((al[k].sizes||'0').split('x')[0],10)||0;" +
+                "if(s<=640&&s>=bw){best=src;bw=s;}if(s<sw){small=src;sw=s;}}r.i=best||small;}" +
+                "if(!r.i){var og=document.querySelector('meta[property=\"og:image\"]');if(og)r.i=og.content||'';}" +
+                "if(!r.i){var vp=document.querySelector('video[poster]');if(vp)r.i=vp.poster||'';}" +
+                "if(r.i){try{r.i=new URL(r.i,location.href).href;}catch(x){}}" +
+                "if(!r.t)r.t=document.title||'';return JSON.stringify(r);}catch(e){return '';}})()"
 
         /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
         private const val PERFIL_PRIVADO = "optimo_privado"
@@ -221,7 +239,7 @@ class MainActivity : Activity() {
     private fun iniciarSegundoPlano() {
         if (!ajustes.segundoPlano || isChangingConfigurations) return
         if (!audioReciente()) return
-        val p = actual
+        val p = sonando ?: actual
         val nombre = if (p == null || p.privada) {
             "Optimo" + (if (p != null && p.privada) " (pestaña privada)" else "")
         } else if (p.titulo.isBlank()) "Optimo" else p.titulo
@@ -230,13 +248,22 @@ class MainActivity : Activity() {
 
     /** Órdenes de la notificación y de la pantalla de bloqueo: se aplican a los medios de la pestaña actual. */
     private fun controlarMedios(orden: String) {
-        val w = actual?.web ?: return
+        val w = (sonando ?: actual)?.web ?: return
         val js = when (orden) {
             "pausar" -> "window.__optimoPausa=1;(function(){var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){try{v[i].pause();}catch(e){}}})()"
             "reanudar" -> "window.__optimoPausa=0;(function(){var v=document.querySelector('video,audio');if(v){try{v.play();}catch(e){}}})()"
             "ocultar" -> {
                 // El audio terminó y la app sigue fuera de pantalla: el WebView vuelve a ocultarse de verdad.
-                if (!enPantalla && w is WebViewFondo) w.ocultarAhora()
+                if (!enPantalla) {
+                    for (q in listOfNotNull(actual, sonando)) {
+                        val x = q.web
+                        if (x is WebViewFondo) x.ocultarAhora()
+                    }
+                }
+                return
+            }
+            "metadatos" -> {
+                pedirMetadatos()
                 return
             }
             else -> return
@@ -279,6 +306,129 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------------------------------------------------------------- audio al cambiar de pestaña
+
+    /** Pestaña que sigue sonando en segundo plano mientras se usa otra (su WebView queda en la pantalla a 1×1 px). */
+    private var sonando: Pestana? = null
+    private val manejadorSonando = Handler(Looper.getMainLooper())
+    private var sinSonar = 0
+
+    /** Vigila la pestaña de fondo: si deja de sonar ~45 s se libera, para no mantener un WebView vivo sin motivo. */
+    private val tareaSonando = object : Runnable {
+        override fun run() {
+            val s = sonando ?: return
+            val w = s.web
+            if (w == null) {
+                sonando = null
+                return
+            }
+            w.evaluateJavascript(JS_SUENA) { r ->
+                if (sonando === s) {
+                    if (r == "1") sinSonar = 0 else sinSonar++
+                    if (sinSonar >= 3) liberarSonando() else manejadorSonando.postDelayed(this, 15000L)
+                }
+            }
+        }
+    }
+
+    private fun reducirVista(w: WebView) {
+        w.setLayoutParams(FrameLayout.LayoutParams(1, 1))
+        w.setAlpha(0f)
+    }
+
+    private fun restaurarVista(w: WebView) {
+        w.setLayoutParams(FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        w.setAlpha(1f)
+        w.bringToFront()
+    }
+
+    private fun quitarVista(w: WebView) {
+        contenedor.removeView(w)
+        w.onPause()
+    }
+
+    private fun liberarSonando() {
+        val s = sonando ?: return
+        sonando = null
+        manejadorSonando.removeCallbacks(tareaSonando)
+        val w = s.web
+        if (w != null && s !== actual) quitarVista(w)
+    }
+
+    /** La pestaña [a] deja de ser la activa: se pausa como siempre, salvo que esté sonando y se quiera seguir oyéndola. */
+    private fun retirarAnterior(a: Pestana) {
+        val wa = a.web ?: return
+        if (ajustes.audioPestanas == 2) {
+            quitarVista(wa)
+            return
+        }
+        // Mientras se decide, el WebView queda a 1×1 px (no se pausa todavía).
+        reducirVista(wa)
+        wa.evaluateJavascript(JS_SUENA) { r ->
+            if (a === actual || a.web == null || !pestanas.contains(a)) {
+                // Se volvió a ella o se cerró mientras se comprobaba: nada que hacer.
+            } else if (r != "1") {
+                quitarVista(wa)
+            } else if (ajustes.audioPestanas == 1) {
+                adoptarSonando(a)
+            } else {
+                preguntarSeguirSonando(a)
+            }
+        }
+    }
+
+    private fun adoptarSonando(a: Pestana) {
+        val previa = sonando
+        if (previa != null && previa !== a) liberarSonando()
+        sonando = a
+        sinSonar = 0
+        manejadorSonando.removeCallbacks(tareaSonando)
+        manejadorSonando.postDelayed(tareaSonando, 15000L)
+        actualizarUi()
+    }
+
+    private fun preguntarSeguirSonando(a: Pestana) {
+        val wa = a.web ?: return
+        val d = nuevoDialogo()
+            .setTitle("Audio en esta pestaña")
+            .setMessage("«" + tituloDe(a) + "» está sonando. ¿Quieres seguir oyéndola mientras usas otra pestaña?")
+            .setPositiveButton("Seguir sonando") { _, _ ->
+                if (a === actual) return@setPositiveButton
+                adoptarSonando(a)
+            }
+            .setNegativeButton("Pausar") { _, _ ->
+                if (a !== actual) quitarVista(wa)
+            }
+            .setNeutralButton("Siempre seguir") { _, _ ->
+                ajustes.audioPestanas = 1
+                if (a !== actual) adoptarSonando(a)
+            }
+            .create()
+        d.setOnCancelListener {
+            if (a !== actual && sonando !== a) quitarVista(wa)
+        }
+        d.show()
+    }
+
+    // ---------------------------------------------------------------- carátula y datos de lo que suena
+
+    /** Pide a la pestaña que suena su título, artista e imagen y se los pasa al servicio (no en pestañas privadas). */
+    private fun pedirMetadatos() {
+        val p = sonando ?: actual ?: return
+        if (p.privada) return
+        val w = p.web ?: return
+        w.evaluateJavascript(JS_META) { r ->
+            try {
+                val s = org.json.JSONTokener(r ?: "").nextValue() as? String
+                if (!s.isNullOrEmpty()) {
+                    val o = org.json.JSONObject(s)
+                    ServicioSegundoPlano.metadatos(o.optString("t"), o.optString("a"), o.optString("i"))
+                }
+            } catch (e: Exception) {
+            }
+        }
+    }
+
     private fun quitarEscuchaAudio() {
         val cb = escuchaAudio ?: return
         try {
@@ -300,14 +450,13 @@ class MainActivity : Activity() {
 
     /** Avisa a la página de que la app sale o vuelve: el script de segundo plano reanuda un vídeo pausado al salir. */
     private fun marcarFondo(enFondo: Boolean) {
-        val w = actual?.web ?: return
         if (!ajustes.segundoPlano) return
         val js = if (enFondo) {
             "window.__optimoBg=1;window.__optimoBgDesde=Date.now();window.__optimoPausa=0;window.__optimoIntentos=0;"
         } else {
             "window.__optimoBg=0;window.__optimoPausa=0;"
         }
-        w.evaluateJavascript(js, null)
+        for (q in listOfNotNull(actual, sonando)) q.web?.evaluateJavascript(js, null)
     }
 
     private fun pedirPermisoNotificaciones() {
@@ -321,6 +470,7 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         ServicioSegundoPlano.manejador = null
         quitarEscuchaAudio()
+        manejadorSonando.removeCallbacks(tareaSonando)
         for (p in pestanas) {
             val w = p.web
             if (w != null) {
@@ -873,14 +1023,14 @@ class MainActivity : Activity() {
 
     private fun activar(p: Pestana) {
         val anterior = actual
-        if (anterior != null && anterior !== p) {
-            val wa = anterior.web
-            if (wa != null) {
-                contenedor.removeView(wa)
-                wa.onPause()
-            }
-        }
+        if (anterior != null && anterior !== p) retirarAnterior(anterior)
         actual = p
+        if (p === sonando) {
+            // Se vuelve a la pestaña que sonaba en segundo plano: recupera su tamaño normal.
+            sonando = null
+            manejadorSonando.removeCallbacks(tareaSonando)
+            p.web?.let { restaurarVista(it) }
+        }
         val w = webDe(p)
         if (w.parent == null) {
             contenedor.addView(
@@ -909,6 +1059,10 @@ class MainActivity : Activity() {
         val idx = pestanas.indexOf(p)
         if (idx < 0) return
         pestanas.removeAt(idx)
+        if (p === sonando) {
+            sonando = null
+            manejadorSonando.removeCallbacks(tareaSonando)
+        }
         val w = p.web
         if (w != null) {
             contenedor.removeView(w)
@@ -1201,6 +1355,10 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         fun add(t: String, a: () -> Unit) {
             items.add(Pair(t, a))
+        }
+        add("Al cambiar de pestaña con audio: " + NOMBRES_AUDIO_PESTANAS[ajustes.audioPestanas]) {
+            ajustes.audioPestanas = (ajustes.audioPestanas + 1) % 3
+            mostrarSegundoPlano()
         }
         add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
             ajustes.segundoPlano = !ajustes.segundoPlano
@@ -1789,7 +1947,7 @@ class MainActivity : Activity() {
                 val textos = LinearLayout(this@MainActivity)
                 textos.setOrientation(LinearLayout.VERTICAL)
                 val t1 = TextView(this@MainActivity)
-                t1.text = (if (p === actual) "● " else "") + (if (p.privada) "🕶 " else "") + tituloDe(p)
+                t1.text = (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") + (if (p.privada) "🕶 " else "") + tituloDe(p)
                 t1.textSize = 16f
                 t1.maxLines = 1
                 t1.ellipsize = TextUtils.TruncateAt.END
