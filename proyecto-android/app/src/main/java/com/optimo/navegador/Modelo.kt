@@ -45,6 +45,9 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Anuncios y rastreadores bloqueados en la pagina actual (se escribe desde hilos de red). */
     val bloqueados = AtomicInteger(0)
 
+    /** Registros de las herramientas de desarrollo de esta pestaña (consola nativa, bloqueos, errores de red). */
+    val dev = DatosDev()
+
     /** Última pulsación sobre el WebView (px de pantalla) y modo «toca el anuncio que quieres bloquear». */
     var toqueX: Float = 0f
     var toqueY: Float = 0f
