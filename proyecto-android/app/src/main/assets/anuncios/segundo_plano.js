@@ -19,6 +19,21 @@
     });
     window.addEventListener('blur', function(e){ if (e.target === window) e.stopImmediatePropagation(); }, true);
   } catch(e){}
+  // Registro para depurar (Ajustes › Diagnóstico del audio): últimos eventos de pausa, reproducción, fin y cambio de tamaño.
+  try {
+    window.__optimoLog = [];
+    var reg = function(e){
+      try {
+        var t = e.target, n = (t && t.tagName) ? t.tagName : (t === window ? 'window' : 'doc');
+        window.__optimoLog.push([Date.now() % 1000000, e.type, n, window.innerWidth + 'x' + window.innerHeight, document.visibilityState, window.__optimoBg ? 'bg' : 'fg']);
+        if (window.__optimoLog.length > 40) window.__optimoLog.shift();
+      } catch(x){}
+    };
+    document.addEventListener('pause', reg, true);
+    document.addEventListener('play', reg, true);
+    document.addEventListener('ended', reg, true);
+    window.addEventListener('resize', reg, true);
+  } catch(e){}
   // Si la página pausa el vídeo justo al salir de la app (sin que lo pidas tú), se reanuda: como mucho 3 veces en
   // los 3 primeros segundos. MainActivity pone __optimoBg al salir y __optimoPausa cuando pausas tú desde la notificación.
   try {
