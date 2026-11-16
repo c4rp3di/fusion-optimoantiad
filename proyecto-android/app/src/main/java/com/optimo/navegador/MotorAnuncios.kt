@@ -272,8 +272,9 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
     /** (Re)instala los scripts de inicio en [web]; llamar al crear la pestaña y al cambiar ajustes. */
     fun instalar(web: WebView) {
         manejadores.remove(web)?.forEach { try { it.remove() } catch (e: Exception) { } }
-        if (!ajustes.bloquearAnuncios || !soportaInicio) return
+        if (!soportaInicio) return
         val lista = ArrayList<ScriptHandler>()
+        if (ajustes.bloquearAnuncios) {
         // Primero los sitios concretos (llevan la unión de «*» y lo suyo) y al final «*»: el indicador evita duplicados.
         val sitios = reglas.sitios.map { it.first }.filter { it != "*" }.distinct()
         for (s in sitios) {
@@ -295,18 +296,43 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
                 lista.add(WebViewCompat.addDocumentStartJavaScript(web, js, reglasDeOrigen(h)))
             } catch (e: Exception) { }
         }
+        }
+        // Reproducción en segundo plano: la página no se entera de que se oculta (solo en YouTube).
+        val fondo = guionFondo()
+        if (fondo != null) {
+            for (h in FONDO_HOSTS) {
+                try {
+                    lista.add(WebViewCompat.addDocumentStartJavaScript(web, fondo, reglasDeOrigen(h)))
+                } catch (e: Exception) { }
+            }
+        }
         manejadores[web] = lista
+    }
+
+    /** Script que mantiene la página «visible» aunque se bloquee la pantalla; null si la opción está desactivada. */
+    private fun guionFondo(): String? {
+        if (!ajustes.segundoPlano) return null
+        val js = leerTexto("segundo_plano.js")
+        return if (js.isBlank()) null else js
     }
 
     /** Respaldo si el WebView no soporta scripts de inicio: se ejecuta al empezar la página. */
     fun alEmpezar(web: WebView, url: String?) {
-        if (soportaInicio || !ajustes.bloquearAnuncios || url == null) return
+        if (soportaInicio || url == null) return
         val host = try { android.net.Uri.parse(url).host?.lowercase() } catch (e: Exception) { null } ?: return
-        guion(reglas.tecnicasPara(host), host)?.let { web.evaluateJavascript(it, null) }
-        guionUsuario(host)?.let { web.evaluateJavascript(it, null) }
+        if (ajustes.bloquearAnuncios) {
+            guion(reglas.tecnicasPara(host), host)?.let { web.evaluateJavascript(it, null) }
+            guionUsuario(host)?.let { web.evaluateJavascript(it, null) }
+        }
+        if (FONDO_HOSTS.any { host == it || host.endsWith(".$it") }) {
+            guionFondo()?.let { web.evaluateJavascript(it, null) }
+        }
     }
 
     companion object {
+        /** Sitios donde se aplica el script de segundo plano (también sus subdominios, p. ej. music.youtube.com). */
+        val FONDO_HOSTS = listOf("youtube.com", "youtube-nocookie.com")
+
         val TECNICAS = listOf(
             TecnicaAnuncios("rutas", "Bloqueo por rutas de anuncios (/pagead/, /adserver/…)"),
             TecnicaAnuncios("vast", "Anuncios de vídeo vacíos (VAST)"),
