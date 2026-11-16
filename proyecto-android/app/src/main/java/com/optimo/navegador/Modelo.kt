@@ -52,5 +52,8 @@ class Pestana(val id: Int, val privada: Boolean) {
 
     /** URL http original cuando se intento mejorar a https (para el respaldo si falla). */
     var mejoradoDesde: String? = null
+
+    /** Ultimo flujo de video/audio visto en la pagina (m3u8, mpd, mp4...). Se escribe desde hilos de red. */
+    @Volatile var medioDetectado: String? = null
 }
 
