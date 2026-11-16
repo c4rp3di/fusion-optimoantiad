@@ -17,3 +17,4 @@ dependencyResolutionManagement {
 rootProject.name = 'Optimo'
 
 include ':app'
+
