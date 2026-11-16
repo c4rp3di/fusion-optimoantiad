@@ -89,6 +89,13 @@ class MainActivity : Activity() {
             "(function(){try{var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
                 "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
 
+        /** Estado de los medios y registro de eventos (pause/play/resize) que anota segundo_plano.js. */
+        private const val JS_DIAG =
+            "(function(){try{var v=document.querySelectorAll('video,audio'),o=[];" +
+                "for(var i=0;i<v.length;i++){o.push(v[i].tagName+' pausado='+v[i].paused+' mudo='+v[i].muted+' listo='+v[i].readyState+' t='+Math.round(v[i].currentTime));}" +
+                "return 'Medios: '+(o.length?o.join(' | '):'(ninguno)')+'\\nVentana: '+innerWidth+'x'+innerHeight+' visibilidad='+document.visibilityState+" +
+                "'\\nRegistro [ms, evento, elemento, tamaño, visibilidad, fg/bg]:\\n'+((window.__optimoLog||[]).map(function(x){return x.join(' ');}).join('\\n')||'(vacío: el script de segundo plano no actuó en esta página)');}catch(e){return 'error: '+e;}})()"
+
         /** Título, artista e imagen de lo que suena: mediaSession de la página, o og:image / póster como respaldo. */
         private const val JS_META =
             "(function(){try{var r={t:'',a:'',i:''};var m=navigator.mediaSession&&navigator.mediaSession.metadata;" +
@@ -308,7 +315,7 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- audio al cambiar de pestaña
 
-    /** Pestaña que sigue sonando en segundo plano mientras se usa otra (su WebView queda en la pantalla a 1×1 px). */
+    /** Pestaña que sigue sonando en segundo plano mientras se usa otra (su WebView sigue en pantalla, tapado por la pestaña activa). */
     private var sonando: Pestana? = null
     private val manejadorSonando = Handler(Looper.getMainLooper())
     private var sinSonar = 0
@@ -331,14 +338,11 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun reducirVista(w: WebView) {
-        w.setLayoutParams(FrameLayout.LayoutParams(1, 1))
-        w.setAlpha(0f)
-    }
-
+    /**
+     * Al volver a la pestaña que sonaba, pasa a primer plano. No se reordena quitándola y volviendo a ponerla
+     * (eso pausaría el vídeo): bringToFront solo cambia el orden interno de las vistas.
+     */
     private fun restaurarVista(w: WebView) {
-        w.setLayoutParams(FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        w.setAlpha(1f)
         w.bringToFront()
     }
 
@@ -362,8 +366,8 @@ class MainActivity : Activity() {
             quitarVista(wa)
             return
         }
-        // Mientras se decide, el WebView queda a 1×1 px (no se pausa todavía).
-        reducirVista(wa)
+        // Mientras se decide, el WebView sigue en su sitio, a tamaño completo; la pestaña nueva se añade encima y lo tapa.
+        // (En 1.7.3 se reducía a 1×1 px y transparente, y el vídeo se pausaba.)
         wa.evaluateJavascript(JS_SUENA) { r ->
             if (a === actual || a.web == null || !pestanas.contains(a)) {
                 // Se volvió a ella o se cerró mientras se comprobaba: nada que hacer.
@@ -411,6 +415,50 @@ class MainActivity : Activity() {
     }
 
     // ---------------------------------------------------------------- carátula y datos de lo que suena
+
+    /** Muestra el registro de pausas/reproducciones de la página y el estado de la carátula, para depurar sin logcat. */
+    private fun mostrarDiagnosticoAudio() {
+        val p = sonando ?: actual
+        val w = p?.web
+        val cabecera = StringBuilder()
+        cabecera.append("Optimo 1.7.4\n")
+        cabecera.append("Pestaña: ").append(if (p == null) "(ninguna)" else if (p === sonando) "de fondo (sonando)" else "activa").append('\n')
+        cabecera.append("Modo al cambiar de pestaña: ").append(NOMBRES_AUDIO_PESTANAS[ajustes.audioPestanas]).append('\n')
+        cabecera.append("Servicio: ").append(if (ServicioSegundoPlano.corriendo) "en marcha" else "parado").append('\n')
+        cabecera.append("Carátula: ").append(ServicioSegundoPlano.diag.ifEmpty { "(sin intentos todavía)" }).append("\n\n")
+        val mostrar = { cuerpo: String ->
+            val texto = cabecera.toString() + cuerpo
+            val tv = TextView(this)
+            tv.text = texto
+            tv.textSize = 11f
+            tv.setTextIsSelectable(true)
+            tv.setPadding(16.dp(), 8.dp(), 16.dp(), 8.dp())
+            val sv = android.widget.ScrollView(this)
+            sv.addView(tv)
+            nuevoDialogo()
+                .setTitle("Diagnóstico del audio")
+                .setView(sv)
+                .setPositiveButton("Copiar") { _, _ ->
+                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                    cm.setPrimaryClip(ClipData.newPlainText("diagnostico", texto))
+                    toast("Copiado")
+                }
+                .setNegativeButton("Cerrar", null)
+                .show()
+        }
+        if (w == null) {
+            mostrar("(sin página)")
+            return
+        }
+        w.evaluateJavascript(JS_DIAG) { r ->
+            val s = try {
+                org.json.JSONTokener(r ?: "").nextValue() as? String
+            } catch (e: Exception) {
+                null
+            }
+            mostrar(s ?: (r ?: "(sin respuesta)"))
+        }
+    }
 
     /** Pide a la pestaña que suena su título, artista e imagen y se los pasa al servicio (no en pestañas privadas). */
     private fun pedirMetadatos() {
@@ -1360,6 +1408,7 @@ class MainActivity : Activity() {
             ajustes.audioPestanas = (ajustes.audioPestanas + 1) % 3
             mostrarSegundoPlano()
         }
+        add("Diagnóstico del audio (copiar y enviar)") { mostrarDiagnosticoAudio() }
         add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
             ajustes.segundoPlano = !ajustes.segundoPlano
             for (q in pestanas) q.web?.let { aplicarFondo(it) }
