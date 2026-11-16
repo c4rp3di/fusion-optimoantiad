@@ -24,6 +24,8 @@
     <!-- Visibilidad de paquetes (Android 11+): saber si Optimo Play esta instalada. -->
     <queries>
         <package android:name="com.optimo.play" />
+        <!-- Gestor de archivos propio: «Descargas» lo abre en la carpeta de descargas. -->
+        <package android:name="com.carpe.gestorarchivos" />
     </queries>
 
     <application
