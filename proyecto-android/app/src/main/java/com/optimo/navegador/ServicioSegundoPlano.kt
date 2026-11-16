@@ -8,6 +8,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.drawable.Icon
 import android.media.AudioManager
 import android.media.MediaMetadata
@@ -19,6 +21,9 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import java.io.ByteArrayOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
  * Mantiene vivo el proceso mientras suena audio con la pantalla bloqueada o con Optimo en segundo plano.
@@ -39,15 +44,30 @@ class ServicioSegundoPlano : Service() {
     private var sinAudio = 0
     private var ciclosEnPausa = 0
     private var vigilando = false
+    private var ciclos = 0
+
+    // Carátula y artista de lo que suena (los pide MainActivity a la página; no se usan en pestañas privadas).
+    private var artista = ""
+    private var urlImagen = ""
+    private var imagen: Bitmap? = null
+    private var generacionImagen = 0
 
     private val vigilante = object : Runnable {
         override fun run() {
+            // Cada ~12 s (y en el primer ciclo) se actualizan título, artista e imagen.
+            ciclos++
+            if (ciclos % 3 == 1) manejador?.invoke("metadatos")
             revisarAudio()
             if (vigilando) principal.postDelayed(this, PERIODO_MS)
         }
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onCreate() {
+        super.onCreate()
+        instancia = this
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
@@ -82,6 +102,9 @@ class ServicioSegundoPlano : Service() {
         }
         sesion = null
         corriendo = false
+        instancia = null
+        generacionImagen++
+        imagen = null
         super.onDestroy()
     }
 
@@ -193,7 +216,14 @@ class ServicioSegundoPlano : Service() {
                     .setState(estado, PlaybackState.PLAYBACK_POSITION_UNKNOWN, if (reproduciendo) 1f else 0f)
                     .build()
             )
-            s.setMetadata(MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, titulo).build())
+            val b = MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, titulo)
+            if (artista.isNotBlank()) b.putString(MediaMetadata.METADATA_KEY_ARTIST, artista)
+            val img = imagen
+            if (img != null) {
+                b.putBitmap(MediaMetadata.METADATA_KEY_ALBUM_ART, img)
+                b.putBitmap(MediaMetadata.METADATA_KEY_ART, img)
+            }
+            s.setMetadata(b.build())
         } catch (e: Exception) {
         }
     }
@@ -221,7 +251,7 @@ class ServicioSegundoPlano : Service() {
         val b = Notification.Builder(this, CANAL)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentTitle(titulo)
-            .setContentText(if (reproduciendo) "Reproduciendo en segundo plano" else "En pausa")
+            .setContentText(if (!reproduciendo) "En pausa" else if (artista.isNotBlank()) artista else "Reproduciendo en segundo plano")
             .setContentIntent(abrir)
             .setOngoing(true)
             .setOnlyAlertOnce(true)
@@ -231,6 +261,7 @@ class ServicioSegundoPlano : Service() {
             .addAction(Notification.Action.Builder(iconoAlternar, if (reproduciendo) "Pausa" else "Reproducir", alternar).build())
             .addAction(Notification.Action.Builder(iconoCerrar, "Cerrar", cerrar).build())
             .setStyle(estilo)
+        imagen?.let { b.setLargeIcon(it) }
         if (Build.VERSION.SDK_INT >= 31) b.setForegroundServiceBehavior(Notification.FOREGROUND_SERVICE_IMMEDIATE)
         return b.build()
     }
@@ -280,6 +311,85 @@ class ServicioSegundoPlano : Service() {
         wifi = null
     }
 
+    // ---------------------------------------------------------------- carátula y datos de lo que suena
+
+    private fun nuevosMetadatos(t: String, a: String, img: String) {
+        var cambio = false
+        val nuevoTitulo = t.trim()
+        if (nuevoTitulo.isNotEmpty() && nuevoTitulo != titulo) {
+            titulo = nuevoTitulo
+            cambio = true
+        }
+        val nuevoArtista = a.trim()
+        if (nuevoArtista != artista) {
+            artista = nuevoArtista
+            cambio = true
+        }
+        val u = img.trim()
+        if (u.isNotEmpty() && u != urlImagen && (u.startsWith("https://") || u.startsWith("http://"))) {
+            urlImagen = u
+            cargarImagen(u)
+        }
+        if (cambio) actualizarNotificacion()
+    }
+
+    /** Descarga la imagen en un hilo aparte (tope de 2 MB, reducida a ~512 px). Si falla se queda la anterior. */
+    private fun cargarImagen(url: String) {
+        val generacion = ++generacionImagen
+        Thread {
+            var mapa: Bitmap? = null
+            try {
+                val c = URL(url).openConnection() as HttpURLConnection
+                c.connectTimeout = 6000
+                c.readTimeout = 8000
+                c.instanceFollowRedirects = true
+                c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Optimo")
+                if (c.responseCode == 200) {
+                    val limite = 2 * 1024 * 1024
+                    val salida = ByteArrayOutputStream()
+                    c.inputStream.use { entrada ->
+                        val buf = ByteArray(16 * 1024)
+                        var total = 0
+                        while (true) {
+                            val n = entrada.read(buf)
+                            if (n < 0) break
+                            total += n
+                            if (total > limite) {
+                                salida.reset()
+                                break
+                            }
+                            salida.write(buf, 0, n)
+                        }
+                    }
+                    val datos = salida.toByteArray()
+                    if (datos.isNotEmpty()) mapa = decodificarReducida(datos, 512)
+                }
+                c.disconnect()
+            } catch (e: Exception) {
+                mapa = null
+            }
+            val resultado = mapa
+            principal.post {
+                if (generacion == generacionImagen && resultado != null) {
+                    imagen = resultado
+                    actualizarNotificacion()
+                }
+            }
+        }.start()
+    }
+
+    private fun decodificarReducida(datos: ByteArray, maximo: Int): Bitmap? {
+        val medida = BitmapFactory.Options()
+        medida.inJustDecodeBounds = true
+        BitmapFactory.decodeByteArray(datos, 0, datos.size, medida)
+        if (medida.outWidth <= 0 || medida.outHeight <= 0) return null
+        var muestreo = 1
+        while (medida.outWidth / (muestreo * 2) >= maximo && medida.outHeight / (muestreo * 2) >= maximo) muestreo *= 2
+        val op = BitmapFactory.Options()
+        op.inSampleSize = muestreo
+        return BitmapFactory.decodeByteArray(datos, 0, datos.size, op)
+    }
+
     companion object {
         const val ACCION_ALTERNAR = "com.optimo.navegador.ALTERNAR"
         const val ACCION_CERRAR = "com.optimo.navegador.CERRAR"
@@ -298,6 +408,14 @@ class ServicioSegundoPlano : Service() {
 
         @Volatile
         var corriendo: Boolean = false
+
+        @Volatile
+        private var instancia: ServicioSegundoPlano? = null
+
+        /** Título, artista e imagen de lo que suena (los lee MainActivity de la página). Siempre en el hilo principal. */
+        fun metadatos(titulo: String, artista: String, imagen: String) {
+            instancia?.nuevosMetadatos(titulo, artista, imagen)
+        }
 
         /** Arranca el servicio en primer plano. Devuelve false si el sistema no lo permite. */
         fun iniciar(c: Context, nombre: String): Boolean {
