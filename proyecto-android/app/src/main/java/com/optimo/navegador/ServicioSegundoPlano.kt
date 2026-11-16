@@ -108,6 +108,8 @@ class ServicioSegundoPlano : Service() {
     }
 
     private fun detenerTodo() {
+        // El audio terminó (o se cerró): que el WebView vuelva a ocultarse de verdad si la app sigue fuera de pantalla.
+        manejador?.invoke("ocultar")
         vigilando = false
         principal.removeCallbacks(vigilante)
         try {
