@@ -16,6 +16,11 @@
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
     <uses-feature android:name="android.hardware.location" android:required="false" />
 
+    <!-- Visibilidad de paquetes (Android 11+): saber si Optimo Play esta instalada. -->
+    <queries>
+        <package android:name="com.optimo.play" />
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
