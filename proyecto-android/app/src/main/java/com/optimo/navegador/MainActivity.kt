@@ -640,7 +640,19 @@ class MainActivity : Activity() {
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
-            descargar(url, ua, disposicion, mime, p.privada)
+            if (ReproductorExterno.esMedio(url, mime) && ReproductorExterno.instalado(this)) {
+                val alternativas = ArrayList<Pair<String, () -> Unit>>()
+                alternativas.add(Pair("Reproducir en Optimo Play") {
+                    ReproductorExterno.enviar(this, url, null, p.url, ua)
+                    Unit
+                })
+                alternativas.add(Pair("Descargar") {
+                    descargar(url, ua, disposicion, mime, p.privada)
+                })
+                opciones(URLUtil.guessFileName(url, disposicion, mime), alternativas)
+            } else {
+                descargar(url, ua, disposicion, mime, p.privada)
+            }
         }
         w.setFindListener { ordinal, total, _ ->
             contadorBuscar.text = if (total == 0) "0/0" else "${ordinal + 1}/$total"
@@ -980,6 +992,12 @@ class MainActivity : Activity() {
         add("Nueva pestaña") { nuevaPestana(null) }
         add("Nueva pestaña privada") { nuevaPestana(null, true) }
         add("Buscar en la página") { mostrarBusqueda() }
+        val medio = p.medioDetectado
+        if (medio != null && ReproductorExterno.instalado(this)) {
+            add("▶ Reproducir vídeo de la página (Optimo Play)") {
+                ReproductorExterno.enviar(this, medio, p.titulo, p.url, p.web?.settings?.userAgentString)
+            }
+        }
         add("Marcadores") { mostrarMarcadores() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
@@ -1666,6 +1684,11 @@ class MainActivity : Activity() {
             add("Abrir en pestaña nueva") { nuevaPestana(enlace, privada) }
             add("Copiar enlace") { copiar(enlace) }
             add("Compartir enlace") { compartir(enlace) }
+            if (ReproductorExterno.esMedio(enlace, null) && ReproductorExterno.instalado(this)) {
+                add("Reproducir en Optimo Play") {
+                    ReproductorExterno.enviar(this, enlace, null, p.url, web.settings.userAgentString)
+                }
+            }
         }
         if (imagen != null) {
             add("Abrir imagen en pestaña nueva") { nuevaPestana(imagen, privada) }
@@ -2022,11 +2045,24 @@ class MainActivity : Activity() {
             }
             if (esquema == "about" || esquema == "blob" || esquema == "data" || esquema == "javascript") return false
             if (esquema == "file" || esquema == "content") return true
+            if (esquema == "magnet" && request.hasGesture() &&
+                ReproductorExterno.enviar(this@MainActivity, uri.toString(), null, null, null)
+            ) return true
             if (request.hasGesture()) abrirExterno(uri.toString())
             return true
         }
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            if (request != null) {
+                val u = request.url.toString()
+                if (ReproductorExterno.esMedio(u, null) && !ReproductorExterno.esMagnet(u)) {
+                    // Un manifiesto (m3u8/mpd) manda sobre un mp4 suelto (suelen ser anuncios o miniaturas).
+                    val previo = p.medioDetectado
+                    if (previo == null || !ReproductorExterno.esManifiesto(previo) || ReproductorExterno.esManifiesto(u)) {
+                        p.medioDetectado = u
+                    }
+                }
+            }
             if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame) {
                 val respuesta = anuncios.interceptar(request)
                 if (respuesta != null) {
@@ -2042,6 +2078,7 @@ class MainActivity : Activity() {
             if (view != null) anuncios.alEmpezar(view, url)
             p.progreso = 0
             p.bloqueados.set(0)
+            p.medioDetectado = null
             fijarUrl(p, url)
             if (p === actual) actualizarUi()
         }
