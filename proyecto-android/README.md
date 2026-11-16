@@ -68,13 +68,25 @@ Si sigue pausándose, hace falta un logcat con la pantalla bloqueada (`adb logca
 - **Audio entre pestañas:** al abrir o cambiar de pestaña con audio sonando (se comprueba por JavaScript que haya un `video`/`audio` sonando, no en silencio),
   Optimo pregunta «Seguir sonando» / «Pausar» / «Siempre seguir». Ajustes › Reproducción en segundo plano › «Al cambiar de pestaña con audio»:
   preguntar (por defecto), seguir sonando o pausar.
-  - La pestaña que sigue sonando conserva su WebView en pantalla a 1×1 px y transparente (si se quitara de la pantalla, Chromium lo pausaría).
+  - La pestaña que sigue sonando conserva su WebView en pantalla (ver 1.7.4: en 1.7.3 se reducía a 1×1 px y transparente, y el vídeo se pausaba).
   - Solo una pestaña de fondo a la vez; si deja de sonar ~45 s se libera. Se marca con 🔊 en la lista de pestañas y al volver a ella recupera su tamaño.
   - La notificación y la pantalla de bloqueo controlan la pestaña que suena.
 - **Carátula y datos:** el servicio pide cada ~12 s a la página su `navigator.mediaSession.metadata` (título, artista, miniaturas), con `og:image` o el póster del vídeo
   como respaldo. La imagen se descarga aparte (máx. 2 MB, reducida a ~512 px) y se pone en la sesión multimedia (pantalla de bloqueo, panel de control de Xiaomi)
   y como icono grande de la notificación. No se hace en pestañas privadas (se mantiene el título genérico). Si falla algo, queda la nota musical.
 - Sin cambios en la oferta de «Reproducir en Optimo Play» (pendiente).
+
+## 1.7.4 — Corrección del audio entre pestañas y diagnóstico
+
+En 1.7.3 el aviso salía bien pero el vídeo se pausaba al cambiar de pestaña, y la carátula no aparecía.
+- **Pestaña de fondo a tamaño completo:** ya no se reduce a 1×1 px ni se hace transparente (hipótesis: el cambio de tamaño/alfa hacía que la página o Chromium
+  pausara el vídeo). Se queda como estaba, tapada por la pestaña nueva que se añade encima, que es lo más parecido al caso que sí funciona (salir de la app).
+  Coste: la página de fondo sigue pintándose, algo más de batería mientras haya una pestaña sonando de fondo.
+- **Carátula:** la primera petición de datos se hace ~0,8 s después de arrancar el servicio (antes ~4 s). La carátula solo aparece con el servicio en marcha
+  (app fuera de pantalla con audio sonando); con la app abierta no hay servicio. Si el audio se pausaba por el fallo anterior, el servicio ni arrancaba.
+- **Ajustes › Reproducción en segundo plano › «Diagnóstico del audio (copiar y enviar)»:** muestra el estado de los medios de la pestaña, el tamaño de la ventana,
+  el registro de eventos pause/play/resize/ended (los anota `segundo_plano.js` en páginas de YouTube) y el estado de la carátula (datos recibidos, URL de la imagen,
+  error de descarga). Sirve para saber, sin logcat, qué ocurre si vuelve a pausarse.
 
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
