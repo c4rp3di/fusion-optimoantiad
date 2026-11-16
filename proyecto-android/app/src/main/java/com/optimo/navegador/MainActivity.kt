@@ -98,15 +98,19 @@ class MainActivity : Activity() {
 
         /** Título, artista e imagen de lo que suena: mediaSession de la página, o og:image / póster como respaldo. */
         private const val JS_META =
-            "(function(){try{var r={t:'',a:'',i:''};var m=navigator.mediaSession&&navigator.mediaSession.metadata;" +
-                "if(m){r.t=m.title||'';r.a=m.artist||'';var al=m.artwork||[],best='',bw=-1,small='',sw=1e9;" +
-                "for(var k=0;k<al.length;k++){var src=al[k].src;if(!src)continue;" +
-                "var s=parseInt((al[k].sizes||'0').split('x')[0],10)||0;" +
-                "if(s<=640&&s>=bw){best=src;bw=s;}if(s<sw){small=src;sw=s;}}r.i=best||small;}" +
-                "if(!r.i){var og=document.querySelector('meta[property=\"og:image\"]');if(og)r.i=og.content||'';}" +
-                "if(!r.i){var vp=document.querySelector('video[poster]');if(vp)r.i=vp.poster||'';}" +
-                "if(r.i){try{r.i=new URL(r.i,location.href).href;}catch(x){}}" +
-                "if(!r.t)r.t=document.title||'';return JSON.stringify(r);}catch(e){return '';}})()"
+            "(function(){try{var r={t:'',a:'',i:'',j:''};var m=navigator.mediaSession&&navigator.mediaSession.metadata" +
+                ";if(m){r.t=m.title||'';r.a=m.artist||'';var al=m.artwork||[],best='',bw=-1,small='',sw=1e9;for(var k=0;k<" +
+                "al.length;k++){var src=al[k].src;if(!src)continue;var s=parseInt((al[k].sizes||'0').split('x')[0],10)||0;" +
+                "if(s<=640&&s>=bw){best=src;bw=s;}if(s<sw){small=src;sw=s;}}r.i=best||small;}var id='';try{var h=location." +
+                "hostname,q=null;if(/(^|[.])(youtube[.]com|youtube-nocookie[.]com)$/.test(h)){q=/[?&]v=([A-Za-z0-9_-]{11})" +
+                "/.exec(location.search)||/^[/](shorts|embed|live)[/]([A-Za-z0-9_-]{11})/.exec(location.pathname);if(q)q=[" +
+                "0,q[q.length-1]];}else if(/(^|[.])youtu[.]be$/.test(h)){q=/^[/]([A-Za-z0-9_-]{11})/.exec(location.pathnam" +
+                "e);}if(q)id=q[1];}catch(x){}if(id){r.j='https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';if(!r.i)r.i='https:/" +
+                "/i.ytimg.com/vi/'+id+'/maxresdefault.jpg';}if(!r.i){var vp=document.querySelector('video[poster]');if(vp)" +
+                "r.i=vp.poster||'';}if(!r.i&&!id){var og=document.querySelector('meta[property=\"og:image\"]');if(og)r.i=og." +
+                "content||'';}if(r.i){try{r.i=new URL(r.i,location.href).href;}catch(x){}}if(!r.t)r.t=(document.title||'')" +
+                ".replace(/^[(][0-9]+[)] */,'').replace(/ +- +YouTube( Music)?$/,'');return JSON.stringify(r);}catch(e){re" +
+                "turn '';}})()"
 
         /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
         private const val PERFIL_PRIVADO = "optimo_privado"
@@ -470,7 +474,7 @@ class MainActivity : Activity() {
                 val s = org.json.JSONTokener(r ?: "").nextValue() as? String
                 if (!s.isNullOrEmpty()) {
                     val o = org.json.JSONObject(s)
-                    ServicioSegundoPlano.metadatos(o.optString("t"), o.optString("a"), o.optString("i"))
+                    ServicioSegundoPlano.metadatos(o.optString("t"), o.optString("a"), o.optString("i"), o.optString("j"))
                 }
             } catch (e: Exception) {
             }
