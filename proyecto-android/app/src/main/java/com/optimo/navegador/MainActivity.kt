@@ -1270,7 +1270,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.7.0")
+            .setTitle("Optimo 1.7.1")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -1292,6 +1292,8 @@ class MainActivity : Activity() {
     }
 
     private fun abrirDescargas() {
+        // Tu gestor de archivos, en la carpeta Descargas; si no está instalado, el gestor de descargas del sistema.
+        if (GestorExterno.abrirDescargas(this)) return
         try {
             startActivity(Intent(DownloadManager.ACTION_VIEW_DOWNLOADS))
         } catch (e: Exception) {
