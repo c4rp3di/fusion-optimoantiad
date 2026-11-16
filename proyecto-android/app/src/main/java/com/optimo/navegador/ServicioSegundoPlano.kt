@@ -128,6 +128,8 @@ class ServicioSegundoPlano : Service() {
         corriendo = true
         vigilando = true
         principal.postDelayed(vigilante, PERIODO_MS)
+        // Primera carátula sin esperar al primer ciclo.
+        principal.postDelayed({ if (vigilando) manejador?.invoke("metadatos") }, 800L)
     }
 
     private fun detenerTodo() {
@@ -314,6 +316,7 @@ class ServicioSegundoPlano : Service() {
     // ---------------------------------------------------------------- carátula y datos de lo que suena
 
     private fun nuevosMetadatos(t: String, a: String, img: String) {
+        diag = "datos recibidos · imagen: " + (if (img.isBlank()) "(la página no da ninguna)" else img.take(110))
         var cambio = false
         val nuevoTitulo = t.trim()
         if (nuevoTitulo.isNotEmpty() && nuevoTitulo != titulo) {
@@ -338,6 +341,7 @@ class ServicioSegundoPlano : Service() {
         val generacion = ++generacionImagen
         Thread {
             var mapa: Bitmap? = null
+            var fallo = ""
             try {
                 val c = URL(url).openConnection() as HttpURLConnection
                 c.connectTimeout = 6000
@@ -367,12 +371,18 @@ class ServicioSegundoPlano : Service() {
                 c.disconnect()
             } catch (e: Exception) {
                 mapa = null
+                fallo = e.javaClass.simpleName + ": " + (e.message ?: "")
             }
             val resultado = mapa
             principal.post {
-                if (generacion == generacionImagen && resultado != null) {
-                    imagen = resultado
-                    actualizarNotificacion()
+                if (generacion == generacionImagen) {
+                    if (resultado != null) {
+                        imagen = resultado
+                        diag = "imagen puesta (" + resultado.width + "×" + resultado.height + ")"
+                        actualizarNotificacion()
+                    } else {
+                        diag = "no se pudo usar la imagen " + (if (fallo.isEmpty()) "(respuesta no válida, demasiado grande o formato desconocido)" else fallo) + " · " + url.take(90)
+                    }
                 }
             }
         }.start()
@@ -411,6 +421,10 @@ class ServicioSegundoPlano : Service() {
 
         @Volatile
         private var instancia: ServicioSegundoPlano? = null
+
+        /** Último estado de la carátula (para Ajustes › Diagnóstico del audio). */
+        @Volatile
+        var diag: String = ""
 
         /** Título, artista e imagen de lo que suena (los lee MainActivity de la página). Siempre en el hilo principal. */
         fun metadatos(titulo: String, artista: String, imagen: String) {
