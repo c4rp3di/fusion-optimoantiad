@@ -27,3 +27,12 @@ y lo envió como si fuera el vídeo. Los vídeos reales (`googlevideo.com/videop
 
 ## 3. Con el logcat por wifi (cuando se pueda)
 Solo si el segundo plano de YouTube vuelve a fallar en algún dispositivo: `adb logcat | grep -i -E "chromium|optimo|AudioManager"`.
+
+## 4. Herramientas de desarrollo (Optimo 1.8.0)
+Estado: implementadas y fusionadas con 1.7.5; el JS se probó en Chromium con Playwright, **el Kotlin no se ha compilado ni probado en dispositivo**.
+- Compilar en Fusion y corregir lo que salga; probar en el móvil: consola, «🎯 Elegir», edición de atributos, Red (fetch/XHR) y Almacén.
+- Experimento opcional («opción B»): conectar la app al protocolo real de Chrome (CDP) por el socket local del WebView para tener red con cuerpos
+  de todo tipo, estilos exactos, puntos de ruptura y consola nativa. Primero hay que comprobar en el móvil si Android deja a la app conectarse
+  a su propio socket de depuración; iría como ajuste desactivado por defecto.
+- Hojas CSS de otro dominio (CORS): se podrían descargar desde la app para leer sus reglas en la pestaña Estilos.
+
