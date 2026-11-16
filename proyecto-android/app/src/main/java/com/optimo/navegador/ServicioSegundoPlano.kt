@@ -54,9 +54,9 @@ class ServicioSegundoPlano : Service() {
 
     private val vigilante = object : Runnable {
         override fun run() {
-            // Cada ~12 s (y en el primer ciclo) se actualizan título, artista e imagen.
+            // Cada ~8 s (y en el primer ciclo) se actualizan título, artista e imagen.
             ciclos++
-            if (ciclos % 3 == 1) manejador?.invoke("metadatos")
+            if (ciclos % 2 == 1) manejador?.invoke("metadatos")
             revisarAudio()
             if (vigilando) principal.postDelayed(this, PERIODO_MS)
         }
@@ -315,8 +315,9 @@ class ServicioSegundoPlano : Service() {
 
     // ---------------------------------------------------------------- carátula y datos de lo que suena
 
-    private fun nuevosMetadatos(t: String, a: String, img: String) {
-        diag = "datos recibidos · imagen: " + (if (img.isBlank()) "(la página no da ninguna)" else img.take(110))
+    private fun nuevosMetadatos(t: String, a: String, img: String, alt: String) {
+        diag = "datos recibidos · imagen: " + (if (img.isBlank()) "(la página no da ninguna)" else img.take(110)) +
+            (if (alt.isBlank()) "" else " · alternativa: " + alt.take(60))
         var cambio = false
         val nuevoTitulo = t.trim()
         if (nuevoTitulo.isNotEmpty() && nuevoTitulo != titulo) {
@@ -331,61 +332,90 @@ class ServicioSegundoPlano : Service() {
         val u = img.trim()
         if (u.isNotEmpty() && u != urlImagen && (u.startsWith("https://") || u.startsWith("http://"))) {
             urlImagen = u
-            cargarImagen(u)
+            cargarImagen(u, alt.trim())
         }
         if (cambio) actualizarNotificacion()
     }
 
-    /** Descarga la imagen en un hilo aparte (tope de 2 MB, reducida a ~512 px). Si falla se queda la anterior. */
-    private fun cargarImagen(url: String) {
+    /**
+     * Descarga la imagen en un hilo aparte: prueba [url] y, si falla, [alternativa]. Si ninguna sirve se quita la imagen
+     * anterior (mejor ninguna que la carátula de otro vídeo).
+     */
+    private fun cargarImagen(url: String, alternativa: String) {
         val generacion = ++generacionImagen
         Thread {
+            val intentos = ArrayList<String>()
+            intentos.add(url)
+            if (alternativa.isNotBlank() && alternativa != url &&
+                (alternativa.startsWith("https://") || alternativa.startsWith("http://"))
+            ) intentos.add(alternativa)
             var mapa: Bitmap? = null
-            var fallo = ""
-            try {
-                val c = URL(url).openConnection() as HttpURLConnection
-                c.connectTimeout = 6000
-                c.readTimeout = 8000
-                c.instanceFollowRedirects = true
-                c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Optimo")
-                if (c.responseCode == 200) {
-                    val limite = 2 * 1024 * 1024
-                    val salida = ByteArrayOutputStream()
-                    c.inputStream.use { entrada ->
-                        val buf = ByteArray(16 * 1024)
-                        var total = 0
-                        while (true) {
-                            val n = entrada.read(buf)
-                            if (n < 0) break
-                            total += n
-                            if (total > limite) {
-                                salida.reset()
-                                break
-                            }
-                            salida.write(buf, 0, n)
-                        }
+            var usada = url
+            val fallos = StringBuilder()
+            for (u in intentos) {
+                try {
+                    mapa = descargarImagen(u)
+                    if (mapa != null) {
+                        usada = u
+                        break
                     }
-                    val datos = salida.toByteArray()
-                    if (datos.isNotEmpty()) mapa = decodificarReducida(datos, 512)
+                    fallos.append(" [").append(u.takeLast(40)).append(": respuesta no válida]")
+                } catch (e: Exception) {
+                    fallos.append(" [").append(u.takeLast(40)).append(": ").append(e.javaClass.simpleName).append("]")
                 }
-                c.disconnect()
-            } catch (e: Exception) {
-                mapa = null
-                fallo = e.javaClass.simpleName + ": " + (e.message ?: "")
             }
             val resultado = mapa
+            val elegida = usada
+            val motivos = fallos.toString()
             principal.post {
                 if (generacion == generacionImagen) {
-                    if (resultado != null) {
-                        imagen = resultado
-                        diag = "imagen puesta (" + resultado.width + "×" + resultado.height + ")"
-                        actualizarNotificacion()
+                    imagen = resultado
+                    diag = if (resultado != null) {
+                        "imagen puesta (" + resultado.width + "×" + resultado.height + ") " + elegida.take(90)
                     } else {
-                        diag = "no se pudo usar la imagen " + (if (fallo.isEmpty()) "(respuesta no válida, demasiado grande o formato desconocido)" else fallo) + " · " + url.take(90)
+                        "no se pudo usar la imagen:" + motivos
                     }
+                    actualizarNotificacion()
                 }
             }
         }.start()
+    }
+
+    /** Descarga y decodifica una imagen (tope de 2 MB, reducida a ~512 px); null si no es 200, es demasiado grande o no es una imagen. */
+    private fun descargarImagen(url: String): Bitmap? {
+        val c = URL(url).openConnection() as HttpURLConnection
+        try {
+            c.connectTimeout = 6000
+            c.readTimeout = 8000
+            c.instanceFollowRedirects = true
+            c.setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) Optimo")
+            if (c.responseCode != 200) return null
+            val limite = 2 * 1024 * 1024
+            val salida = ByteArrayOutputStream()
+            var excedido = false
+            c.inputStream.use { entrada ->
+                val buf = ByteArray(16 * 1024)
+                var total = 0
+                while (true) {
+                    val n = entrada.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > limite) {
+                        excedido = true
+                        break
+                    }
+                    salida.write(buf, 0, n)
+                }
+            }
+            if (excedido) return null
+            val datos = salida.toByteArray()
+            return if (datos.isEmpty()) null else decodificarReducida(datos, 512)
+        } finally {
+            try {
+                c.disconnect()
+            } catch (e: Exception) {
+            }
+        }
     }
 
     private fun decodificarReducida(datos: ByteArray, maximo: Int): Bitmap? {
@@ -427,8 +457,8 @@ class ServicioSegundoPlano : Service() {
         var diag: String = ""
 
         /** Título, artista e imagen de lo que suena (los lee MainActivity de la página). Siempre en el hilo principal. */
-        fun metadatos(titulo: String, artista: String, imagen: String) {
-            instancia?.nuevosMetadatos(titulo, artista, imagen)
+        fun metadatos(titulo: String, artista: String, imagen: String, alternativa: String) {
+            instancia?.nuevosMetadatos(titulo, artista, imagen, alternativa)
         }
 
         /** Arranca el servicio en primer plano. Devuelve false si el sistema no lo permite. */
