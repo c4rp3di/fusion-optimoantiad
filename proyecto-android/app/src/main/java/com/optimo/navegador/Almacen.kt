@@ -139,6 +139,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("oscuro", v).apply()
         }
 
+    /** Al abrir o cambiar de pestaña con audio sonando: 0 preguntar, 1 seguir sonando, 2 pausar. */
+    var audioPestanas: Int
+        get() = sp.getInt("audio_pestanas", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("audio_pestanas", v).apply()
+        }
+
     /** Seguir reproduciendo con la pantalla bloqueada o en segundo plano (servicio + script de visibilidad). */
     var segundoPlano: Boolean
         get() = sp.getBoolean("segundo_plano", true)
