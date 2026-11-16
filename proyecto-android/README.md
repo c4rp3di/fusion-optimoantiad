@@ -62,3 +62,19 @@ marcaba el WebView como oculto y pausaba por su cuenta. Cambios (hipótesis, sin
 - `segundo_plano.js`: si la página pausa el vídeo en los 3 primeros segundos tras salir (sin pausa tuya desde la notificación), lo reanuda (máx. 3 veces).
 - Sin cambios en la oferta de «Reproducir en Optimo Play» (queda para otra revisión).
 Si sigue pausándose, hace falta un logcat con la pantalla bloqueada (`adb logcat | grep -i -E "chromium|optimo|AudioManager"`).
+
+## 1.7.3 — Audio al cambiar de pestaña y carátula
+
+- **Audio entre pestañas:** al abrir o cambiar de pestaña con audio sonando (se comprueba por JavaScript que haya un `video`/`audio` sonando, no en silencio),
+  Optimo pregunta «Seguir sonando» / «Pausar» / «Siempre seguir». Ajustes › Reproducción en segundo plano › «Al cambiar de pestaña con audio»:
+  preguntar (por defecto), seguir sonando o pausar.
+  - La pestaña que sigue sonando conserva su WebView en pantalla a 1×1 px y transparente (si se quitara de la pantalla, Chromium lo pausaría).
+  - Solo una pestaña de fondo a la vez; si deja de sonar ~45 s se libera. Se marca con 🔊 en la lista de pestañas y al volver a ella recupera su tamaño.
+  - La notificación y la pantalla de bloqueo controlan la pestaña que suena.
+- **Carátula y datos:** el servicio pide cada ~12 s a la página su `navigator.mediaSession.metadata` (título, artista, miniaturas), con `og:image` o el póster del vídeo
+  como respaldo. La imagen se descarga aparte (máx. 2 MB, reducida a ~512 px) y se pone en la sesión multimedia (pantalla de bloqueo, panel de control de Xiaomi)
+  y como icono grande de la notificación. No se hace en pestañas privadas (se mantiene el título genérico). Si falla algo, queda la nota musical.
+- Sin cambios en la oferta de «Reproducir en Optimo Play» (pendiente).
+
+## Pendientes
+Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
