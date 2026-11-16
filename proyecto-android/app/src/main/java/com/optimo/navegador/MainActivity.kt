@@ -37,6 +37,7 @@ import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.PermissionRequest
@@ -119,6 +120,8 @@ class MainActivity : Activity() {
     private lateinit var paleta: Paleta
     private lateinit var ajustes: Ajustes
     private lateinit var anuncios: MotorAnuncios
+    private lateinit var agenteDev: AgenteDev
+    private lateinit var herramientas: PanelDev
     private lateinit var marcadores: Marcadores
     private lateinit var historial: ListaPersistente
     private lateinit var uaEscritorio: String
@@ -179,6 +182,7 @@ class MainActivity : Activity() {
         ajustes = Ajustes(this)
         borrarPerfilPrivado()
         anuncios = MotorAnuncios(this, ajustes)
+        agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         ListasManager.iniciar(this, ajustes)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
@@ -551,6 +555,7 @@ class MainActivity : Activity() {
             }
             return
         }
+        if (::herramientas.isInitialized && herramientas.visible && herramientas.alAtras()) return
         if (barraBuscar.visibility == View.VISIBLE) {
             cerrarBusqueda()
             return
@@ -787,6 +792,14 @@ class MainActivity : Activity() {
         contenedor.setBackgroundColor(paleta.fondo)
         principal.addView(contenedor, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
+        // Herramientas de desarrollo: panel acoplado bajo la página (oculto hasta abrirlo desde el menú)
+        herramientas = PanelDev(
+            this, paleta, ajustes, agenteDev, contenedor,
+            { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogo() },
+            { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() }
+        )
+        principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
+
         // Barra inferior: atras, adelante, recargar/parar, marcador, pestañas, menu
         val barraInf = LinearLayout(this)
         barraInf.setOrientation(LinearLayout.HORIZONTAL)
@@ -1006,6 +1019,7 @@ class MainActivity : Activity() {
         w.setOnLongClickListener { v -> menuContextual(v as WebView, p) }
         aplicarAjustesWeb(w)
         anuncios.instalar(w)
+        agenteDev.instalar(w)
         p.web = w
         return w
     }
@@ -1105,6 +1119,7 @@ class MainActivity : Activity() {
         }
         cerrarBusqueda()
         actualizarUi()
+        if (::herramientas.isInitialized) herramientas.alCambiarPestana()
     }
 
     private fun cerrarPestana(p: Pestana) {
@@ -1352,6 +1367,7 @@ class MainActivity : Activity() {
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
+            add("Herramientas de desarrollo") { herramientas.alternar() }
         }
         add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
         add("Ir a la página de inicio") { mostrarInicio(p) }
@@ -1377,6 +1393,12 @@ class MainActivity : Activity() {
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
         add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Herramientas de desarrollo: captura desde el inicio: " + si(ajustes.devCaptura)) {
+            ajustes.devCaptura = !ajustes.devCaptura
+            reinstalarDev()
+            toast("Recarga las páginas abiertas para aplicarlo")
+            mostrarAjustes()
+        }
         add("Usar HTTPS primero: " + si(ajustes.httpsPrimero)) {
             ajustes.httpsPrimero = !ajustes.httpsPrimero
             mostrarAjustes()
@@ -1506,6 +1528,13 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancelar", null)
             .show()
+    }
+
+    private fun reinstalarDev() {
+        for (q in pestanas) {
+            val w = q.web
+            if (w != null) agenteDev.instalar(w)
+        }
     }
 
     private fun reinstalarAnuncios() {
@@ -2457,6 +2486,7 @@ class MainActivity : Activity() {
                 val respuesta = anuncios.interceptar(request)
                 if (respuesta != null) {
                     p.bloqueados.incrementAndGet()
+                    p.dev.bloqueo(request.url.toString(), request.method ?: "GET")
                     return respuesta
                 }
             }
@@ -2466,6 +2496,9 @@ class MainActivity : Activity() {
         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             super.onPageStarted(view, url, favicon)
             if (view != null) anuncios.alEmpezar(view, url)
+            if (view != null) agenteDev.alEmpezar(view)
+            p.dev.limpiar()
+            if (p === actual && ::herramientas.isInitialized) herramientas.alNavegar()
             p.progreso = 0
             p.bloqueados.set(0)
             p.medioDetectado = null
@@ -2476,6 +2509,7 @@ class MainActivity : Activity() {
         override fun onPageFinished(view: WebView?, url: String?) {
             super.onPageFinished(view, url)
             p.progreso = 100
+            if (p === actual && ::herramientas.isInitialized) herramientas.alCargada()
             p.mejoradoDesde = null
             fijarUrl(p, url)
             val titulo = view?.title ?: ""
@@ -2494,8 +2528,18 @@ class MainActivity : Activity() {
             if (p === actual) actualizarUi()
         }
 
+        override fun onReceivedHttpError(view: WebView?, request: WebResourceRequest?, errorResponse: WebResourceResponse?) {
+            super.onReceivedHttpError(view, request, errorResponse)
+            if (request != null && errorResponse != null) {
+                p.dev.errorHttp(request.url.toString(), request.method ?: "GET", errorResponse.statusCode, errorResponse.reasonPhrase ?: "")
+            }
+        }
+
         override fun onReceivedError(view: WebView?, request: WebResourceRequest?, error: WebResourceError?) {
             super.onReceivedError(view, request, error)
+            if (request != null && !request.isForMainFrame) {
+                p.dev.errorHttp(request.url.toString(), request.method ?: "GET", 0, error?.description?.toString() ?: "Error de red")
+            }
             if (view == null || request == null || !request.isForMainFrame) return
             val fallida = request.url.toString()
             val descripcion = error?.description?.toString() ?: "Error de red"
@@ -2591,6 +2635,24 @@ class MainActivity : Activity() {
     }
 
     private inner class ClienteChrome(private val p: Pestana) : WebChromeClient() {
+
+        override fun onConsoleMessage(m: ConsoleMessage?): Boolean {
+            if (m == null) return false
+            val msg = m.message() ?: return false
+            // Lo que ya tiene el agente (marcado con el valor aleatorio) no se duplica.
+            if (msg.startsWith(agenteDev.marca) || msg.take(40).contains(agenteDev.nonce)) return false
+            val nivel = when (m.messageLevel()) {
+                ConsoleMessage.MessageLevel.ERROR -> "error"
+                ConsoleMessage.MessageLevel.WARNING -> "warn"
+                ConsoleMessage.MessageLevel.DEBUG -> "debug"
+                ConsoleMessage.MessageLevel.TIP -> "info"
+                else -> "log"
+            }
+            val src = m.sourceId() ?: ""
+            val origen = if (src.isEmpty()) null else src + ":" + m.lineNumber()
+            p.dev.consola(nivel, msg, origen)
+            return false
+        }
 
         override fun onProgressChanged(view: WebView?, newProgress: Int) {
             p.progreso = newProgress
