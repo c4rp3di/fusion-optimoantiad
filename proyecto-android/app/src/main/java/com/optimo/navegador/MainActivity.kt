@@ -80,6 +80,7 @@ class MainActivity : Activity() {
         private const val REQ_PERMISOS_WEB = 102
         private const val REQ_UBICACION = 103
         private const val REQ_ALMACENAMIENTO = 104
+        private const val REQ_NOTIFICACIONES = 105
         private const val MAX_PESTANAS = 20
 
         /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
@@ -158,6 +159,11 @@ class MainActivity : Activity() {
         configurarVentana()
         restaurarSesion()
         procesarIntent(intent)
+        ServicioSegundoPlano.manejador = { orden -> controlarMedios(orden) }
+        if (ajustes.segundoPlano && !ajustes.notifPedido) {
+            ajustes.notifPedido = true
+            pedirPermisoNotificaciones()
+        }
     }
 
     override fun onNewIntent(intent: Intent?) {
@@ -169,6 +175,8 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        // De vuelta en primer plano: ya no hace falta el servicio de segundo plano.
+        if (ServicioSegundoPlano.corriendo) ServicioSegundoPlano.detener(this)
         actual?.web?.onResume()
         // Al volver de otra app el sistema puede haber mostrado sus barras.
         if (paginaCompleta && vistaCompleta == null) ajustarBarrasSistema(true)
@@ -176,13 +184,59 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         super.onPause()
+        iniciarSegundoPlano()
         guardarSesion()
         marcadores.guardarAhora()
         historial.guardarAhora()
         CookieManager.getInstance().flush()
     }
 
+    /** Pulsar Inicio/Recientes con un vídeo a pantalla completa lo pasa a imagen en imagen (el bloqueo de pantalla no). */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (!ajustes.pip || vistaCompleta == null) return
+        try {
+            enterPictureInPictureMode(
+                android.app.PictureInPictureParams.Builder().setAspectRatio(android.util.Rational(16, 9)).build()
+            )
+        } catch (e: Exception) {
+            // El sistema no admite PiP o el usuario lo desactivó para Optimo.
+        }
+    }
+
+    /** Si suena audio al salir de la app o bloquear la pantalla, arranca el servicio que mantiene la reproducción. */
+    private fun iniciarSegundoPlano() {
+        if (!ajustes.segundoPlano || isChangingConfigurations) return
+        val am = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+        if (!am.isMusicActive) return
+        val p = actual
+        val nombre = if (p == null || p.privada) {
+            "Optimo" + (if (p != null && p.privada) " (pestaña privada)" else "")
+        } else if (p.titulo.isBlank()) "Optimo" else p.titulo
+        ServicioSegundoPlano.iniciar(this, nombre)
+    }
+
+    /** Órdenes de la notificación y de la pantalla de bloqueo: se aplican a los medios de la pestaña actual. */
+    private fun controlarMedios(orden: String) {
+        val w = actual?.web ?: return
+        val js = when (orden) {
+            "pausar" -> "(function(){var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){try{v[i].pause();}catch(e){}}})()"
+            "reanudar" -> "(function(){var v=document.querySelector('video,audio');if(v){try{v.play();}catch(e){}}})()"
+            else -> return
+        }
+        w.evaluateJavascript(js, null)
+    }
+
+    private fun pedirPermisoNotificaciones() {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQ_NOTIFICACIONES)
+        }
+    }
+
     override fun onDestroy() {
+        ServicioSegundoPlano.manejador = null
         for (p in pestanas) {
             val w = p.web
             if (w != null) {
@@ -265,6 +319,9 @@ class MainActivity : Activity() {
                 val par = pendienteUbicacion
                 pendienteUbicacion = null
                 if (par != null) par.first.invoke(par.second, todos, false)
+            }
+            REQ_NOTIFICACIONES -> {
+                if (!todos) toast("Sin permiso de notificaciones: seguirá sonando, pero sin controles en la barra")
             }
             REQ_ALMACENAMIENTO -> {
                 val tarea = pendienteDescarga
@@ -1048,9 +1105,41 @@ class MainActivity : Activity() {
             }
             mostrarAjustes()
         }
+        add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
         add("Borrar historial, caché y cookies") { confirmarBorrado() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
+    }
+
+    private fun mostrarSegundoPlano() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
+            ajustes.segundoPlano = !ajustes.segundoPlano
+            if (ajustes.segundoPlano) pedirPermisoNotificaciones()
+            reinstalarAnuncios()
+            toast("Recarga la página de YouTube para aplicarlo")
+            mostrarSegundoPlano()
+        }
+        add("Imagen en imagen al salir (vídeo a pantalla completa): " + si(ajustes.pip)) {
+            ajustes.pip = !ajustes.pip
+            mostrarSegundoPlano()
+        }
+        add("Batería de Optimo («Sin restricciones»)…") { abrirAjustesBateria() }
+        opciones("Reproducción en segundo plano", items)
+    }
+
+    private fun abrirAjustesBateria() {
+        toast("Pon el ahorro de batería de Optimo en «Sin restricciones»")
+        try {
+            startActivity(
+                Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + packageName))
+            )
+        } catch (e: Exception) {
+            toast("No se pudo abrir los ajustes de la app")
+        }
     }
 
     private fun mostrarListas() {
@@ -1181,10 +1270,11 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.5.0")
+            .setTitle("Optimo 1.7.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
+                    "• Reproducción en segundo plano (YouTube): sigue sonando con la pantalla bloqueada y, con un vídeo a pantalla completa, pasa a imagen en imagen al salir. Se activa o desactiva en Ajustes.\n" +
                     "• HTTPS primero. Si el sitio no lo ofrece, solo se abre por http si lo confirmas. Los certificados no válidos se bloquean (solo la red local permite continuar, tras confirmar).\n" +
                     "• Pestaña privada: perfil aislado (cookies, almacenamiento y caché propios, que se borran al cerrar la última pestaña privada), sin historial y sin capturas de pantalla.\n" +
                     "• Marcadores, historial, sesión y reglas se guardan cifrados con una clave del Keystore del dispositivo.\n" +
