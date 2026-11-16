@@ -139,6 +139,27 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("oscuro", v).apply()
         }
 
+    /** Seguir reproduciendo con la pantalla bloqueada o en segundo plano (servicio + script de visibilidad). */
+    var segundoPlano: Boolean
+        get() = sp.getBoolean("segundo_plano", true)
+        set(v) {
+            sp.edit().putBoolean("segundo_plano", v).apply()
+        }
+
+    /** Imagen en imagen al salir de la app con un vídeo a pantalla completa. */
+    var pip: Boolean
+        get() = sp.getBoolean("pip", true)
+        set(v) {
+            sp.edit().putBoolean("pip", v).apply()
+        }
+
+    /** Ya se pidió una vez el permiso de notificaciones (Android 13+) para los controles de segundo plano. */
+    var notifPedido: Boolean
+        get() = sp.getBoolean("notif_pedido", false)
+        set(v) {
+            sp.edit().putBoolean("notif_pedido", v).apply()
+        }
+
     /** Técnicas contra anuncios (ver MotorAnuncios.TECNICAS): todas activas por defecto. */
     fun tecnica(id: String): Boolean = sp.getBoolean("ads_$id", true)
 
