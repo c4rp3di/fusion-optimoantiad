@@ -127,6 +127,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("anuncios", v).apply()
         }
 
+    /** Herramientas de desarrollo: inyectar el agente al inicio de cada página (captura completa de consola y red). */
+    var devCaptura: Boolean
+        get() = sp.getBoolean("dev_captura", false)
+        set(v) {
+            sp.edit().putBoolean("dev_captura", v).apply()
+        }
+
     var httpsPrimero: Boolean
         get() = sp.getBoolean("https", true)
         set(v) {
