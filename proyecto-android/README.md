@@ -88,5 +88,16 @@ En 1.7.3 el aviso salía bien pero el vídeo se pausaba al cambiar de pestaña, 
   el registro de eventos pause/play/resize/ended (los anota `segundo_plano.js` en páginas de YouTube) y el estado de la carátula (datos recibidos, URL de la imagen,
   error de descarga). Sirve para saber, sin logcat, qué ocurre si vuelve a pausarse.
 
+## 1.7.5 — Carátula del vídeo que suena
+
+En 1.7.4 la carátula ya llegaba al panel de control y a la pantalla de bloqueo, pero era la de otro vídeo: YouTube navega sin recargar la página y su
+`og:image` se queda con el primer vídeo cargado (y `mediaSession` no daba imagen).
+- **YouTube:** la imagen sale ahora del identificador del vídeo de la URL actual (`v=`, `/shorts/`, `/embed/`, `/live/`, `youtu.be/`): primero `maxresdefault.jpg`
+  (16:9 sin barras) y, si no existe, `hqdefault.jpg`. Si la página sí da `mediaSession.metadata.artwork`, manda esa imagen (con `hqdefault` de respaldo).
+- **Otras webs:** `mediaSession` › póster del vídeo › `og:image`. En YouTube ya no se usa `og:image`.
+- Si ninguna imagen sirve, se quita la anterior (mejor ninguna que la de otro vídeo).
+- El título de respaldo (`document.title`) se limpia: sin « - YouTube» ni el contador «(3)».
+- Los datos se consultan cada ~8 s (antes ~12 s) para que el cambio de canción se note antes.
+
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
