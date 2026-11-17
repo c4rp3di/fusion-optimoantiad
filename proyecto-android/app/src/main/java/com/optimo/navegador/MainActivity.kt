@@ -93,28 +93,23 @@ class MainActivity : Activity() {
             "(function(){try{if(window.__optimoMudo)return 0;var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
                 "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
 
-        /** Estado de los medios y registro de eventos (pause/play/resize) que anota segundo_plano.js. */
-        private const val JS_DIAG =
-            "(function(){try{var v=document.querySelectorAll('video,audio'),o=[];" +
-                "for(var i=0;i<v.length;i++){o.push(v[i].tagName+' pausado='+v[i].paused+' mudo='+v[i].muted+' listo='+v[i].readyState+' t='+Math.round(v[i].currentTime));}" +
-                "return 'Medios: '+(o.length?o.join(' | '):'(ninguno)')+'\\nVentana: '+innerWidth+'x'+innerHeight+' visibilidad='+document.visibilityState+" +
-                "'\\nRegistro [ms, evento, elemento, tamaño, visibilidad, fg/bg]:\\n'+((window.__optimoLog||[]).map(function(x){return x.join(' ');}).join('\\n')||'(vacío: el script de segundo plano no actuó en esta página)');}catch(e){return 'error: '+e;}})()"
-
         /** Título, artista e imagen de lo que suena: mediaSession de la página, o og:image / póster como respaldo. */
         private const val JS_META =
-            "(function(){try{var r={t:'',a:'',i:'',j:''};var m=navigator.mediaSession&&navigator.mediaSession.metadata" +
-                ";if(m){r.t=m.title||'';r.a=m.artist||'';var al=m.artwork||[],best='',bw=-1,small='',sw=1e9;for(var k=0;k<" +
-                "al.length;k++){var src=al[k].src;if(!src)continue;var s=parseInt((al[k].sizes||'0').split('x')[0],10)||0;" +
-                "if(s<=640&&s>=bw){best=src;bw=s;}if(s<sw){small=src;sw=s;}}r.i=best||small;}var id='';try{var h=location." +
-                "hostname,q=null;if(/(^|[.])(youtube[.]com|youtube-nocookie[.]com)$/.test(h)){q=/[?&]v=([A-Za-z0-9_-]{11})" +
-                "/.exec(location.search)||/^[/](shorts|embed|live)[/]([A-Za-z0-9_-]{11})/.exec(location.pathname);if(q)q=[" +
-                "0,q[q.length-1]];}else if(/(^|[.])youtu[.]be$/.test(h)){q=/^[/]([A-Za-z0-9_-]{11})/.exec(location.pathnam" +
-                "e);}if(q)id=q[1];}catch(x){}if(id){r.j='https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';if(!r.i)r.i='https:/" +
-                "/i.ytimg.com/vi/'+id+'/maxresdefault.jpg';}if(!r.i){var vp=document.querySelector('video[poster]');if(vp)" +
-                "r.i=vp.poster||'';}if(!r.i&&!id){var og=document.querySelector('meta[property=\"og:image\"]');if(og)r.i=og." +
-                "content||'';}if(r.i){try{r.i=new URL(r.i,location.href).href;}catch(x){}}if(!r.t)r.t=(document.title||'')" +
-                ".replace(/^[(][0-9]+[)] */,'').replace(/ +- +YouTube( Music)?$/,'');return JSON.stringify(r);}catch(e){re" +
-                "turn '';}})()"
+            "(function(){try{var r={t:'',a:'',i:'',j:'',p:-1,d:-1};var m=navigator.mediaSession&&navigator.mediaSessio" +
+                "n.metadata;if(m){r.t=m.title||'';r.a=m.artist||'';var al=m.artwork||[],best='',bw=-1,small='',sw=1e9;for(" +
+                "var k=0;k<al.length;k++){var src=al[k].src;if(!src)continue;var s=parseInt((al[k].sizes||'0').split('x')[" +
+                "0],10)||0;if(s<=640&&s>=bw){best=src;bw=s;}if(s<sw){small=src;sw=s;}}r.i=best||small;}var id='';try{var h" +
+                "=location.hostname,q=null;if(/(^|[.])(youtube[.]com|youtube-nocookie[.]com)$/.test(h)){q=/[?&]v=([A-Za-z0" +
+                "-9_-]{11})/.exec(location.search)||/^[/](shorts|embed|live)[/]([A-Za-z0-9_-]{11})/.exec(location.pathname" +
+                ");if(q)q=[0,q[q.length-1]];}else if(/(^|[.])youtu[.]be$/.test(h)){q=/^[/]([A-Za-z0-9_-]{11})/.exec(locati" +
+                "on.pathname);}if(q)id=q[1];}catch(x){}if(id){r.j='https://i.ytimg.com/vi/'+id+'/hqdefault.jpg';if(!r.i)r." +
+                "i='https://i.ytimg.com/vi/'+id+'/maxresdefault.jpg';}if(!r.i){var vp=document.querySelector('video[poster" +
+                "]');if(vp)r.i=vp.poster||'';}if(!r.i&&!id){var og=document.querySelector('meta[property=\"og:image\"]');if(" +
+                "og)r.i=og.content||'';}if(r.i){try{r.i=new URL(r.i,location.href).href;}catch(x){}}if(!r.t)r.t=(document." +
+                "title||'').replace(/^[(][0-9]+[)] */,'').replace(/ +- +YouTube( Music)?$/,'');var vv=document.querySelect" +
+                "orAll('video,audio'),v=null;for(var n=0;n<vv.length;n++){if(!vv[n].paused&&vv[n].readyState>1){v=vv[n];br" +
+                "eak;}}if(!v&&vv.length)v=vv[0];if(v){r.p=Math.round((v.currentTime||0)*1000);r.d=isFinite(v.duration)?Mat" +
+                "h.round(v.duration*1000):-1;}return JSON.stringify(r);}catch(e){return '';}})()"
 
         /** Perfil de WebView (cookies, almacenamiento, caché) exclusivo de las pestañas privadas. */
         private const val PERFIL_PRIVADO = "optimo_privado"
@@ -290,7 +285,14 @@ class MainActivity : Activity() {
                 pedirMetadatos()
                 return
             }
-            else -> return
+            else -> {
+                // «buscar:<ms>»: la barra de progreso de la pantalla de bloqueo / panel de control.
+                if (!orden.startsWith("buscar:")) return
+                val ms = orden.substring(7).toLongOrNull() ?: return
+                "(function(){var vv=document.querySelectorAll('video,audio'),v=null;for(var n=0;n<vv.length;n++){" +
+                    "if(!vv[n].paused&&vv[n].readyState>1){v=vv[n];break;}}if(!v&&vv.length)v=vv[0];" +
+                    "if(v){try{v.currentTime=" + (ms / 1000.0) + ";}catch(e){}}})()"
+            }
         }
         w.evaluateJavascript(js, null)
     }
@@ -437,51 +439,7 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- carátula y datos de lo que suena
 
-    /** Muestra el registro de pausas/reproducciones de la página y el estado de la carátula, para depurar sin logcat. */
-    private fun mostrarDiagnosticoAudio() {
-        val p = sonando ?: actual
-        val w = p?.web
-        val cabecera = StringBuilder()
-        cabecera.append("Optimo 1.7.4\n")
-        cabecera.append("Pestaña: ").append(if (p == null) "(ninguna)" else if (p === sonando) "de fondo (sonando)" else "activa").append('\n')
-        cabecera.append("Modo al cambiar de pestaña: ").append(NOMBRES_AUDIO_PESTANAS[ajustes.audioPestanas]).append('\n')
-        cabecera.append("Servicio: ").append(if (ServicioSegundoPlano.corriendo) "en marcha" else "parado").append('\n')
-        cabecera.append("Carátula: ").append(ServicioSegundoPlano.diag.ifEmpty { "(sin intentos todavía)" }).append("\n\n")
-        val mostrar = { cuerpo: String ->
-            val texto = cabecera.toString() + cuerpo
-            val tv = TextView(this)
-            tv.text = texto
-            tv.textSize = 11f
-            tv.setTextIsSelectable(true)
-            tv.setPadding(16.dp(), 8.dp(), 16.dp(), 8.dp())
-            val sv = android.widget.ScrollView(this)
-            sv.addView(tv)
-            nuevoDialogo()
-                .setTitle("Diagnóstico del audio")
-                .setView(sv)
-                .setPositiveButton("Copiar") { _, _ ->
-                    val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                    cm.setPrimaryClip(ClipData.newPlainText("diagnostico", texto))
-                    toast("Copiado")
-                }
-                .setNegativeButton("Cerrar", null)
-                .show()
-        }
-        if (w == null) {
-            mostrar("(sin página)")
-            return
-        }
-        w.evaluateJavascript(JS_DIAG) { r ->
-            val s = try {
-                org.json.JSONTokener(r ?: "").nextValue() as? String
-            } catch (e: Exception) {
-                null
-            }
-            mostrar(s ?: (r ?: "(sin respuesta)"))
-        }
-    }
-
-    /** Pide a la pestaña que suena su título, artista e imagen y se los pasa al servicio (no en pestañas privadas). */
+    /** Pide a la pestaña que suena su título, artista, imagen, posición y duración y se los pasa al servicio (no en pestañas privadas). */
     private fun pedirMetadatos() {
         val p = sonando ?: actual ?: return
         if (p.privada) return
@@ -491,7 +449,10 @@ class MainActivity : Activity() {
                 val s = org.json.JSONTokener(r ?: "").nextValue() as? String
                 if (!s.isNullOrEmpty()) {
                     val o = org.json.JSONObject(s)
-                    ServicioSegundoPlano.metadatos(o.optString("t"), o.optString("a"), o.optString("i"), o.optString("j"))
+                    ServicioSegundoPlano.metadatos(
+                        o.optString("t"), o.optString("a"), o.optString("i"), o.optString("j"),
+                        o.optLong("p", -1L), o.optLong("d", -1L)
+                    )
                 }
             } catch (e: Exception) {
             }
@@ -1850,7 +1811,6 @@ class MainActivity : Activity() {
             ajustes.audioPestanas = (ajustes.audioPestanas + 1) % 3
             mostrarSegundoPlano()
         }
-        add("Diagnóstico del audio (copiar y enviar)") { mostrarDiagnosticoAudio() }
         add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
             ajustes.segundoPlano = !ajustes.segundoPlano
             for (q in pestanas) q.web?.let { aplicarFondo(it) }
