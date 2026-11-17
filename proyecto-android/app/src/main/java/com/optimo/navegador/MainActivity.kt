@@ -3144,7 +3144,7 @@ class MainActivity : Activity() {
             }
             if (request != null) {
                 val u = request.url.toString()
-                if (ReproductorExterno.esMedio(u, null) && !ReproductorExterno.esMagnet(u)) {
+                if (ReproductorExterno.esMedio(u, null) && !ReproductorExterno.esMagnet(u) && ReproductorExterno.esDetectable(u)) {
                     // Un manifiesto (m3u8/mpd) manda sobre un mp4 suelto (suelen ser anuncios o miniaturas).
                     val previo = p.medioDetectado
                     if (previo == null || !ReproductorExterno.esManifiesto(previo) || ReproductorExterno.esManifiesto(u)) {
