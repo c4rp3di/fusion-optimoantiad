@@ -251,5 +251,151 @@ class Ajustes(contexto: Context) {
         set(v) {
             sp.edit().putBoolean("cookies3", v).apply()
         }
+
+    // ---------------------------------------------------------------- pantalla de inicio editable (Paginas.inicio)
+
+    /** Tema de colores: id de Paginas.TEMAS_INICIO ("auto" sigue al sistema; "personalizado" usa los cuatro colores de abajo). */
+    var inicioTema: String
+        get() = sp.getString("inicio_tema", "auto") ?: "auto"
+        set(v) {
+            sp.edit().putString("inicio_tema", v).apply()
+        }
+
+    var inicioColorFondo: String
+        get() = Paginas.normalizarHex(sp.getString("inicio_c_fondo", "") ?: "") ?: "#121418"
+        set(v) {
+            sp.edit().putString("inicio_c_fondo", v).apply()
+        }
+
+    var inicioColorTexto: String
+        get() = Paginas.normalizarHex(sp.getString("inicio_c_texto", "") ?: "") ?: "#E8EAED"
+        set(v) {
+            sp.edit().putString("inicio_c_texto", v).apply()
+        }
+
+    var inicioColorAcento: String
+        get() = Paginas.normalizarHex(sp.getString("inicio_c_acento", "") ?: "") ?: "#00BFA5"
+        set(v) {
+            sp.edit().putString("inicio_c_acento", v).apply()
+        }
+
+    var inicioColorSuperficie: String
+        get() = Paginas.normalizarHex(sp.getString("inicio_c_sup", "") ?: "") ?: "#1E2229"
+        set(v) {
+            sp.edit().putString("inicio_c_sup", v).apply()
+        }
+
+    var inicioTitulo: String
+        get() = sp.getString("inicio_titulo", "Optimo") ?: "Optimo"
+        set(v) {
+            sp.edit().putString("inicio_titulo", v).apply()
+        }
+
+    var inicioSubtitulo: String
+        get() = sp.getString("inicio_subtitulo", "Navega rápido y con control.") ?: ""
+        set(v) {
+            sp.edit().putString("inicio_subtitulo", v).apply()
+        }
+
+    var inicioBuscador: Boolean
+        get() = sp.getBoolean("inicio_buscador", true)
+        set(v) {
+            sp.edit().putBoolean("inicio_buscador", v).apply()
+        }
+
+    /** Mostrar la rejilla de accesos directos (con false desaparecen los marcadores de la pantalla de inicio). */
+    var inicioAccesos: Boolean
+        get() = sp.getBoolean("inicio_accesos", true)
+        set(v) {
+            sp.edit().putBoolean("inicio_accesos", v).apply()
+        }
+
+    /** De dónde salen los accesos: 0 marcadores recientes, 1 lista propia, 2 los predeterminados. */
+    var inicioOrigen: Int
+        get() = sp.getInt("inicio_origen", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("inicio_origen", v).apply()
+        }
+
+    var inicioMaxAccesos: Int
+        get() = sp.getInt("inicio_max", 8).coerceIn(4, 12)
+        set(v) {
+            sp.edit().putInt("inicio_max", v).apply()
+        }
+
+    /** Forma de los iconos: false círculo, true cuadrado redondeado. */
+    var inicioCuadrados: Boolean
+        get() = sp.getBoolean("inicio_cuadrados", false)
+        set(v) {
+            sp.edit().putBoolean("inicio_cuadrados", v).apply()
+        }
+
+    /** Enlace «⚙ Personalizar esta pantalla» al pie de la página de inicio. */
+    var inicioEnlacePersonalizar: Boolean
+        get() = sp.getBoolean("inicio_enlace", true)
+        set(v) {
+            sp.edit().putBoolean("inicio_enlace", v).apply()
+        }
+
+    /** Accesos propios: (nombre, url). Se guardan en una cadena con tabuladores y saltos de línea. */
+    fun accesosPropios(): List<Pair<String, String>> {
+        val texto = sp.getString("inicio_propios", "") ?: ""
+        val res = ArrayList<Pair<String, String>>()
+        for (linea in texto.split('\n')) {
+            val partes = linea.split('\t')
+            if (partes.size == 2 && partes[1].isNotEmpty()) res.add(Pair(partes[0], partes[1]))
+        }
+        return res
+    }
+
+    fun guardarAccesosPropios(lista: List<Pair<String, String>>) {
+        val limpio = lista.filter { !it.second.contains('\t') && !it.second.contains('\n') }
+        sp.edit().putString(
+            "inicio_propios",
+            limpio.joinToString("\n") { it.first.replace('\t', ' ').replace('\n', ' ') + "\t" + it.second }
+        ).apply()
+    }
+
+    /** Vuelve la pantalla de inicio a su aspecto original (no toca los accesos propios). */
+    fun restablecerInicio() {
+        sp.edit()
+            .remove("inicio_tema").remove("inicio_c_fondo").remove("inicio_c_texto").remove("inicio_c_acento")
+            .remove("inicio_c_sup").remove("inicio_titulo").remove("inicio_subtitulo").remove("inicio_buscador")
+            .remove("inicio_accesos").remove("inicio_origen").remove("inicio_max").remove("inicio_cuadrados")
+            .remove("inicio_enlace")
+            .apply()
+    }
+
+    // ---------------------------------------------------------------- enlaces multimedia y magnets
+
+    /**
+     * Qué hacer con un enlace o descarga de vídeo, audio o torrent:
+     * 0 preguntar cada vez, 1 en el navegador (como antes: se abre o descarga en Optimo), 2 siempre en otra app ([appMedio]).
+     */
+    var modoMedio: Int
+        get() = sp.getInt("medio_modo", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("medio_modo", v).apply()
+        }
+
+    /** Paquete de la app elegida para el modo 2 (por defecto Optimo Play). */
+    var appMedio: String
+        get() = sp.getString("medio_app", ReproductorExterno.PAQUETE) ?: ReproductorExterno.PAQUETE
+        set(v) {
+            sp.edit().putString("medio_app", v).apply()
+        }
+
+    /** Lo mismo para enlaces magnet: 0 preguntar, 1 automático (Optimo Play si está instalada; si no, el selector del sistema), 2 siempre en [appMagnet]. */
+    var modoMagnet: Int
+        get() = sp.getInt("magnet_modo", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("magnet_modo", v).apply()
+        }
+
+    var appMagnet: String
+        get() = sp.getString("magnet_app", ReproductorExterno.PAQUETE) ?: ReproductorExterno.PAQUETE
+        set(v) {
+            sp.edit().putString("magnet_app", v).apply()
+        }
 }
 
