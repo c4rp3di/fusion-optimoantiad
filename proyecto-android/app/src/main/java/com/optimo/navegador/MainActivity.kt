@@ -15,6 +15,7 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.net.http.SslError
@@ -55,8 +56,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.ArrayAdapter
 import android.widget.BaseAdapter
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ListView
 import android.widget.ProgressBar
@@ -87,7 +90,7 @@ class MainActivity : Activity() {
 
         /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
         private const val JS_SUENA =
-            "(function(){try{var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
+            "(function(){try{if(window.__optimoMudo)return 0;var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
                 "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
 
         /** Estado de los medios y registro de eventos (pause/play/resize) que anota segundo_plano.js. */
@@ -120,6 +123,7 @@ class MainActivity : Activity() {
     private lateinit var paleta: Paleta
     private lateinit var ajustes: Ajustes
     private lateinit var anuncios: MotorAnuncios
+    private lateinit var silenciador: Silenciador
     private lateinit var agenteDev: AgenteDev
     private lateinit var herramientas: PanelDev
     private lateinit var marcadores: Marcadores
@@ -156,6 +160,7 @@ class MainActivity : Activity() {
     private lateinit var btnRecargar: TextView
     private lateinit var btnMarcador: TextView
     private lateinit var btnPestanas: TextView
+    private lateinit var btnAltavoz: TextView
     private lateinit var barraSuperior: LinearLayout
     private lateinit var borrarTexto: TextView
     private lateinit var barraInferior: LinearLayout
@@ -182,6 +187,7 @@ class MainActivity : Activity() {
         ajustes = Ajustes(this)
         borrarPerfilPrivado()
         anuncios = MotorAnuncios(this, ajustes)
+        silenciador = Silenciador(this)
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         ListasManager.iniciar(this, ajustes)
@@ -312,6 +318,10 @@ class MainActivity : Activity() {
             val cb = object : android.media.AudioManager.AudioPlaybackCallback() {
                 override fun onPlaybackConfigChanged(configs: MutableList<android.media.AudioPlaybackConfiguration>?) {
                     if (am.isMusicActive) ultimoAudioMs = android.os.SystemClock.uptimeMillis()
+                    // Empieza o termina algún audio: se actualiza el altavoz de la barra (y otra vez algo después,
+                    // porque al saltar el aviso la página puede no haber marcado aún el vídeo como reproduciéndose).
+                    comprobarSuena()
+                    manejadorSonando.postDelayed({ comprobarSuena() }, 900L)
                 }
             }
             am.registerAudioPlaybackCallback(cb, Handler(Looper.getMainLooper()))
@@ -673,6 +683,8 @@ class MainActivity : Activity() {
         candado = TextView(this)
         candado.textSize = 16f
         candado.gravity = Gravity.CENTER
+        candado.isClickable = true
+        candado.setOnClickListener { mostrarInfoSitio() }
         barraSup.addView(candado, LinearLayout.LayoutParams(34.dp(), ViewGroup.LayoutParams.WRAP_CONTENT))
 
         omnibox = EditText(this)
@@ -727,6 +739,10 @@ class MainActivity : Activity() {
             FrameLayout.LayoutParams(36.dp(), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END or Gravity.CENTER_VERTICAL)
         )
         barraSup.addView(cajaOmnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
+        // Altavoz: solo aparece si la pestaña suena o está silenciada (tocar para silenciar / activar el sonido)
+        btnAltavoz = boton("🔊", 17f) { actual?.let { alternarSilencio(it) } }
+        btnAltavoz.visibility = View.GONE
+        barraSup.addView(btnAltavoz, LinearLayout.LayoutParams(38.dp(), 40.dp()))
         // Marcadores (junto al de pantalla completa, que queda en el extremo derecho)
         barraSup.addView(boton("🔖", 17f) { mostrarMarcadores() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
         barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
@@ -903,7 +919,58 @@ class MainActivity : Activity() {
         btnMarcador.text = if (guardado) "★" else "☆"
         btnMarcador.setTextColor(if (guardado) paleta.acento else paleta.texto)
         btnPestanas.text = pestanas.size.toString()
+        val verAltavoz = p.silenciada || p.suena
+        btnAltavoz.visibility = if (verAltavoz) View.VISIBLE else View.GONE
+        btnAltavoz.text = if (p.silenciada) "🔇" else "🔊"
+        btnAltavoz.setTextColor(if (p.silenciada) paleta.advertencia else paleta.texto)
         actualizarProgreso()
+    }
+
+    // ---------------------------------------------------------------- silenciar pestañas
+
+    /** Silencia o devuelve el sonido a una pestaña (se aplica a la página actual y a las siguientes de esa pestaña). */
+    private fun alternarSilencio(p: Pestana) {
+        p.silenciada = !p.silenciada
+        if (p.silenciada) p.suena = false
+        p.web?.let { silenciador.poner(it, p.silenciada) }
+        toast(if (p.silenciada) "Pestaña silenciada" else "Sonido activado")
+        if (p === actual) actualizarUi()
+        if (!p.silenciada) comprobarSuena()
+    }
+
+    /** Comprueba si la pestaña actual suena (por JavaScript) para mostrar u ocultar el altavoz de la barra. */
+    private fun comprobarSuena() {
+        val p = actual ?: return
+        val w = p.web ?: return
+        if (p.silenciada) return
+        w.evaluateJavascript(JS_SUENA) { r ->
+            val s = r == "1"
+            if (p.suena != s) {
+                p.suena = s
+                if (p === actual) actualizarUi()
+            }
+        }
+    }
+
+    /** Candado: estado de la conexión y acciones rápidas del sitio, entre ellas silenciar la pestaña. */
+    private fun mostrarInfoSitio() {
+        val p = actual ?: return
+        val estado = when {
+            p.privada -> "Pestaña privada"
+            p.inicio -> "Página de inicio de Optimo"
+            p.url.startsWith("https://") -> "Conexión segura (HTTPS)"
+            p.url.startsWith("http://") -> "Conexión sin cifrar (HTTP)"
+            else -> "Sin conexión"
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair(if (p.silenciada) "🔊 Activar el sonido de esta pestaña" else "🔇 Silenciar esta pestaña") {
+            alternarSilencio(p)
+        })
+        if (!p.inicio && p.url.isNotEmpty()) {
+            items.add(Pair("Copiar dirección") { copiar(p.url) })
+            items.add(Pair("Compartir página") { compartir(p.url) })
+        }
+        opciones(estado + (if (!p.inicio && p.url.isNotEmpty()) "\n" + Omnibox.hostDe(p.url) else ""), items)
     }
 
     private fun actualizarProgreso() {
@@ -998,16 +1065,11 @@ class MainActivity : Activity() {
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
-            if (ReproductorExterno.esMedio(url, mime) && ReproductorExterno.instalado(this)) {
-                val alternativas = ArrayList<Pair<String, () -> Unit>>()
-                alternativas.add(Pair("Reproducir en Optimo Play") {
-                    ReproductorExterno.enviar(this, url, null, p.url, ua)
-                    Unit
-                })
-                alternativas.add(Pair("Descargar") {
+            if (ReproductorExterno.esMedio(url, mime)) {
+                // Vídeo, audio o torrent: según Ajustes › «Enlaces multimedia y magnets», se descarga, se pregunta o va a otra app.
+                gestionarMedio(url, mime, p, ua, URLUtil.guessFileName(url, disposicion, mime), "Descargar") {
                     descargar(url, ua, disposicion, mime, p.privada)
-                })
-                opciones(URLUtil.guessFileName(url, disposicion, mime), alternativas)
+                }
             } else {
                 descargar(url, ua, disposicion, mime, p.privada)
             }
@@ -1020,6 +1082,7 @@ class MainActivity : Activity() {
         aplicarAjustesWeb(w)
         anuncios.instalar(w)
         agenteDev.instalar(w)
+        silenciador.instalar(w, p.silenciada)
         p.web = w
         return w
     }
@@ -1119,6 +1182,7 @@ class MainActivity : Activity() {
         }
         cerrarBusqueda()
         actualizarUi()
+        comprobarSuena()
         if (::herramientas.isInitialized) herramientas.alCambiarPestana()
     }
 
@@ -1225,18 +1289,53 @@ class MainActivity : Activity() {
         p.url = ""
         p.titulo = "Nueva pestaña"
         p.progreso = 100
-        webDe(p).loadDataWithBaseURL("optimo://inicio", paginaInicio(), "text/html", "utf-8", "optimo://inicio")
+        val w = webDe(p)
+        w.setBackgroundColor(Color.parseColor(coloresInicio().fondo))
+        w.loadDataWithBaseURL("optimo://inicio", paginaInicio(), "text/html", "utf-8", "optimo://inicio")
         if (p === actual) actualizarUi()
     }
 
     private fun paginaInicio(): String {
+        val max = ajustes.inicioMaxAccesos
         val atajos = ArrayList<Pair<String, String>>()
-        for (e in marcadores.todos()) {
-            atajos.add(Pair(e.titulo, e.url))
-            if (atajos.size >= 8) break
+        when (ajustes.inicioOrigen) {
+            1 -> atajos.addAll(ajustes.accesosPropios())
+            2 -> atajos.addAll(Paginas.ATAJOS_POR_DEFECTO)
+            else -> {
+                for (e in marcadores.todos()) {
+                    atajos.add(Pair(e.titulo, e.url))
+                    if (atajos.size >= max) break
+                }
+                if (atajos.isEmpty()) atajos.addAll(Paginas.ATAJOS_POR_DEFECTO)
+            }
         }
-        if (atajos.isEmpty()) atajos.addAll(Paginas.ATAJOS_POR_DEFECTO)
-        return Paginas.inicio(paleta.colores, Omnibox.motor(ajustes.motor), atajos)
+        val cfg = Paginas.ConfigInicio(
+            ajustes.inicioTitulo, ajustes.inicioSubtitulo, ajustes.inicioBuscador, ajustes.inicioAccesos,
+            max, ajustes.inicioCuadrados, ajustes.inicioEnlacePersonalizar
+        )
+        return Paginas.inicio(coloresInicio(), Omnibox.motor(ajustes.motor), atajos, cfg)
+    }
+
+    /** Colores de la página de inicio según el tema elegido (por defecto, los del sistema). */
+    private fun coloresInicio(): Colores {
+        return when (ajustes.inicioTema) {
+            "auto" -> paleta.colores
+            "personalizado" -> Paginas.coloresPersonalizados(
+                ajustes.inicioColorFondo, ajustes.inicioColorTexto, ajustes.inicioColorAcento, ajustes.inicioColorSuperficie
+            )
+            else -> Paginas.TEMAS_INICIO.firstOrNull { it.id == ajustes.inicioTema }?.colores ?: paleta.colores
+        }
+    }
+
+    /** Vuelve a pintar las pestañas que muestran la página de inicio (tras cambiar su configuración). */
+    private fun refrescarInicio() {
+        for (q in pestanas) {
+            val w = q.web ?: continue
+            if (q.inicio) {
+                w.setBackgroundColor(Color.parseColor(coloresInicio().fondo))
+                w.loadDataWithBaseURL("optimo://inicio", paginaInicio(), "text/html", "utf-8", "optimo://inicio")
+            }
+        }
     }
 
     private fun fijarUrl(p: Pestana, url: String?) {
@@ -1357,9 +1456,9 @@ class MainActivity : Activity() {
         add("Nueva pestaña privada") { nuevaPestana(null, true) }
         add("Buscar en la página") { mostrarBusqueda() }
         val medio = p.medioDetectado
-        if (medio != null && ReproductorExterno.instalado(this)) {
-            add("▶ Reproducir vídeo de la página (Optimo Play)") {
-                ReproductorExterno.enviar(this, medio, p.titulo, p.url, p.web?.settings?.userAgentString)
+        if (medio != null && AppsMedia.apps(this, medio, null).isNotEmpty()) {
+            add("▶ Reproducir vídeo de la página en otra app…") {
+                elegirAppMedio(medio, null, p, p.web?.settings?.userAgentString, p.titulo)
             }
         }
         add("Marcadores") { mostrarMarcadores() }
@@ -1390,6 +1489,8 @@ class MainActivity : Activity() {
             reinstalarAnuncios()
             mostrarAjustes()
         }
+        add("Pantalla de inicio…") { mostrarAjustesInicio() }
+        add("Enlaces multimedia y magnets…") { mostrarAjustesMedia() }
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
         add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
@@ -1423,6 +1524,166 @@ class MainActivity : Activity() {
         add("Borrar historial, caché y cookies") { confirmarBorrado() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
+    }
+
+    // ---------------------------------------------------------------- ajustes de la pantalla de inicio
+
+    private val NOMBRES_ORIGEN_INICIO = listOf("marcadores recientes", "lista propia", "predeterminados")
+
+    private fun nombreTemaInicio(): String =
+        Paginas.TEMAS_INICIO.firstOrNull { it.id == ajustes.inicioTema }?.nombre?.substringBefore(" (") ?: "Automático"
+
+    private fun mostrarAjustesInicio() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        fun cambiar(a: () -> Unit): () -> Unit = {
+            a()
+            refrescarInicio()
+            mostrarAjustesInicio()
+        }
+        add("Colores: " + nombreTemaInicio() + "…") { elegirTemaInicio() }
+        add("Mostrar accesos directos / marcadores: " + si(ajustes.inicioAccesos), cambiar {
+            ajustes.inicioAccesos = !ajustes.inicioAccesos
+        })
+        if (ajustes.inicioAccesos) {
+            add("Origen de los accesos: " + NOMBRES_ORIGEN_INICIO[ajustes.inicioOrigen], cambiar {
+                ajustes.inicioOrigen = (ajustes.inicioOrigen + 1) % 3
+            })
+            if (ajustes.inicioOrigen == 1) {
+                add("Editar mis accesos (" + ajustes.accesosPropios().size + ")…") { editarAccesosPropios() }
+            }
+            add("Cantidad de accesos: " + ajustes.inicioMaxAccesos, cambiar {
+                ajustes.inicioMaxAccesos = if (ajustes.inicioMaxAccesos >= 12) 4 else ajustes.inicioMaxAccesos + 4
+            })
+            add("Forma de los iconos: " + (if (ajustes.inicioCuadrados) "cuadrados" else "redondos"), cambiar {
+                ajustes.inicioCuadrados = !ajustes.inicioCuadrados
+            })
+        }
+        add("Mostrar el buscador: " + si(ajustes.inicioBuscador), cambiar {
+            ajustes.inicioBuscador = !ajustes.inicioBuscador
+        })
+        add("Título: " + (if (ajustes.inicioTitulo.isBlank()) "(ninguno)" else ajustes.inicioTitulo) + "…") {
+            pedirTextoOpcional("Título de la pantalla de inicio (vacío = sin título)", ajustes.inicioTitulo) { t ->
+                ajustes.inicioTitulo = t
+                refrescarInicio()
+                mostrarAjustesInicio()
+            }
+        }
+        add("Subtítulo: " + (if (ajustes.inicioSubtitulo.isBlank()) "(ninguno)" else ajustes.inicioSubtitulo) + "…") {
+            pedirTextoOpcional("Subtítulo (vacío = sin subtítulo)", ajustes.inicioSubtitulo) { t ->
+                ajustes.inicioSubtitulo = t
+                refrescarInicio()
+                mostrarAjustesInicio()
+            }
+        }
+        add("Enlace «Personalizar» al pie de la pantalla: " + si(ajustes.inicioEnlacePersonalizar), cambiar {
+            ajustes.inicioEnlacePersonalizar = !ajustes.inicioEnlacePersonalizar
+        })
+        add("Restablecer el aspecto original") {
+            ajustes.restablecerInicio()
+            refrescarInicio()
+            toast("Pantalla de inicio restablecida")
+            mostrarAjustesInicio()
+        }
+        opciones("Pantalla de inicio", items)
+    }
+
+    private fun elegirTemaInicio() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (t in Paginas.TEMAS_INICIO) {
+            val marca = if (t.id == ajustes.inicioTema) "● " else ""
+            items.add(Pair(marca + t.nombre) {
+                ajustes.inicioTema = t.id
+                refrescarInicio()
+                if (t.id == "personalizado") editarColoresInicio() else mostrarAjustesInicio()
+            })
+        }
+        opciones("Colores de la pantalla de inicio", items)
+    }
+
+    /** Los cuatro colores del tema personalizado, uno a uno, en hexadecimal (#RRGGBB). */
+    private fun editarColoresInicio() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun color(nombre: String, valor: String, guardar: (String) -> Unit) {
+            items.add(Pair(nombre + ": " + valor) {
+                pedirTexto(nombre + " (#RRGGBB)", valor) { t ->
+                    val h = Paginas.normalizarHex(t)
+                    if (h == null) {
+                        toast("Color no válido. Ejemplo: #1E88E5")
+                    } else {
+                        guardar(h)
+                        refrescarInicio()
+                    }
+                    editarColoresInicio()
+                }
+            })
+        }
+        color("Fondo", ajustes.inicioColorFondo) { ajustes.inicioColorFondo = it }
+        color("Texto", ajustes.inicioColorTexto) { ajustes.inicioColorTexto = it }
+        color("Acento (título y botones)", ajustes.inicioColorAcento) { ajustes.inicioColorAcento = it }
+        color("Iconos y buscador", ajustes.inicioColorSuperficie) { ajustes.inicioColorSuperficie = it }
+        items.add(Pair("Listo") { mostrarAjustesInicio() })
+        opciones("Colores personalizados", items)
+    }
+
+    /** Lista propia de accesos directos de la pantalla de inicio: añadir, añadir la página actual o quitar. */
+    private fun editarAccesosPropios() {
+        val lista = ajustes.accesosPropios()
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair("➕ Añadir un acceso…") {
+            pedirTexto("Dirección del sitio", "https://") { u ->
+                val url = normalizarUrl(u)
+                if (url == null) {
+                    toast("Dirección no válida")
+                    editarAccesosPropios()
+                } else {
+                    pedirTexto("Nombre", Omnibox.hostDe(url).removePrefix("www.")) { nombre ->
+                        ajustes.guardarAccesosPropios(ajustes.accesosPropios() + Pair(nombre, url))
+                        refrescarInicio()
+                        editarAccesosPropios()
+                    }
+                }
+            }
+        })
+        val p = actual
+        if (p != null && !p.inicio && p.url.startsWith("http")) {
+            items.add(Pair("➕ Añadir la página actual") {
+                val nombre = if (p.titulo.isNotBlank()) p.titulo else Omnibox.hostDe(p.url)
+                ajustes.guardarAccesosPropios(ajustes.accesosPropios() + Pair(nombre, p.url))
+                refrescarInicio()
+                editarAccesosPropios()
+            })
+        }
+        for ((i, e) in lista.withIndex()) {
+            items.add(Pair("✕ " + e.first + " — " + Omnibox.hostDe(e.second)) {
+                val nueva = ArrayList(ajustes.accesosPropios())
+                if (i < nueva.size) nueva.removeAt(i)
+                ajustes.guardarAccesosPropios(nueva)
+                refrescarInicio()
+                editarAccesosPropios()
+            })
+        }
+        items.add(Pair("Listo") { mostrarAjustesInicio() })
+        opciones("Mis accesos (toca uno para quitarlo)", items)
+    }
+
+    /** Como pedirTexto, pero admite dejar el campo vacío (para quitar el título o el subtítulo). */
+    private fun pedirTextoOpcional(titulo: String, inicial: String, alAceptar: (String) -> Unit) {
+        val campo = EditText(this)
+        campo.setSingleLine(true)
+        campo.setText(inicial)
+        campo.setSelectAllOnFocus(true)
+        val caja = FrameLayout(this)
+        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
+        caja.addView(campo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        nuevoDialogo()
+            .setTitle(titulo)
+            .setView(caja)
+            .setPositiveButton("Aceptar") { _, _ -> alAceptar(campo.text.toString().trim().take(80)) }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     private fun mostrarSegundoPlano() {
@@ -1597,10 +1858,13 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.7.1")
+            .setTitle("Optimo 1.9.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
+                    "• Silenciar pestañas: altavoz en la barra de direcciones (aparece si la pestaña suena o está silenciada), en el candado y en la lista de pestañas.\n" +
+                    "• Pantalla de inicio editable (Ajustes › Pantalla de inicio): colores, accesos o marcadores, buscador, título e iconos.\n" +
+                    "• Vídeos, audios, torrents y magnets: pregunta si abrirlos aquí o en otra app (Optimo Play u otras); se ajusta en Ajustes.\n" +
                     "• Reproducción en segundo plano (YouTube): sigue sonando con la pantalla bloqueada y, con un vídeo a pantalla completa, pasa a imagen en imagen al salir. Se activa o desactiva en Ajustes.\n" +
                     "• HTTPS primero. Si el sitio no lo ofrece, solo se abre por http si lo confirmas. Los certificados no válidos se bloquean (solo la red local permite continuar, tras confirmar).\n" +
                     "• Pestaña privada: perfil aislado (cookies, almacenamiento y caché propios, que se borran al cerrar la última pestaña privada), sin historial y sin capturas de pantalla.\n" +
@@ -2043,6 +2307,13 @@ class MainActivity : Activity() {
                 textos.addView(t1)
                 textos.addView(t2)
                 fila.addView(textos, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                if (p.silenciada || p.suena) {
+                    val altavoz = boton(if (p.silenciada) "🔇" else "🔊", 18f) {
+                        alternarSilencio(p)
+                        notifyDataSetChanged()
+                    }
+                    fila.addView(altavoz, LinearLayout.LayoutParams(44.dp(), 48.dp()))
+                }
                 val cerrar = boton("✕", 18f) {
                     cerrarPestana(p)
                     notifyDataSetChanged()
@@ -2052,6 +2323,17 @@ class MainActivity : Activity() {
             }
         }
         lista.setAdapter(adaptador)
+        // Qué pestañas suenan ahora: se pregunta a cada página y se refresca la lista según llegan las respuestas.
+        for (q in pestanas) {
+            if (q.silenciada) continue
+            q.web?.evaluateJavascript(JS_SUENA) { r ->
+                val s = r == "1"
+                if (q.suena != s) {
+                    q.suena = s
+                    adaptador.notifyDataSetChanged()
+                }
+            }
+        }
         lista.setOnItemClickListener { _, _, pos, _ ->
             dialogo?.dismiss()
             activar(pestanas[pos])
@@ -2103,10 +2385,13 @@ class MainActivity : Activity() {
             add("Abrir en pestaña nueva") { nuevaPestana(enlace, privada) }
             add("Copiar enlace") { copiar(enlace) }
             add("Compartir enlace") { compartir(enlace) }
-            if (ReproductorExterno.esMedio(enlace, null) && ReproductorExterno.instalado(this)) {
-                add("Reproducir en Optimo Play") {
-                    ReproductorExterno.enviar(this, enlace, null, p.url, web.settings.userAgentString)
+            if (ReproductorExterno.esMedio(enlace, null)) {
+                if (ReproductorExterno.instalado(this)) {
+                    add("Reproducir en Optimo Play") {
+                        ReproductorExterno.enviar(this, enlace, null, p.url, web.settings.userAgentString)
+                    }
                 }
+                add("Abrir con otra app…") { elegirAppMedio(enlace, null, p, web.settings.userAgentString, null) }
             }
         }
         if (imagen != null) {
@@ -2243,6 +2528,211 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- descargas, externos, intents
 
+    // ---------------------------------------------------------------- enlaces multimedia y magnets: ¿navegador u otra app?
+
+    /** Una opción del diálogo de apps; [accion] recibe si se marcó «Recordar mi elección». */
+    private class FilaApp(val etiqueta: String, val icono: Drawable?, val accion: (Boolean) -> Unit)
+
+    /**
+     * Decide qué hacer con un vídeo, audio, torrent o magnet según Ajustes › «Enlaces multimedia y magnets»:
+     * preguntar, hacerlo en el navegador (como antes) o enviarlo siempre a la app elegida (Optimo Play u otra).
+     * [enNavegador] es lo que ocurre «aquí» (null en magnets, que un navegador no puede abrir); [etiquetaNavegador] su texto.
+     */
+    private fun gestionarMedio(
+        url: String, mime: String?, p: Pestana, ua: String?, titulo: String?,
+        etiquetaNavegador: String?, enNavegador: (() -> Unit)?
+    ) {
+        val magnet = ReproductorExterno.esMagnet(url)
+        val modo = if (magnet) ajustes.modoMagnet else ajustes.modoMedio
+        val paqueteFijo = if (magnet) ajustes.appMagnet else ajustes.appMedio
+        val apps = AppsMedia.apps(this, url, mime)
+        val lanzar = { app: AppDestino ->
+            if (!AppsMedia.abrir(this, app, url, mime, null, p.url.ifEmpty { null }, ua)) toast("No se pudo abrir con " + app.etiqueta)
+        }
+
+        if (modo == 1) {
+            // Navegador / automático: el comportamiento de siempre.
+            if (!magnet) {
+                enNavegador?.invoke()
+            } else {
+                val play = apps.firstOrNull { it.paquete == ReproductorExterno.PAQUETE }
+                if (play != null) lanzar(play) else abrirExternoSistema(url)
+            }
+            return
+        }
+        if (modo == 2) {
+            val app = apps.firstOrNull { it.paquete == paqueteFijo }
+            if (app != null) {
+                lanzar(app)
+                return
+            }
+            // La app elegida ya no está instalada: se pregunta.
+        }
+        if (apps.isEmpty()) {
+            // Nada que ofrecer: no se pregunta.
+            if (enNavegador != null) enNavegador() else abrirExternoSistema(url)
+            return
+        }
+        val filas = ArrayList<FilaApp>()
+        if (enNavegador != null) {
+            filas.add(FilaApp(etiquetaNavegador ?: "Abrir en el navegador", null) { recordar ->
+                if (recordar) ajustes.modoMedio = 1
+                enNavegador()
+            })
+        }
+        for (a in apps) {
+            filas.add(FilaApp(a.etiqueta, a.icono) { recordar ->
+                if (recordar) {
+                    if (magnet) {
+                        ajustes.modoMagnet = 2
+                        ajustes.appMagnet = a.paquete
+                    } else {
+                        ajustes.modoMedio = 2
+                        ajustes.appMedio = a.paquete
+                    }
+                }
+                lanzar(a)
+            })
+        }
+        filas.add(FilaApp("Copiar enlace", null) { copiar(url) })
+        val cabecera = if (magnet) "Abrir enlace magnet con…"
+        else (titulo ?: URLUtil.guessFileName(url, null, mime)).ifBlank { "Abrir con…" }
+        dialogoApps(cabecera, filas, true)
+    }
+
+    /** Elección manual de app para un enlace o vídeo detectado (menú ⋮ y pulsación larga): sin «recordar» ni opción de navegador. */
+    private fun elegirAppMedio(url: String, mime: String?, p: Pestana, ua: String?, titulo: String?) {
+        val apps = AppsMedia.apps(this, url, mime)
+        if (apps.isEmpty()) {
+            toast("No hay ninguna aplicación para abrir esto")
+            return
+        }
+        val abrir = { a: AppDestino ->
+            if (!AppsMedia.abrir(this, a, url, mime, titulo, p.url.ifEmpty { null }, ua)) toast("No se pudo abrir con " + a.etiqueta)
+        }
+        if (apps.size == 1) {
+            abrir(apps[0])
+            return
+        }
+        val filas = ArrayList<FilaApp>()
+        for (a in apps) filas.add(FilaApp(a.etiqueta, a.icono) { abrir(a) })
+        filas.add(FilaApp("Copiar enlace", null) { copiar(url) })
+        dialogoApps("Abrir con…", filas, false)
+    }
+
+    /** Diálogo con una fila por app (icono y nombre) y, opcionalmente, la casilla «Recordar mi elección». */
+    private fun dialogoApps(titulo: String, filas: List<FilaApp>, conRecordar: Boolean) {
+        var dialogo: AlertDialog? = null
+        val casilla = CheckBox(this)
+        casilla.text = "Recordar mi elección (se cambia en Ajustes)"
+        casilla.textSize = 13f
+        casilla.setTextColor(paleta.tenue)
+        val lista = LinearLayout(this)
+        lista.setOrientation(LinearLayout.VERTICAL)
+        for (f in filas) {
+            val fila = LinearLayout(this)
+            fila.setOrientation(LinearLayout.HORIZONTAL)
+            fila.setGravity(Gravity.CENTER_VERTICAL)
+            fila.setPadding(20.dp(), 10.dp(), 20.dp(), 10.dp())
+            if (f.icono != null) {
+                val ic = ImageView(this)
+                ic.setImageDrawable(f.icono)
+                fila.addView(ic, LinearLayout.LayoutParams(36.dp(), 36.dp()))
+            }
+            val t = TextView(this)
+            t.text = f.etiqueta
+            t.textSize = 16f
+            t.setTextColor(paleta.texto)
+            t.setPadding(if (f.icono != null) 14.dp() else 0, 0, 0, 0)
+            fila.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            fila.isClickable = true
+            ripple(fila)
+            fila.setOnClickListener {
+                dialogo?.dismiss()
+                f.accion(conRecordar && casilla.isChecked)
+            }
+            lista.addView(fila, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val desplazable = android.widget.ScrollView(this)
+        desplazable.addView(lista)
+        val caja = LinearLayout(this)
+        caja.setOrientation(LinearLayout.VERTICAL)
+        caja.addView(desplazable, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        if (conRecordar) {
+            casilla.setPadding(0, 0, 0, 0)
+            val marco = FrameLayout(this)
+            marco.setPadding(20.dp(), 6.dp(), 20.dp(), 6.dp())
+            marco.addView(casilla)
+            caja.addView(marco, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        val d = nuevoDialogo()
+            .setTitle(titulo)
+            .setView(caja)
+            .setNegativeButton("Cancelar", null)
+            .create()
+        dialogo = d
+        d.show()
+    }
+
+    // ---------------------------------------------------------------- ajustes de enlaces multimedia y magnets
+
+    private fun descripcionModoMedia(magnet: Boolean): String {
+        val modo = if (magnet) ajustes.modoMagnet else ajustes.modoMedio
+        val paquete = if (magnet) ajustes.appMagnet else ajustes.appMedio
+        return when (modo) {
+            0 -> "preguntar cada vez"
+            1 -> if (magnet) "automático (Optimo Play si está instalada)" else "en el navegador"
+            else -> "siempre en " + (AppsMedia.etiquetaDe(this, paquete) ?: "una app (no instalada: se preguntará)")
+        }
+    }
+
+    private fun mostrarAjustesMedia() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair("Vídeo, audio y torrents: " + descripcionModoMedia(false)) { elegirModoMedia(false) })
+        items.add(Pair("Enlaces magnet: " + descripcionModoMedia(true)) { elegirModoMedia(true) })
+        opciones("Enlaces multimedia y magnets", items)
+    }
+
+    private fun elegirModoMedia(magnet: Boolean) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        val modo = if (magnet) ajustes.modoMagnet else ajustes.modoMedio
+        fun fijar(m: Int) {
+            if (magnet) ajustes.modoMagnet = m else ajustes.modoMedio = m
+            mostrarAjustesMedia()
+        }
+        items.add(Pair((if (modo == 0) "● " else "") + "Preguntar cada vez") { fijar(0) })
+        items.add(Pair(
+            (if (modo == 1) "● " else "") +
+                (if (magnet) "Automático (Optimo Play si está instalada; si no, el selector del sistema)"
+                else "En el navegador (abrir o descargar aquí, como antes)")
+        ) { fijar(1) })
+        items.add(Pair((if (modo == 2) "● " else "") + "Siempre en una app…") { elegirAppFija(magnet) })
+        opciones(if (magnet) "Enlaces magnet" else "Vídeo, audio y torrents", items)
+    }
+
+    private fun elegirAppFija(magnet: Boolean) {
+        val apps = AppsMedia.appsGenericas(this, magnet)
+        if (apps.isEmpty()) {
+            toast("No hay aplicaciones compatibles instaladas")
+            mostrarAjustesMedia()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (a in apps) {
+            items.add(Pair(a.etiqueta) {
+                if (magnet) {
+                    ajustes.modoMagnet = 2
+                    ajustes.appMagnet = a.paquete
+                } else {
+                    ajustes.modoMedio = 2
+                    ajustes.appMedio = a.paquete
+                }
+                mostrarAjustesMedia()
+            })
+        }
+        opciones("Siempre abrir con…", items)
+    }
+
     private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false) {
         if (!(url.startsWith("http://") || url.startsWith("https://"))) {
             toast("Este tipo de descarga no es compatible")
@@ -2282,7 +2772,19 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Enlaces que salen del navegador. Los magnet pasan por la decisión de Ajustes (preguntar / app fija / automático). */
     private fun abrirExterno(url: String) {
+        if (ReproductorExterno.esMagnet(url)) {
+            val p = actual
+            if (p != null) {
+                gestionarMedio(url, null, p, null, null, null, null)
+                return
+            }
+        }
+        abrirExternoSistema(url)
+    }
+
+    private fun abrirExternoSistema(url: String) {
         try {
             val intent = if (url.startsWith("intent:")) {
                 Intent.parseUri(url, Intent.URI_INTENT_SCHEME)
@@ -2453,6 +2955,17 @@ class MainActivity : Activity() {
             val uri = request.url
             val esquema = uri.scheme?.lowercase() ?: return false
             if (esquema == "http" || esquema == "https") {
+                // Enlace tocado a un vídeo/audio/torrent: según Ajustes se abre aquí, se pregunta o va a otra app.
+                if (request.isForMainFrame && request.hasGesture() && ajustes.modoMedio != 1) {
+                    val u = uri.toString()
+                    if (ReproductorExterno.esMedio(u, null)) {
+                        // loadUrl no vuelve a pasar por aquí, así que «abrir en el navegador» no pregunta dos veces.
+                        gestionarMedio(u, null, p, view.settings.userAgentString, null, "Abrir en el navegador") {
+                            view.post { cargarUrl(p, view, u, true) }
+                        }
+                        return true
+                    }
+                }
                 val host = (uri.host ?: "").lowercase()
                 if (esquema == "http" && request.isForMainFrame &&
                     !httpPermitido.contains(host) && !Omnibox.esLocal(host)
@@ -2462,11 +2975,16 @@ class MainActivity : Activity() {
                 }
                 return false
             }
+            if (esquema == "optimo") {
+                if (uri.toString() == Paginas.URL_PERSONALIZAR) mostrarAjustesInicio()
+                return true
+            }
             if (esquema == "about" || esquema == "blob" || esquema == "data" || esquema == "javascript") return false
             if (esquema == "file" || esquema == "content") return true
-            if (esquema == "magnet" && request.hasGesture() &&
-                ReproductorExterno.enviar(this@MainActivity, uri.toString(), null, null, null)
-            ) return true
+            if (esquema == "magnet") {
+                if (request.hasGesture()) gestionarMedio(uri.toString(), null, p, null, null, null, null)
+                return true
+            }
             if (request.hasGesture()) abrirExterno(uri.toString())
             return true
         }
@@ -2497,12 +3015,14 @@ class MainActivity : Activity() {
             super.onPageStarted(view, url, favicon)
             if (view != null) anuncios.alEmpezar(view, url)
             if (view != null) agenteDev.alEmpezar(view)
+            if (view != null) silenciador.alEmpezar(view, p.silenciada)
             p.dev.limpiar()
             if (p === actual && ::herramientas.isInitialized) herramientas.alNavegar()
             p.progreso = 0
             p.bloqueados.set(0)
             p.medioDetectado = null
             fijarUrl(p, url)
+            if (view != null && !p.inicio) view.setBackgroundColor(paleta.fondo)
             if (p === actual) actualizarUi()
         }
 
