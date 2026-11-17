@@ -1550,6 +1550,7 @@ class MainActivity : Activity() {
             mostrarAjustes()
         }
         add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
+        add("Lectura y voz…") { mostrarAjustesLectura() }
         add("Privacidad y datos…") { mostrarPrivacidad() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
@@ -2201,7 +2202,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.11.1")
+            .setTitle("Optimo 1.11.2")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -3043,6 +3044,85 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------------------------------------------------------------- ajustes de lectura y voz
+
+    private fun factor(v: Int): String = String.format(java.util.Locale.getDefault(), "%.1f×", v / 100.0)
+
+    private fun elegirNumero(titulo: String, nombres: Array<String>, valores: IntArray, alElegir: (Int) -> Unit) {
+        nuevoDialogo()
+            .setTitle(titulo)
+            .setItems(nombres) { _, i ->
+                alElegir(valores[i])
+                mostrarAjustesLectura()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesLectura() }
+            .setOnCancelListener { mostrarAjustesLectura() }
+            .show()
+    }
+
+    /** Ajustes › Lectura y voz: voz del modo lectura y aspecto por defecto de la vista de lectura. */
+    private fun mostrarAjustesLectura() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Velocidad de la voz: " + factor(ajustes.vozVelocidad)) {
+            elegirNumero("Velocidad de la voz", arrayOf("0,6×", "0,8×", "1,0× (normal)", "1,2×", "1,5×", "2,0×"), intArrayOf(60, 80, 100, 120, 150, 200)) {
+                ajustes.vozVelocidad = it
+            }
+        }
+        add("Tono de la voz: " + factor(ajustes.vozTono)) {
+            elegirNumero("Tono de la voz", arrayOf("Grave (0,8×)", "Normal (1,0×)", "Agudo (1,2×)"), intArrayOf(80, 100, 120)) {
+                ajustes.vozTono = it
+            }
+        }
+        add("Probar la voz") {
+            configurarVoz()
+            lector.alTerminar = { }
+            lector.leer("Hola. Así suena la lectura en voz alta de Optimo.", "")
+            mostrarAjustesLectura()
+        }
+        add("Voz e idioma: ajustes de Android…") {
+            try {
+                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                } catch (e2: Exception) {
+                    toast("No se pudieron abrir los ajustes de voz")
+                }
+            }
+        }
+        add("Tamaño de letra del modo lectura: " + ajustes.lecturaTam) {
+            elegirNumero("Tamaño de letra", arrayOf("Pequeña (16)", "Normal (19)", "Grande (24)", "Muy grande (30)"), intArrayOf(16, 19, 24, 30)) {
+                ajustes.lecturaTam = it
+            }
+        }
+        val temas = arrayOf("Automático (según el modo del sistema)", "Claro", "Sepia", "Oscuro", "Negro")
+        val claves = arrayOf("", "claro", "sepia", "oscuro", "negro")
+        val temaActual = claves.indexOf(ajustes.lecturaTema).coerceAtLeast(0)
+        add("Fondo del modo lectura: " + temas[temaActual].substringBefore(" (")) {
+            nuevoDialogo()
+                .setTitle("Fondo del modo lectura")
+                .setItems(temas) { _, i ->
+                    ajustes.lecturaTema = claves[i]
+                    mostrarAjustesLectura()
+                }
+                .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesLectura() }
+                .setOnCancelListener { mostrarAjustesLectura() }
+                .show()
+        }
+        add("Tipo de letra: " + (if (ajustes.lecturaFuente == "sans") "sin serifas" else "con serifas")) {
+            ajustes.lecturaFuente = if (ajustes.lecturaFuente == "sans") "serif" else "sans"
+            mostrarAjustesLectura()
+        }
+        add("Interlineado: " + arrayOf("compacto", "normal", "amplio")[ajustes.lecturaInter]) {
+            ajustes.lecturaInter = (ajustes.lecturaInter + 1) % 3
+            mostrarAjustesLectura()
+        }
+        opciones("Lectura y voz", items)
+    }
+
     // ---------------------------------------------------------------- modo lectura
 
     private fun abrirModoLectura(p: Pestana) {
@@ -3080,6 +3160,18 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Pone al lector la velocidad y el tono de Ajustes y los avisos de fin y de fallo. */
+    private fun configurarVoz() {
+        lector.velocidad = ajustes.vozVelocidad / 100f
+        lector.tono = ajustes.vozTono / 100f
+        lector.alFallo = { motivo -> toast(motivo) }
+        lector.alTerminar = {
+            val q = pestanaVoz
+            pestanaVoz = null
+            if (q != null) marcarVoz(q, false)
+        }
+    }
+
     private fun marcarVoz(p: Pestana, activa: Boolean) {
         p.web?.evaluateJavascript("window.__optimoLectura&&window.__optimoLectura.voz(" + activa + ")", null)
     }
@@ -3109,11 +3201,7 @@ class MainActivity : Activity() {
                 toast("No hay texto para leer")
             } else {
                 pestanaVoz = p
-                lector.alTerminar = {
-                    val q = pestanaVoz
-                    pestanaVoz = null
-                    if (q != null) marcarVoz(q, false)
-                }
+                configurarVoz()
                 lector.leer(texto, idioma)
                 marcarVoz(p, true)
             }
