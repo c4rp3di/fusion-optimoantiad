@@ -124,6 +124,7 @@ class MainActivity : Activity() {
     private lateinit var ajustes: Ajustes
     private lateinit var anuncios: MotorAnuncios
     private lateinit var silenciador: Silenciador
+    private val manejadorPrincipal = Handler(Looper.getMainLooper())
     private lateinit var agenteDev: AgenteDev
     private lateinit var herramientas: PanelDev
     private lateinit var marcadores: Marcadores
@@ -1129,7 +1130,7 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun crearPestana(privada: Boolean, url: String?, cargada: Boolean): Pestana? {
+    private fun crearPestana(privada: Boolean, url: String?, cargada: Boolean, activarYa: Boolean = true): Pestana? {
         if (privada && !perfilesOk) {
             toast("Tu WebView no admite pestañas privadas aisladas. Actualiza «Android System WebView».")
             return null
@@ -1143,7 +1144,7 @@ class MainActivity : Activity() {
         p.pendiente = url
         p.inicio = (url == null && !cargada)
         pestanas.add(p)
-        activar(p)
+        if (activarYa) activar(p)
         return p
     }
 
@@ -1468,14 +1469,27 @@ class MainActivity : Activity() {
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
+        if (!p.inicio && p.url.startsWith("http")) {
+            val ok = ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))
+            add("Emergentes y redirecciones en este sitio: " + (if (ok) "permitidas" else "bloqueadas")) {
+                if (ajustes.emergentes == 2) {
+                    toast("Están permitidas en todos los sitios (Ajustes › Ventanas emergentes)")
+                } else {
+                    ajustes.permitirEmergentes(Omnibox.hostDe(p.url), !ok)
+                    toast(if (ok) "Bloqueadas en este sitio" else "Permitidas en este sitio")
+                }
+            }
+        }
         add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
         add("Ir a la página de inicio") { mostrarInicio(p) }
         add("Descargas") { abrirDescargas() }
         add("Ajustes") { mostrarAjustes() }
         add("Cerrar todas las pestañas") { cerrarTodas() }
-        val bloq = p.bloqueados.get()
-        val titulo = if (ajustes.bloquearAnuncios) "Bloqueados en esta página: $bloq" else null
-        opciones(titulo, items)
+        val partes = ArrayList<String>()
+        if (ajustes.bloquearAnuncios) partes.add("Bloqueados en esta página: " + p.bloqueados.get())
+        val em = p.emergentesBloqueados.get()
+        if (em > 0) partes.add("Emergentes y redirecciones bloqueadas: $em")
+        opciones(if (partes.isEmpty()) null else partes.joinToString("\n"), items)
     }
 
     private fun mostrarAjustes() {
@@ -1491,6 +1505,7 @@ class MainActivity : Activity() {
         }
         add("Pantalla de inicio…") { mostrarAjustesInicio() }
         add("Enlaces multimedia y magnets…") { mostrarAjustesMedia() }
+        add("Ventanas emergentes y redirecciones…") { mostrarAjustesEmergentes() }
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
         add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
@@ -1524,6 +1539,130 @@ class MainActivity : Activity() {
         add("Borrar historial, caché y cookies") { confirmarBorrado() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
+    }
+
+    // ---------------------------------------------------------------- ventanas emergentes y redirecciones
+
+    /** Dominio «base» aproximado (sin lista de sufijos públicos): example.com, example.co.uk. Las IP se comparan enteras. */
+    private fun dominioBase(host: String): String {
+        val h = host.lowercase().trimEnd('.')
+        val partes = h.split('.')
+        if (partes.size <= 2 || partes.all { x -> x.isNotEmpty() && x.all { c -> c.isDigit() } }) return h
+        val ult = partes[partes.size - 1]
+        val pen = partes[partes.size - 2]
+        val n = if (ult.length == 2 && pen.length <= 3) 3 else 2
+        return partes.takeLast(n).joinToString(".")
+    }
+
+    private fun mismoSitio(a: String, b: String): Boolean = dominioBase(a) == dominioBase(b)
+
+    /** La emergente oculta pasa el control: se muestra. */
+    private fun mostrarEmergente(q: Pestana) {
+        if (!q.oculta || !pestanas.contains(q)) return
+        q.oculta = false
+        activar(q)
+    }
+
+    /** Cierra una emergente bloqueada y devuelve a la pestaña de origen. Se puede llamar desde cualquier hilo. */
+    private fun cerrarEmergente(q: Pestana) {
+        if (q.cerrando) return
+        q.cerrando = true
+        val origen = q.abiertaPor
+        origen?.emergentesBloqueados?.incrementAndGet()
+        manejadorPrincipal.post {
+            if (!pestanas.contains(q)) return@post
+            val eraActual = q === actual
+            q.oculta = false
+            cerrarPestana(q)
+            if (eraActual && origen != null && pestanas.contains(origen)) activar(origen)
+            toast("Pestaña emergente bloqueada")
+            if (origen === actual) actualizarUi()
+        }
+    }
+
+    /**
+     * Vigila una emergente no confiable en sus primeros segundos: se cierra si va a un dominio de anuncios o, en modo estricto,
+     * a un sitio distinto del enlace que se tocó. Devuelve true si se ha cerrado. Si la dirección pasa, se muestra la pestaña.
+     * Se llama desde el hilo de red (shouldInterceptRequest) y desde el principal.
+     */
+    private fun vigilarEmergente(q: Pestana, uri: Uri): Boolean {
+        if (android.os.SystemClock.uptimeMillis() - q.nacidoMs > 15000L) return false
+        val host = (uri.host ?: "").lowercase()
+        if (host.isEmpty()) return false
+        val anuncio = ajustes.bloquearAnuncios && AdBlock.bloquea(host)
+        val esperado = q.enlaceEsperado
+        val otroSitio = esperado != null && !mismoSitio(host, esperado)
+        if (anuncio || otroSitio) {
+            cerrarEmergente(q)
+            return true
+        }
+        q.enlaceEsperado = null
+        if (q.oculta) manejadorPrincipal.post { mostrarEmergente(q) }
+        return false
+    }
+
+    /**
+     * Navegación de la propia pestaña que inicia la página (no tú): se bloquea si va a un dominio de anuncios o, sin que hayas
+     * tocado nada en 5 s, a otro sitio. Los redirects HTTP normales (acortadores, inicio de sesión) y los sitios con permiso pasan.
+     */
+    private fun bloquearNavegacionAutomatica(p: Pestana, uri: Uri, request: WebResourceRequest): Boolean {
+        if (!ajustes.bloquearRedirecciones || request.isRedirect) return false
+        if (p.inicio || p.url.isEmpty()) return false
+        val host = (uri.host ?: "").lowercase()
+        if (host.isEmpty()) return false
+        if (ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))) return false
+        val actualHost = Omnibox.hostDe(p.url).lowercase()
+        val aAnuncio = ajustes.bloquearAnuncios && !mismoSitio(host, actualHost) && AdBlock.bloquea(host)
+        val sinTocar = !request.hasGesture() && !mismoSitio(host, actualHost) &&
+            android.os.SystemClock.uptimeMillis() - p.toqueMs > 5000L
+        if (!aAnuncio && !sinTocar) return false
+        p.emergentesBloqueados.incrementAndGet()
+        toast(if (aAnuncio) "Redirección a anuncios bloqueada" else "Redirección automática bloqueada (" + host + ")")
+        if (p === actual) actualizarUi()
+        return true
+    }
+
+    private fun mostrarAjustesEmergentes() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        val modos = listOf(
+            "Bloquear las de anuncios (recomendado)",
+            "Estricto: solo si tocas un enlace",
+            "Permitir todas (como antes)"
+        )
+        items.add(Pair("Pestañas emergentes: " + modos[ajustes.emergentes]) { elegirModoEmergentes() })
+        items.add(Pair("Bloquear redirecciones automáticas: " + si(ajustes.bloquearRedirecciones)) {
+            ajustes.bloquearRedirecciones = !ajustes.bloquearRedirecciones
+            mostrarAjustesEmergentes()
+        })
+        items.add(Pair("Sitios con permiso (" + ajustes.emergentesPermitidos().size + ")…") { editarSitiosEmergentes() })
+        opciones("Ventanas emergentes y redirecciones", items)
+    }
+
+    private fun elegirModoEmergentes() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun modo(n: Int, texto: String) {
+            items.add(Pair((if (ajustes.emergentes == n) "● " else "") + texto) {
+                ajustes.emergentes = n
+                mostrarAjustesEmergentes()
+            })
+        }
+        modo(0, "Bloquear las de anuncios (recomendado): cierra las pestañas que van a dominios de las listas y limita a una por toque y cada 4 s")
+        modo(1, "Estricto: solo se abren si tocas un enlace y la pestaña va a ese mismo sitio (puede romper algún inicio de sesión)")
+        modo(2, "Permitir todas (como antes de 1.9.1)")
+        opciones("Pestañas emergentes", items)
+    }
+
+    private fun editarSitiosEmergentes() {
+        val sitios = ajustes.emergentesPermitidos().sorted()
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (h in sitios) {
+            items.add(Pair("✕ " + h) {
+                ajustes.permitirEmergentes(h, false)
+                editarSitiosEmergentes()
+            })
+        }
+        items.add(Pair("Listo") { mostrarAjustesEmergentes() })
+        opciones(if (sitios.isEmpty()) "Ningún sitio con permiso (se añaden desde el menú ⋮ de cada página)" else "Sitios con permiso (toca uno para quitarlo)", items)
     }
 
     // ---------------------------------------------------------------- ajustes de la pantalla de inicio
@@ -1858,10 +1997,11 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.9.0")
+            .setTitle("Optimo 1.9.1")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
+                    "• Ventanas emergentes: cierra las pestañas de anuncios, limita una por toque y bloquea redirecciones automáticas (Ajustes › Ventanas emergentes y redirecciones; por sitio desde el menú ⋮).\n" +
                     "• Silenciar pestañas: altavoz en la barra de direcciones (aparece si la pestaña suena o está silenciada), en el candado y en la lista de pestañas.\n" +
                     "• Pantalla de inicio editable (Ajustes › Pantalla de inicio): colores, accesos o marcadores, buscador, título e iconos.\n" +
                     "• Vídeos, audios, torrents y magnets: pregunta si abrirlos aquí o en otra app (Optimo Play u otras); se ajusta en Ajustes.\n" +
@@ -2411,6 +2551,7 @@ class MainActivity : Activity() {
         if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
             p.toqueX = ev.x
             p.toqueY = ev.y
+            p.toqueMs = android.os.SystemClock.uptimeMillis()
         }
         if (!p.eligiendo) return false
         when (ev.actionMasked) {
@@ -2966,6 +3107,13 @@ class MainActivity : Activity() {
                         return true
                     }
                 }
+                if (request.isForMainFrame) {
+                    if (p.esEmergente && !p.libre) {
+                        if (vigilarEmergente(p, uri)) return true
+                    } else if (!p.esEmergente && bloquearNavegacionAutomatica(p, uri, request)) {
+                        return true
+                    }
+                }
                 val host = (uri.host ?: "").lowercase()
                 if (esquema == "http" && request.isForMainFrame &&
                     !httpPermitido.contains(host) && !Omnibox.esLocal(host)
@@ -2990,6 +3138,10 @@ class MainActivity : Activity() {
         }
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            if (request != null && request.isForMainFrame && p.esEmergente && !p.libre && vigilarEmergente(p, request.url)) {
+                // Emergente de anuncios: no llega a salir la petición.
+                return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
+            }
             if (request != null) {
                 val u = request.url.toString()
                 if (ReproductorExterno.esMedio(u, null) && !ReproductorExterno.esMagnet(u)) {
@@ -3020,6 +3172,7 @@ class MainActivity : Activity() {
             if (p === actual && ::herramientas.isInitialized) herramientas.alNavegar()
             p.progreso = 0
             p.bloqueados.set(0)
+            p.emergentesBloqueados.set(0)
             p.medioDetectado = null
             fijarUrl(p, url)
             if (view != null && !p.inicio) view.setBackgroundColor(paleta.fondo)
@@ -3189,8 +3342,47 @@ class MainActivity : Activity() {
             isUserGesture: Boolean,
             resultMsg: Message?
         ): Boolean {
-            if (!isUserGesture || resultMsg == null) return false
-            val nueva = crearPestana(p.privada, null, true) ?: return false
+            if (resultMsg == null) return false
+            if (!isUserGesture) {
+                // Una página que abre pestañas sin que toques nada: siempre bloqueado.
+                p.emergentesBloqueados.incrementAndGet()
+                return false
+            }
+            val libre = ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))
+            var enlace: String? = null
+            if (!libre) {
+                val ahora = android.os.SystemClock.uptimeMillis()
+                // Límite: una emergente por toque y como mucho una cada 4 s (las ráfagas de 3 o 4 pestañas son anuncios).
+                if ((p.toqueMs != 0L && p.emergenteDelToque == p.toqueMs) || ahora - p.ultimoEmergenteMs < 4000L) {
+                    p.emergentesBloqueados.incrementAndGet()
+                    toast("Pestaña emergente bloqueada")
+                    return false
+                }
+                if (ajustes.emergentes == 1) {
+                    // Estricto: tiene que ser un enlace que has tocado de verdad.
+                    val r = view?.hitTestResult
+                    val tipo = r?.type
+                    if (tipo != WebView.HitTestResult.SRC_ANCHOR_TYPE && tipo != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
+                        p.emergentesBloqueados.incrementAndGet()
+                        toast("Pestaña emergente bloqueada")
+                        return false
+                    }
+                    if (tipo == WebView.HitTestResult.SRC_ANCHOR_TYPE) enlace = Omnibox.hostDe(r?.extra ?: "").lowercase().ifEmpty { null }
+                }
+                p.emergenteDelToque = p.toqueMs
+                p.ultimoEmergenteMs = ahora
+            }
+            // Si no es de confianza, la pestaña nace oculta hasta ver su primera dirección (si es de anuncios se cierra sin parpadeos).
+            val nueva = crearPestana(p.privada, null, true, libre) ?: return false
+            nueva.esEmergente = true
+            nueva.abiertaPor = p
+            nueva.libre = libre
+            nueva.nacidoMs = android.os.SystemClock.uptimeMillis()
+            nueva.enlaceEsperado = enlace
+            if (!libre) {
+                nueva.oculta = true
+                manejadorPrincipal.postDelayed({ mostrarEmergente(nueva) }, 1500L)
+            }
             val transporte = resultMsg.obj as WebView.WebViewTransport
             transporte.webView = webDe(nueva)
             resultMsg.sendToTarget()
