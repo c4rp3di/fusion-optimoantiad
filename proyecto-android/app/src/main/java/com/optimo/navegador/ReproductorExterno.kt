@@ -30,6 +30,22 @@ object ReproductorExterno {
 
     fun esMagnet(url: String): Boolean = url.startsWith("magnet:", true)
 
+    private val HOSTS_EXCLUIDOS = listOf("youtube.com", "youtu.be", "youtube-nocookie.com", "googlevideo.com")
+
+    /** ¿Merece la pena recordar este recurso como «vídeo de la página»? Descarta YouTube (flujos firmados) y sonidos de interfaz (/s/...). */
+    fun esDetectable(url: String): Boolean {
+        if (esMagnet(url)) return true
+        return try {
+            val u = Uri.parse(url)
+            val host = (u.host ?: "").lowercase()
+            if (HOSTS_EXCLUIDOS.any { host == it || host.endsWith(".$it") }) return false
+            if ((u.path ?: "").startsWith("/s/")) return false
+            true
+        } catch (e: Exception) {
+            true
+        }
+    }
+
     fun esManifiesto(url: String): Boolean {
         val r = url.substringBefore('?').substringBefore('#').lowercase()
         return r.endsWith(".m3u8") || r.endsWith(".mpd")
