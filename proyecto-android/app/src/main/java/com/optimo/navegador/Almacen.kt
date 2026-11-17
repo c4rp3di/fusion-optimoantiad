@@ -433,5 +433,64 @@ class Ajustes(contexto: Context) {
         set(v) {
             sp.edit().putString("magnet_app", v).apply()
         }
+
+    // ---------------------------------------------------------------- privacidad y datos guardados
+
+    /** Guardar el historial de las pestañas normales (las privadas nunca lo guardan). */
+    var guardarHistorial: Boolean
+        get() = sp.getBoolean("guardar_historial", true)
+        set(v) {
+            sp.edit().putBoolean("guardar_historial", v).apply()
+        }
+
+    /** Recordar las pestañas abiertas para restaurarlas al reabrir Optimo. */
+    var guardarSesion: Boolean
+        get() = sp.getBoolean("guardar_sesion", true)
+        set(v) {
+            sp.edit().putBoolean("guardar_sesion", v).apply()
+        }
+
+    private fun claveSitio(host: String): String = host.lowercase().removePrefix("www.")
+
+    /** Permisos web que se dejaron concedidos «siempre» a un sitio: entradas «sitio|tipo» (tipo: camara, microfono, ubicacion). */
+    private fun permisosGuardados(): Set<String> = HashSet(sp.getStringSet("permisos_sitio", emptySet()) ?: emptySet())
+
+    fun permisoRecordado(host: String, tipo: String): Boolean {
+        val h = claveSitio(host)
+        return h.isNotEmpty() && permisosGuardados().contains(h + "|" + tipo)
+    }
+
+    fun recordarPermiso(host: String, tipo: String) {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return
+        val s = HashSet(permisosGuardados())
+        s.add(h + "|" + tipo)
+        sp.edit().putStringSet("permisos_sitio", s).apply()
+    }
+
+    fun quitarPermiso(host: String, tipo: String) {
+        val s = HashSet(permisosGuardados())
+        s.remove(claveSitio(host) + "|" + tipo)
+        sp.edit().putStringSet("permisos_sitio", s).apply()
+    }
+
+    /** Tipos de permiso que tiene guardados un sitio. */
+    fun permisosDe(host: String): List<String> {
+        val h = claveSitio(host)
+        val res = ArrayList<String>()
+        for (e in permisosGuardados()) {
+            if (e.substringBefore('|') == h) res.add(e.substringAfter('|'))
+        }
+        res.sort()
+        return res
+    }
+
+    fun sitiosConPermisos(): List<String> = permisosGuardados().map { it.substringBefore('|') }.distinct().sorted()
+
+    fun totalPermisos(): Int = permisosGuardados().size
+
+    fun quitarTodosPermisos() {
+        sp.edit().remove("permisos_sitio").apply()
+    }
 }
 
