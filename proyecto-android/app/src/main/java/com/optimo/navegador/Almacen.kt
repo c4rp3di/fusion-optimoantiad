@@ -366,6 +366,42 @@ class Ajustes(contexto: Context) {
             .apply()
     }
 
+    // ---------------------------------------------------------------- ventanas emergentes y redirecciones
+
+    /**
+     * Pestañas que abre una página por su cuenta: 0 bloquear las de anuncios (cierra las de dominios de las listas y limita a una
+     * por toque y cada pocos segundos), 1 estricto (solo si tocas un enlace y la pestaña va a ese mismo sitio), 2 permitir todas.
+     */
+    var emergentes: Int
+        get() = sp.getInt("emergentes", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("emergentes", v).apply()
+        }
+
+    /** Bloquear que la página te lleve sola a otro sitio (sin tocar nada) o a un dominio de anuncios. */
+    var bloquearRedirecciones: Boolean
+        get() = sp.getBoolean("redirecciones", true)
+        set(v) {
+            sp.edit().putBoolean("redirecciones", v).apply()
+        }
+
+    fun emergentesPermitidos(): Set<String> = HashSet(sp.getStringSet("emergentes_ok", emptySet()) ?: emptySet())
+
+    /** ¿Este sitio (o un dominio padre suyo) tiene permiso para abrir emergentes y redirigir? */
+    fun emergentesPermitidosEn(host: String): Boolean {
+        val h = host.lowercase().removePrefix("www.")
+        if (h.isEmpty()) return false
+        return emergentesPermitidos().any { h == it || h.endsWith("." + it) }
+    }
+
+    fun permitirEmergentes(host: String, permitir: Boolean) {
+        val h = host.lowercase().removePrefix("www.")
+        if (h.isEmpty()) return
+        val s = HashSet(emergentesPermitidos())
+        if (permitir) s.add(h) else s.removeAll { h == it || h.endsWith("." + it) }
+        sp.edit().putStringSet("emergentes_ok", s).apply()
+    }
+
     // ---------------------------------------------------------------- enlaces multimedia y magnets
 
     /**
