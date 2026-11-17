@@ -434,6 +434,34 @@ class Ajustes(contexto: Context) {
             sp.edit().putString("magnet_app", v).apply()
         }
 
+    // ---------------------------------------------------------------- modo lectura
+
+    var lecturaTam: Int
+        get() = sp.getInt("lectura_tam", 19).coerceIn(14, 32)
+        set(v) {
+            sp.edit().putInt("lectura_tam", v.coerceIn(14, 32)).apply()
+        }
+
+    /** claro, sepia, oscuro o negro; vacío = según el modo del sistema. */
+    var lecturaTema: String
+        get() = sp.getString("lectura_tema", "") ?: ""
+        set(v) {
+            if (v == "claro" || v == "sepia" || v == "oscuro" || v == "negro") sp.edit().putString("lectura_tema", v).apply()
+        }
+
+    var lecturaFuente: String
+        get() = if (sp.getString("lectura_fuente", "serif") == "sans") "sans" else "serif"
+        set(v) {
+            sp.edit().putString("lectura_fuente", if (v == "sans") "sans" else "serif").apply()
+        }
+
+    /** Interlineado: 0 compacto, 1 normal, 2 amplio. */
+    var lecturaInter: Int
+        get() = sp.getInt("lectura_inter", 1).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("lectura_inter", v.coerceIn(0, 2)).apply()
+        }
+
     // ---------------------------------------------------------------- privacidad y datos guardados
 
     /** Guardar el historial de las pestañas normales (las privadas nunca lo guardan). */
