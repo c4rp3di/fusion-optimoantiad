@@ -57,6 +57,8 @@ object ReproductorExterno {
             if (!titulo.isNullOrBlank()) i.putExtra("title", titulo)
             if (!referer.isNullOrBlank() && !esMagnet(url)) i.putExtra("referer", referer)
             if (!ua.isNullOrBlank() && !esMagnet(url)) i.putExtra("user_agent", ua)
+            // Tarea aparte: Optimo Play aparece como su propia tarjeta en Recientes y Optimo queda intacta para volver a ella.
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(i)
             true
         } catch (e: Exception) {
