@@ -216,3 +216,10 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - Si la voz sigue sin arrancar, ahora avisa con un mensaje (antes fallaba en silencio).
 - Nuevo **Ajustes › Lectura y voz…**: velocidad y tono de la voz, «Probar la voz», acceso a los ajustes de voz de Android (motor e idioma), y el aspecto por defecto del modo lectura (tamaño, fondo —incluido «automático»—, tipo de letra e interlineado).
 - Sin compilar ni probar en dispositivo.
+
+## 1.11.3 — Quitar capa que tapa la página
+
+- Menú ⋮ › **«Quitar capa que tapa la página»**: busca capas a pantalla completa (muros del tipo «desactiva tu bloqueador», modales, iframes fijos, también en Shadow DOM cerrado) y las lista. Puedes ocultarlas **solo ahora** o **siempre en este sitio** (queda como regla de ocultar) y desbloquea el desplazamiento si la página lo bloqueó (`overflow:hidden`). Lo guardado aparece en «Reglas de este sitio».
+- El selector de elementos de «Personalizar este sitio» ya no falla cuando lo que se toca es `html`/`body` pero hay elementos encima (usa la pila de elementos del punto).
+- Límite: si la página genera nombres de clase aleatorios en cada carga, la regla guardada puede no volver a coincidir; entonces hay que repetir «Solo ahora».
+- Probado en Chromium con muros simulados (capa fija que se recrea, Shadow DOM cerrado, iframe fijo); sin probar en la web real ni en dispositivo, y sin compilar el Kotlin.
