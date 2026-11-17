@@ -5,6 +5,10 @@ function(x,y,nivel){
     function cuenta(s){ try{ return document.querySelectorAll(s).length; }catch(e){ return 0; } }
     quitar();
     var el=document.elementFromPoint(x,y);
+    if(document.elementsFromPoint&&(!el||el===document.body||el===document.documentElement)){
+      var pila=document.elementsFromPoint(x,y);
+      for(var q=0;q<pila.length;q++){ if(pila[q]!==document.body&&pila[q]!==document.documentElement){ el=pila[q]; break; } }
+    }
     if(!el||el===document.body||el===document.documentElement) return null;
     for(var i=0;i<nivel;i++){
       var p=el.parentElement;
