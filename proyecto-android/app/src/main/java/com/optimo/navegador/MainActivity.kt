@@ -1477,6 +1477,7 @@ class MainActivity : Activity() {
             add("Compartir página") { compartir(p.url) }
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
             if (p.url.startsWith("http")) {
+                add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
                 add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
             }
@@ -2202,7 +2203,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.11.2")
+            .setTitle("Optimo 1.11.3")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -3121,6 +3122,93 @@ class MainActivity : Activity() {
             mostrarAjustesLectura()
         }
         opciones("Lectura y voz", items)
+    }
+
+    // ---------------------------------------------------------------- capas que tapan la página (muros anti-bloqueador, modales)
+
+    /** Busca capas a pantalla completa que tapan la página y permite ocultarlas ahora o siempre en este sitio. */
+    private fun quitarMuros(p: Pestana) {
+        val w = p.web
+        if (w == null || p.inicio) {
+            toast("Abre primero una página")
+            return
+        }
+        val paginaHost = (try { Uri.parse(w.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
+        val sitio = ReglasUsuario.clave(paginaHost)
+        if (sitio.isEmpty()) return
+        w.evaluateJavascript(anuncios.scriptMuros()) { crudo ->
+            var muros: org.json.JSONArray? = null
+            var scrollBloqueado = false
+            try {
+                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
+                if (v is String) {
+                    val o = org.json.JSONObject(v)
+                    muros = o.optJSONArray("muros")
+                    scrollBloqueado = o.optBoolean("scrollBloqueado")
+                }
+            } catch (e: Exception) {
+                muros = null
+            }
+            if (muros == null || muros.length() == 0) {
+                if (scrollBloqueado) {
+                    nuevoDialogo()
+                        .setTitle("No veo ninguna capa")
+                        .setMessage("La página tiene el desplazamiento bloqueado. ¿Quieres desbloquearlo?")
+                        .setPositiveButton("Desbloquear siempre aquí") { _, _ ->
+                            val css = "html,body{overflow:auto!important}"
+                            ReglasUsuario.agregarCss(sitio, "Desbloquear desplazamiento", css)
+                            reinstalarAnuncios()
+                            anuncios.aplicarCssAhora(w, css)
+                        }
+                        .setNeutralButton("Solo ahora") { _, _ ->
+                            anuncios.aplicarCssAhora(w, "html,body{overflow:auto!important}")
+                        }
+                        .setNegativeButton("Cancelar", null)
+                        .show()
+                } else {
+                    toast("No he encontrado ninguna capa que tape la página. Prueba «Elegir un elemento» en Personalizar este sitio")
+                }
+            } else {
+                mostrarMuros(w, sitio, muros, scrollBloqueado)
+            }
+        }
+    }
+
+    private fun mostrarMuros(w: WebView, sitio: String, muros: org.json.JSONArray, scrollBloqueado: Boolean) {
+        val n = muros.length()
+        val sels = ArrayList<String>()
+        val etiquetas = ArrayList<String>()
+        val marcadas = BooleanArray(n)
+        for (i in 0 until n) {
+            val m = muros.getJSONObject(i)
+            sels.add(m.optString("sel"))
+            val texto = m.optString("texto")
+            etiquetas.add(m.optString("tag") + " " + m.optInt("w") + "×" + m.optInt("h") + (if (texto.isNotEmpty()) " · «" + texto + "»" else ""))
+            marcadas[i] = m.optBoolean("fuerte")
+        }
+        fun aplicar(guardar: Boolean) {
+            var hechos = 0
+            for (i in 0 until n) {
+                if (!marcadas[i] || sels[i].isEmpty()) continue
+                hechos++
+                if (guardar) ReglasUsuario.agregarOcultar(sitio, sels[i])
+                anuncios.aplicarCssAhora(w, sels[i] + "{display:none!important}")
+            }
+            if (hechos > 0 || scrollBloqueado) {
+                val css = "html,body{overflow:auto!important}"
+                if (guardar) ReglasUsuario.agregarCss(sitio, "Desbloquear desplazamiento", css)
+                anuncios.aplicarCssAhora(w, css)
+            }
+            if (guardar) reinstalarAnuncios()
+            toast(if (hechos == 0) "No marcaste ninguna capa" else if (guardar) "Capas ocultas en $sitio. Se mantendrá en tus visitas" else "Capas ocultas hasta recargar")
+        }
+        nuevoDialogo()
+            .setTitle("Capas que tapan la página")
+            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
+            .setPositiveButton("Ocultar siempre aquí") { _, _ -> aplicar(true) }
+            .setNeutralButton("Solo ahora") { _, _ -> aplicar(false) }
+            .setNegativeButton("Cancelar", null)
+            .show()
     }
 
     // ---------------------------------------------------------------- modo lectura
