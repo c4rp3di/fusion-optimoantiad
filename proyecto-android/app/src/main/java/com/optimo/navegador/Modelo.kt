@@ -53,6 +53,12 @@ class Pestana(val id: Int, val privada: Boolean) {
     var toqueY: Float = 0f
     var eligiendo: Boolean = false
 
+    /** El modo «elegir» es para cualquier elemento de la página (ocultar o cambiar su apariencia), no solo anuncios. */
+    var eligiendoElemento: Boolean = false
+
+    /** La vista de modo lectura está abierta sobre esta página. */
+    var lectura: Boolean = false
+
     /** URL http original cuando se intento mejorar a https (para el respaldo si falla). */
     var mejoradoDesde: String? = null
 
