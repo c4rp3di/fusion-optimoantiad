@@ -181,3 +181,14 @@ Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
 - «Reproducir vídeo de la página en otra app…» ya no se ofrece con recursos de `youtube.com`, `youtu.be`, `youtube-nocookie.com` ni `googlevideo.com`, ni con rutas de interfaz `/s/...` (`ReproductorExterno.esDetectable`).
 - Servicio de segundo plano: bloqueo Wi-Fi `WIFI_MODE_FULL` (antes `FULL_LOW_LATENCY`/`FULL_HIGH_PERF`) y cierre tras ~80 s en pausa (antes ~5 min).
 - Sin compilar ni probar en dispositivo (igual que 1.9.1). Siguen pendientes: sondeo de tamaño de medios, espaciar scripts de vigilancia y prioridad del renderer.
+
+## 1.10.0 — Privacidad y datos
+
+Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y cookies»):
+- **Qué se guarda:** «Guardar historial» y «Guardar pestañas abiertas al cerrar» se pueden desactivar (al desactivarlos se ofrece borrar lo ya guardado; las pestañas privadas nunca guardan nada).
+- **Borrar por categoría:** historial, caché (muestra su tamaño), cookies y datos de sitios, o todo a la vez (también los permisos concedidos). Marcadores y reglas se conservan.
+- **Permisos por sitio:** al pedir cámara, micrófono o ubicación aparece un tercer botón «Siempre en este sitio» (no en pestañas privadas). Esos permisos se listan en «Permisos concedidos a sitios» y se pueden revocar uno a uno. Si Android aún no ha concedido el permiso a Optimo, se sigue pidiendo como antes.
+- **Por sitio:** menú ⋮ › «Privacidad de este sitio…»: revocar permisos, ver cuántas reglas de ocultar tiene y borrar sus cookies y almacenamiento local sin tocar los demás sitios (cookies del sitio y de su dominio base; es una limpieza «mejor esfuerzo»).
+- Sin gestión cookie a cookie (de momento; ya se pueden borrar todas de golpe).
+- **No se ha podido compilar ni probar en dispositivo.** Revisado a mano (llaves y paréntesis). Si Fusion da errores, pasa el log.
+- Próximo: exportar e importar la configuración (cifrada con contraseña propia; la clave del Keystore no sale del móvil).
