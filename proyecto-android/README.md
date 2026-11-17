@@ -25,7 +25,7 @@ proyecto y lo conserva: firma propia, distinta de cualquier otra app, estable en
 
 ## Estructura
 `app/src/main/java/com/optimo/navegador/`: `MainActivity.kt` (interfaz, pestañas, menus, clientes WebView),
-`Omnibox.kt`, `AdBlock.kt`, `Paginas.kt` (logica pura), `Almacen.kt` (marcadores, historial, ajustes), `AlmacenSeguro.kt` (cifrado local), `Marcadores.kt` (marcadores y carpetas), `Modelo.kt`, `ServicioSegundoPlano.kt` (reproducción con la pantalla bloqueada), `PanelDev.kt` / `DevAgente.kt` / `DevDatos.kt` (herramientas de desarrollo).
+`Omnibox.kt`, `Silenciador.kt` (silenciar pestañas), `AppsMedia.kt` (apps externas para multimedia/magnets), `AdBlock.kt`, `Paginas.kt` (logica pura), `Almacen.kt` (marcadores, historial, ajustes), `AlmacenSeguro.kt` (cifrado local), `Marcadores.kt` (marcadores y carpetas), `Modelo.kt`, `ServicioSegundoPlano.kt` (reproducción con la pantalla bloqueada), `PanelDev.kt` / `DevAgente.kt` / `DevDatos.kt` (herramientas de desarrollo).
 
 
 ## 1.6.0 — Integración con Optimo Play
@@ -131,6 +131,33 @@ Límites conocidos (frente al F12 de PC):
 - En páginas con CSP que prohíbe `eval`, el resultado de la consola se muestra como JSON sin formato.
 - **No se ha podido compilar ni probar en dispositivo** (no hay SDK de Android en el entorno de desarrollo): el agente JS sí se probó con Node, el
   código Kotlin está revisado a mano. Si Fusion da errores de compilación o algo no se comporta, pasa el log y se corrige.
+
+## 1.9.0 — Silenciar pestañas, pantalla de inicio editable y apps externas para multimedia
+
+**Silenciar pestañas** (`Silenciador.kt`, `assets/audio/silenciar.js`)
+- Altavoz 🔊/🔇 en la barra de direcciones (junto a 🔖): aparece solo si la pestaña suena o está silenciada; tocar alterna.
+- El candado ahora es un botón: «Silenciar esta pestaña / Activar el sonido», copiar dirección y compartir.
+- Lista de pestañas: altavoz en cada fila que suena o está silenciada.
+- El WebView no tiene «mute» propio: el script (inyectado al inicio de documento y en iframes) fuerza `muted` en `<video>`/`<audio>` (la página sigue viendo su
+  valor, y se respeta si ya estaba en mute al quitar el silencio) y pasa Web Audio por un GainNode a 0. El estado se aplica en vivo y a las páginas siguientes de la pestaña.
+- Límites: el silencio es por pestaña y no se guarda al cerrar la app; audio que no pasa por la página (p. ej. el vídeo nativo a pantalla completa de algunos sitios) puede escaparse.
+
+**Pantalla de inicio editable** — Ajustes › «Pantalla de inicio…» (o el enlace «⚙ Personalizar» al pie de la propia pantalla)
+- Colores: Automático, Claro, Oscuro, Negro (AMOLED), Océano, Bosque, Atardecer, Papel o Personalizado (fondo, texto, acento e iconos en #RRGGBB).
+- Quitar los accesos/marcadores, o elegir su origen: marcadores recientes, lista propia (añadir/quitar, también la página actual) o los predeterminados; 4, 8 o 12 accesos; iconos redondos o cuadrados.
+- Mostrar/ocultar el buscador, cambiar o quitar el título y el subtítulo, y «Restablecer el aspecto original».
+
+**Vídeo, audio, torrents y magnets** — Ajustes › «Enlaces multimedia y magnets…» (`AppsMedia.kt`)
+- Al tocar un enlace a vídeo/audio/m3u8/mpd/torrent, al descargarlo o al pulsar un magnet, Optimo pregunta: abrir en el navegador (como antes) u otra app
+  (Optimo Play primero, luego las apps del dispositivo que lo admitan; los navegadores no se listan). Casilla «Recordar mi elección».
+- Ajuste independiente para vídeo/audio/torrents (preguntar · en el navegador · siempre en la app X) y para magnets (preguntar · automático como antes · siempre en la app X).
+  Si la app fija se desinstala, vuelve a preguntar. Si no hay ninguna otra app, no pregunta y funciona como antes.
+- Pulsación larga en un enlace multimedia o magnet: «Abrir con otra app…»; menú ⋮ › «Reproducir vídeo de la página en otra app…».
+- Manifiesto: nuevas `<queries>` (visibilidad de paquetes) para encontrar esas apps.
+- Por defecto ambos ajustes están en «preguntar».
+
+**No se ha podido compilar ni probar en dispositivo** (sin SDK de Android aquí): el script de silencio se probó con Node y simulaciones del navegador,
+y las llaves/paréntesis de todo el Kotlin se comprobaron con un analizador propio; la compilación real queda para Fusion.
 
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
