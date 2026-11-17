@@ -17,17 +17,19 @@ object Lectura {
 
     private var guion: String? = null
 
+    private fun leerGuion(c: Context): String {
+        val texto = try {
+            c.assets.open("lectura/lectura.js").bufferedReader().use { it.readText() }.trim()
+        } catch (e: Exception) {
+            ""
+        }
+        guion = texto
+        return texto
+    }
+
     /** Script de apertura/cierre con las preferencias del usuario. */
     fun guion(c: Context, ajustes: Ajustes, noche: Boolean): String {
-        var js = guion
-        if (js == null) {
-            js = try {
-                c.assets.open("lectura/lectura.js").bufferedReader().use { it.readText() }.trim()
-            } catch (e: Exception) {
-                ""
-            }
-            guion = js
-        }
+        val js: String = guion ?: leerGuion(c)
         if (js.isEmpty()) return "'error'"
         val tema = if (ajustes.lecturaTema.isEmpty()) (if (noche) "oscuro" else "claro") else ajustes.lecturaTema
         val o = JSONObject()
