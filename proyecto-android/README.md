@@ -161,5 +161,17 @@ Límites conocidos (frente al F12 de PC):
 **No se ha podido compilar ni probar en dispositivo** (sin SDK de Android aquí): el script de silencio se probó con Node y simulaciones del navegador,
 y las llaves/paréntesis de todo el Kotlin se comprobaron con un analizador propio; la compilación real queda para Fusion.
 
+## 1.9.1 — Ventanas emergentes y redirecciones
+
+Ajustes › «Ventanas emergentes y redirecciones…» (probado el caso de páginas de torrents, que secuestran cualquier toque para abrir anuncios):
+- **Bloquear las de anuncios (por defecto):** una pestaña abierta por una página nace oculta; si su primera dirección es un dominio de las listas de bloqueo se cierra sin
+  mostrarse y se vuelve a la pestaña de origen (si no, aparece en ≤1,5 s). Además, solo se permite una emergente por toque y una cada 4 s, y ninguna sin toque.
+- **Estricto:** solo si el toque fue sobre un enlace y la pestaña va al mismo sitio que ese enlace (un enlace que abre otro sitio = toque secuestrado). Puede romper algún inicio de sesión.
+- **Permitir todas:** como antes.
+- **Redirecciones automáticas:** se bloquea que la propia pestaña navegue a un dominio de anuncios, o a otro sitio sin que hayas tocado nada en 5 s. Los redirects HTTP
+  (acortadores, inicio de sesión) y los enlaces que tocas pasan.
+- **Excepciones por sitio:** menú ⋮ › «Emergentes y redirecciones en este sitio» (y gestión en Ajustes).
+- El menú ⋮ muestra cuántas se han bloqueado en la página. Límite: un anuncio de un dominio que no esté en ninguna lista y se abra con un toque en un enlace real no se puede distinguir de uno legítimo.
+
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
