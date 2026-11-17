@@ -23,6 +23,10 @@
 
     <!-- Visibilidad de paquetes (Android 11+): saber si Optimo Play esta instalada. -->
     <queries>
+        <!-- Síntesis de voz (modo lectura en voz alta): sin esto Android 11+ no deja ver los motores instalados. -->
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
         <package android:name="com.optimo.play" />
         <!-- Gestor de archivos propio: «Descargas» lo abre en la carpeta de descargas. -->
         <package android:name="com.carpe.gestorarchivos" />
