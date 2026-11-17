@@ -264,6 +264,9 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
         web.evaluateJavascript(CSS_USUARIO_JS.replace("__LISTA__", JSONArray().put(css).toString()), null)
     }
 
+    /** Script que busca capas que tapan la página (muros «desactiva tu bloqueador», ventanas modales); devuelve JSON o null. */
+    fun scriptMuros(): String = "(" + leerTexto("muros.js").trim() + ")()"
+
     /** Script que elige el elemento en (x, y), subiendo [nivel] contenedores, y lo resalta; devuelve JSON o null. */
     fun scriptElemento(x: Float, y: Float, nivel: Int): String =
         "(" + leerTexto("elegir_elemento.js").trim() + ")(" + x + "," + y + "," + nivel + ")"
