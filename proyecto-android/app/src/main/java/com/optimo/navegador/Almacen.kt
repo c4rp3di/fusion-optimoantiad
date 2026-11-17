@@ -446,7 +446,7 @@ class Ajustes(contexto: Context) {
     var lecturaTema: String
         get() = sp.getString("lectura_tema", "") ?: ""
         set(v) {
-            if (v == "claro" || v == "sepia" || v == "oscuro" || v == "negro") sp.edit().putString("lectura_tema", v).apply()
+            if (v == "" || v == "claro" || v == "sepia" || v == "oscuro" || v == "negro") sp.edit().putString("lectura_tema", v).apply()
         }
 
     var lecturaFuente: String
@@ -460,6 +460,20 @@ class Ajustes(contexto: Context) {
         get() = sp.getInt("lectura_inter", 1).coerceIn(0, 2)
         set(v) {
             sp.edit().putInt("lectura_inter", v.coerceIn(0, 2)).apply()
+        }
+
+    /** Velocidad de la voz en %, de 50 a 250 (100 = normal). */
+    var vozVelocidad: Int
+        get() = sp.getInt("voz_velocidad", 100).coerceIn(50, 250)
+        set(v) {
+            sp.edit().putInt("voz_velocidad", v.coerceIn(50, 250)).apply()
+        }
+
+    /** Tono de la voz en %, de 50 a 200 (100 = normal). */
+    var vozTono: Int
+        get() = sp.getInt("voz_tono", 100).coerceIn(50, 200)
+        set(v) {
+            sp.edit().putInt("voz_tono", v.coerceIn(50, 200)).apply()
         }
 
     // ---------------------------------------------------------------- privacidad y datos guardados
