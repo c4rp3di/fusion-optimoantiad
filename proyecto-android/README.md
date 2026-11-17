@@ -192,3 +192,18 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - Sin gestión cookie a cookie (de momento; ya se pueden borrar todas de golpe).
 - **No se ha podido compilar ni probar en dispositivo.** Revisado a mano (llaves y paréntesis). Si Fusion da errores, pasa el log.
 - Próximo: exportar e importar la configuración (cifrada con contraseña propia; la clave del Keystore no sale del móvil).
+
+## 1.11.0 — Personalizar sitios y modo lectura
+
+**Menú ⋮ › «Personalizar este sitio…»** (solo páginas http/https):
+- **Elegir un elemento (tocar):** toca cualquier parte de la página; se resalta en naranja y puedes *ocultarlo*, *cambiar su apariencia* (ampliar/reducir, texto más grande, fondo oscuro/claro, quitar fondos, ancho completo, semitransparente, soltar barras fijas, quitar sombras y bordes, o CSS propio) y moverte entre el elemento, su contenedor (▲) y uno más pequeño (▼).
+- **CSS propio de este sitio:** editor de CSS que se guarda y se aplica en cada visita (dominio y subdominios). El límite es 20 000 caracteres.
+- **Reglas de este sitio:** ver y borrar las reglas (ocultar y estilos) de ese sitio. En Ajustes › «Reglas de sitios y anuncios» están todas, con los dominios bloqueados.
+- Las reglas se aplican con hojas de estilo construibles (no las bloquea la CSP de las páginas) y **ya no dependen de tener activado el bloqueo de anuncios**.
+- «Bloquear un anuncio (tocar)» y la pulsación larga siguen igual.
+
+**Menú ⋮ › «Modo lectura»:** extrae el artículo (texto, títulos, listas, citas, imágenes) y lo muestra limpio sobre la página, en una vista aislada del CSS del sitio. Barra superior: ✕ salir, A− / A+ tamaño, Aa tipo de letra (serif/sans), ↕ interlineado, ◐ fondo (claro, sepia, oscuro, negro) y 🔊 lectura en voz alta (síntesis de voz de Android; usa el idioma de la página si el sistema lo tiene). Tus preferencias se recuerdan. Atrás también sale. Si la página no parece un artículo, avisa.
+- La extracción es heurística (sin librerías): bien en blogs y noticias; puede fallar en webs muy raras o aplicaciones.
+- La voz sigue mientras la app esté viva en segundo plano, pero no hay servicio ni controles de notificación para ella.
+
+**Pruebas:** los tres scripts (lectura, elegir elemento, CSS con CSP estricta) se probaron en Chromium con Playwright sobre páginas de ejemplo. El Kotlin **no se ha compilado ni probado en dispositivo**: revisado a mano (llaves y paréntesis). Si Fusion da errores, pasa el log.
