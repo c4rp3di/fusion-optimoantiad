@@ -62,6 +62,39 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Último estado conocido: algún vídeo/audio de la pestaña suena de verdad (para mostrar el altavoz 🔊). */
     var suena: Boolean = false
 
+    // ---- ventanas emergentes y redirecciones (Ajustes › «Ventanas emergentes y redirecciones…»)
+
+    /** Pestaña abierta por la página de otra pestaña (window.open / target=_blank). */
+    var esEmergente: Boolean = false
+
+    /** Pestaña desde la que se abrió (para volver a ella si la emergente se bloquea). */
+    var abiertaPor: Pestana? = null
+
+    /** La emergente se creó sin mostrarla: espera a ver su primera dirección para decidir si se cierra o se muestra. */
+    @Volatile var oculta: Boolean = false
+
+    /** Emergente de un sitio con permiso (o modo «permitir todas»): no se vigila. */
+    @Volatile var libre: Boolean = true
+
+    /** Hora (uptimeMillis) en que nació la emergente; solo se vigila en sus primeros segundos. */
+    @Volatile var nacidoMs: Long = 0L
+
+    /** Modo estricto: host del enlace que se tocó para abrirla; si la emergente va a otro sitio, era un secuestro del toque. */
+    @Volatile var enlaceEsperado: String? = null
+
+    /** Ya se ha ordenado cerrar esta emergente (evita contarla dos veces). */
+    @Volatile var cerrando: Boolean = false
+
+    /** Emergentes y redirecciones automáticas bloqueadas en la página actual. */
+    val emergentesBloqueados = AtomicInteger(0)
+
+    /** Última emergente permitida desde esta pestaña y toque al que correspondía (límite: una por toque y cada pocos segundos). */
+    var ultimoEmergenteMs: Long = 0L
+    var emergenteDelToque: Long = -1L
+
+    /** Hora (uptimeMillis) del último toque del usuario sobre la página. */
+    var toqueMs: Long = 0L
+
     /** Ultimo flujo de video/audio visto en la pagina (m3u8, mpd, mp4...). Se escribe desde hilos de red. */
     @Volatile var medioDetectado: String? = null
 }
