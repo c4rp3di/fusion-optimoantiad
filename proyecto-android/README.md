@@ -134,6 +134,8 @@ Límites conocidos (frente al F12 de PC):
 
 ## 1.9.0 — Silenciar pestañas, pantalla de inicio editable y apps externas para multimedia
 
+> 1.9.0: Optimo Play y las demás apps externas se lanzan con `FLAG_ACTIVITY_NEW_TASK` (tarea propia en Recientes, Optimo no se tapa).
+
 **Silenciar pestañas** (`Silenciador.kt`, `assets/audio/silenciar.js`)
 - Altavoz 🔊/🔇 en la barra de direcciones (junto a 🔖): aparece solo si la pestaña suena o está silenciada; tocar alterna.
 - El candado ahora es un botón: «Silenciar esta pestaña / Activar el sonido», copiar dirección y compartir.
