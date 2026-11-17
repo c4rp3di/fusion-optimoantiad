@@ -291,7 +291,7 @@ class ServicioSegundoPlano : Service() {
         try {
             val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             @Suppress("DEPRECATION")
-            val modo = if (Build.VERSION.SDK_INT >= 29) WifiManager.WIFI_MODE_FULL_LOW_LATENCY else WifiManager.WIFI_MODE_FULL_HIGH_PERF
+            val modo = WifiManager.WIFI_MODE_FULL
             val l = wm.createWifiLock(modo, "Optimo:segundoPlano")
             l.setReferenceCounted(false)
             l.acquire()
@@ -436,7 +436,7 @@ class ServicioSegundoPlano : Service() {
         private const val CANAL = "optimo_segundo_plano"
         private const val ID_NOTIF = 4401
         private const val PERIODO_MS = 4000L
-        private const val MAX_CICLOS_EN_PAUSA = 75 // ~5 minutos
+        private const val MAX_CICLOS_EN_PAUSA = 20 // ~80 segundos
         private const val TOPE_BLOQUEO_MS = 6L * 60L * 60L * 1000L
 
         /** MainActivity lo rellena: recibe «pausar» o «reanudar» y lo aplica a la página. Siempre en el hilo principal. */
