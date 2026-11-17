@@ -122,6 +122,8 @@ class MainActivity : Activity() {
 
     private lateinit var paleta: Paleta
     private lateinit var ajustes: Ajustes
+    private val lector = LectorVoz(this)
+    private var pestanaVoz: Pestana? = null
     private lateinit var anuncios: MotorAnuncios
     private lateinit var silenciador: Silenciador
     private val manejadorPrincipal = Handler(Looper.getMainLooper())
@@ -535,6 +537,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        lector.cerrar()
         ServicioSegundoPlano.manejador = null
         quitarEscuchaAudio()
         manejadorSonando.removeCallbacks(tareaSonando)
@@ -564,6 +567,12 @@ class MainActivity : Activity() {
                 ultimoAtras = ahora
                 toast("Pulsa atrás otra vez para salir de pantalla completa")
             }
+            return
+        }
+        val lee = actual
+        if (lee != null && lee.lectura) {
+            lee.web?.evaluateJavascript("window.__optimoLectura&&window.__optimoLectura.cerrar()", null)
+            lee.lectura = false
             return
         }
         if (::herramientas.isInitialized && herramientas.visible && herramientas.alAtras()) return
@@ -1467,6 +1476,10 @@ class MainActivity : Activity() {
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
+            if (p.url.startsWith("http")) {
+                add("Modo lectura") { abrirModoLectura(p) }
+                add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
+            }
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
         if (!p.inicio && p.url.startsWith("http")) {
@@ -1509,7 +1522,7 @@ class MainActivity : Activity() {
         add("Ventanas emergentes y redirecciones…") { mostrarAjustesEmergentes() }
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
-        add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
         add("Herramientas de desarrollo: captura desde el inicio: " + si(ajustes.devCaptura)) {
             ajustes.devCaptura = !ajustes.devCaptura
             reinstalarDev()
@@ -2097,7 +2110,7 @@ class MainActivity : Activity() {
             }
         }
         add("Permisos concedidos a sitios (" + ajustes.totalPermisos() + ")…") { mostrarPermisosSitios() }
-        add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
         add("Borrar todo: historial, caché, cookies y permisos") {
             confirmarAccionPrivacidad(
                 "Borrar todo",
@@ -2188,7 +2201,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.10.0")
+            .setTitle("Optimo 1.11.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -2748,13 +2761,19 @@ class MainActivity : Activity() {
         when (ev.actionMasked) {
             android.view.MotionEvent.ACTION_UP -> {
                 p.eligiendo = false
-                bloquearAnuncio(v, p, null, ev.x, ev.y)
+                if (p.eligiendoElemento) {
+                    p.eligiendoElemento = false
+                    elegirElemento(v, p, ev.x, ev.y, 0)
+                } else {
+                    bloquearAnuncio(v, p, null, ev.x, ev.y)
+                }
                 return true
             }
             android.view.MotionEvent.ACTION_MOVE -> {
                 val holgura = android.view.ViewConfiguration.get(this).scaledTouchSlop
                 if (Math.abs(ev.x - p.toqueX) > holgura || Math.abs(ev.y - p.toqueY) > holgura) {
                     p.eligiendo = false
+                    p.eligiendoElemento = false
                     toast("Selección cancelada")
                     return false
                 }
@@ -2762,6 +2781,7 @@ class MainActivity : Activity() {
             }
             android.view.MotionEvent.ACTION_CANCEL -> {
                 p.eligiendo = false
+                p.eligiendoElemento = false
                 return false
             }
         }
@@ -2831,24 +2851,27 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun mostrarReglasUsuario() {
-        val ocultar = ReglasUsuario.listaOcultar()
-        val dominios = ReglasUsuario.listaDominios()
-        if (ocultar.isEmpty() && dominios.isEmpty()) {
+    private fun mostrarReglasUsuario(sitio: String? = null) {
+        val ocultar = ReglasUsuario.listaOcultar().filter { sitio == null || it.host == sitio }
+        val estilos = ReglasUsuario.listaCss().filter { sitio == null || it.host == sitio }
+        val dominios = if (sitio == null) ReglasUsuario.listaDominios() else emptyList()
+        if (ocultar.isEmpty() && estilos.isEmpty() && dominios.isEmpty()) {
             toast("Aún no has añadido reglas")
             return
         }
         val etiquetas = ArrayList<String>()
         for (r in ocultar) etiquetas.add("Ocultar en " + r.host + ": " + r.sel)
+        for (r in estilos) etiquetas.add("Estilo en " + r.host + ": " + r.nombre)
         for (dd in dominios) etiquetas.add("Bloquear dominio: $dd")
         val marcadas = BooleanArray(etiquetas.size)
         nuevoDialogo()
-            .setTitle("Reglas añadidas (marca para borrar)")
+            .setTitle(if (sitio == null) "Reglas añadidas (marca para borrar)" else "Reglas de $sitio (marca para borrar)")
             .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
             .setPositiveButton("Borrar marcadas") { _, _ ->
                 var borradas = 0
                 for (i in ocultar.indices) if (marcadas[i]) { ReglasUsuario.quitarOcultar(ocultar[i]); borradas++ }
-                for (j in dominios.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarDominio(dominios[j]); borradas++ }
+                for (j in estilos.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarCss(estilos[j]); borradas++ }
+                for (k in dominios.indices) if (marcadas[ocultar.size + estilos.size + k]) { ReglasUsuario.quitarDominio(dominios[k]); borradas++ }
                 if (borradas > 0) {
                     reinstalarAnuncios()
                     toast("$borradas regla(s) borradas. Recarga las páginas abiertas")
@@ -2856,6 +2879,245 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cerrar", null)
             .show()
+    }
+
+    // ---------------------------------------------------------------- personalizar un sitio: elegir elementos y estilos
+
+    private fun mostrarPersonalizarSitio(p: Pestana) {
+        val sitio = ReglasUsuario.clave(Omnibox.hostDe(p.url))
+        if (sitio.isEmpty()) return
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Elegir un elemento de la página (tocar)") {
+            p.eligiendo = true
+            p.eligiendoElemento = true
+            toast("Toca el elemento que quieres ocultar o cambiar")
+        }
+        add("CSS propio de este sitio…") {
+            editarCss("CSS de $sitio", ReglasUsuario.cssPropio(sitio), ".ejemplo { display: none !important }", true) { css ->
+                if (ReglasUsuario.fijarCssPropio(sitio, css)) {
+                    reinstalarAnuncios()
+                    if (css.isNotBlank()) p.web?.let { anuncios.aplicarCssAhora(it, css) }
+                    toast(if (css.isBlank()) "CSS borrado. Recarga la página" else "Guardado. Recarga la página para quitar lo anterior")
+                } else {
+                    toast("El CSS es demasiado largo (máximo 20 000 caracteres)")
+                }
+            }
+        }
+        add("Reglas de este sitio (" + ReglasUsuario.totalDe(sitio) + ")…") { mostrarReglasUsuario(sitio) }
+        opciones("Personalizar " + sitio, items)
+    }
+
+    /** Editor de texto multilínea para CSS. [alGuardar] recibe el texto (vacío = borrar, si [puedeBorrar]). */
+    private fun editarCss(titulo: String, inicial: String, pista: String, puedeBorrar: Boolean, alGuardar: (String) -> Unit) {
+        val campo = EditText(this)
+        campo.setText(inicial)
+        campo.hint = pista
+        campo.minLines = 6
+        campo.gravity = android.view.Gravity.TOP or android.view.Gravity.START
+        campo.typeface = android.graphics.Typeface.MONOSPACE
+        campo.textSize = 13f
+        campo.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        campo.setHorizontallyScrolling(false)
+        val caja = FrameLayout(this)
+        val m = (16 * resources.displayMetrics.density).toInt()
+        caja.setPadding(m, m / 2, m, 0)
+        caja.addView(campo)
+        val b = nuevoDialogo()
+            .setTitle(titulo)
+            .setView(caja)
+            .setPositiveButton("Guardar") { _, _ -> alGuardar(campo.text.toString()) }
+            .setNegativeButton("Cancelar", null)
+        if (puedeBorrar && inicial.isNotEmpty()) b.setNeutralButton("Borrar") { _, _ -> alGuardar("") }
+        b.show()
+    }
+
+    private fun quitarMarca(web: WebView) {
+        web.evaluateJavascript(
+            "(function(){var m=window.__optimoMarca;if(m){try{m.el.style.outline=m.o;m.el.style.outlineOffset=m.oo;}catch(e){}window.__optimoMarca=null;}})()",
+            null
+        )
+    }
+
+    /** Identifica el elemento en (x, y) —píxeles de pantalla—, subiendo [nivel] contenedores, y ofrece qué hacer con él. */
+    @Suppress("DEPRECATION")
+    private fun elegirElemento(web: WebView, p: Pestana, x: Float, y: Float, nivel: Int) {
+        val escala = if (web.scale > 0f) web.scale else resources.displayMetrics.density
+        web.evaluateJavascript(anuncios.scriptElemento(x / escala, y / escala, nivel)) { crudo ->
+            var datos: org.json.JSONObject? = null
+            try {
+                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
+                if (v is String) datos = org.json.JSONObject(v)
+            } catch (e: Exception) {
+                datos = null
+            }
+            if (datos == null) {
+                toast("No he podido seleccionar nada ahí")
+            } else {
+                mostrarElemento(web, p, x, y, nivel, datos)
+            }
+        }
+    }
+
+    private fun mostrarElemento(web: WebView, p: Pestana, x: Float, y: Float, nivel: Int, d: org.json.JSONObject) {
+        val paginaHost = (try { Uri.parse(web.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
+        val sel = d.optString("sel")
+        if (paginaHost.isEmpty() || sel.isEmpty()) {
+            quitarMarca(web)
+            toast("No se pudo crear la regla para esta página")
+            return
+        }
+        val sitio = ReglasUsuario.clave(paginaHost)
+        val n = d.optInt("n", 1)
+        val texto = d.optString("texto")
+        val cabecera = d.optString("tag") + " " + d.optInt("w") + "×" + d.optInt("h") +
+            (if (n > 1) " · coincide con $n elementos" else "") + (if (texto.isNotEmpty()) "\n«" + texto + "»" else "")
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Ocultar este elemento") {
+            quitarMarca(web)
+            if (ReglasUsuario.agregarOcultar(sitio, sel)) {
+                reinstalarAnuncios()
+                anuncios.aplicarAhora(web, paginaHost)
+                toast("Elemento oculto en $sitio")
+            } else {
+                toast("Ya estaba oculto")
+            }
+        }
+        add("Cambiar su apariencia…") { mostrarApariencia(web, sitio, sel) }
+        if (d.optBoolean("hayPadre")) add("Elegir el contenedor ▲") { elegirElemento(web, p, x, y, nivel + 1) }
+        if (nivel > 0) add("Elegir uno más pequeño ▼") { elegirElemento(web, p, x, y, nivel - 1) }
+        val b = nuevoDialogo()
+            .setTitle(cabecera)
+            .setItems(Array(items.size) { i -> items[i].first }) { _, i -> items[i].second() }
+            .setNegativeButton("Cancelar") { _, _ -> quitarMarca(web) }
+            .setOnCancelListener { quitarMarca(web) }
+        b.show()
+    }
+
+    /** Cambios de apariencia listos para usar sobre el elemento elegido; «§» se sustituye por su selector. */
+    private val APARIENCIAS = listOf(
+        Pair("Ampliar un 25 %", "§{zoom:1.25!important}"),
+        Pair("Reducir al 80 %", "§{zoom:.8!important}"),
+        Pair("Texto más grande", "§{font-size:130%!important}"),
+        Pair("Fondo oscuro, texto claro", "§,§ *{background:#121212!important;color:#e8e8e8!important;border-color:#444!important}"),
+        Pair("Fondo claro, texto oscuro", "§,§ *{background:#ffffff!important;color:#202124!important}"),
+        Pair("Quitar fondos e imágenes de fondo", "§,§ *{background:none!important}"),
+        Pair("Ancho completo", "§{width:100%!important;max-width:100%!important;margin-left:0!important;margin-right:0!important}"),
+        Pair("Semitransparente (30 %)", "§{opacity:.3!important}"),
+        Pair("Soltarlo de la pantalla (barras fijas)", "§{position:static!important}"),
+        Pair("Quitar sombras y bordes", "§{box-shadow:none!important;border:none!important;text-shadow:none!important}")
+    )
+
+    private fun mostrarApariencia(web: WebView, sitio: String, sel: String) {
+        val nombres = ArrayList<String>()
+        for (a in APARIENCIAS) nombres.add(a.first)
+        nombres.add("Escribir CSS propio…")
+        fun guardar(nombre: String, css: String) {
+            quitarMarca(web)
+            if (ReglasUsuario.agregarCss(sitio, nombre + ": " + sel, css)) {
+                reinstalarAnuncios()
+                anuncios.aplicarCssAhora(web, css)
+                toast("Aplicado en $sitio. Se mantendrá en tus visitas")
+            } else {
+                toast("No se añadió (ya existía o es demasiado largo)")
+            }
+        }
+        nuevoDialogo()
+            .setTitle("Apariencia del elemento")
+            .setItems(nombres.toTypedArray()) { _, i ->
+                if (i < APARIENCIAS.size) {
+                    guardar(APARIENCIAS[i].first, APARIENCIAS[i].second.replace("§", sel))
+                } else {
+                    editarCss("CSS del elemento", sel + " {\n  \n}", "propiedad: valor !important;", false) { css ->
+                        guardar("CSS propio", css)
+                    }
+                }
+            }
+            .setNegativeButton("Cancelar") { _, _ -> quitarMarca(web) }
+            .setOnCancelListener { quitarMarca(web) }
+            .show()
+    }
+
+    // ---------------------------------------------------------------- modo lectura
+
+    private fun abrirModoLectura(p: Pestana) {
+        val w = p.web
+        if (w == null || p.inicio) {
+            toast("Abre primero una página")
+            return
+        }
+        w.evaluateJavascript(Lectura.guion(this, ajustes, paleta.oscuro)) { r ->
+            val v = (r ?: "").trim('"')
+            if (v == "ok") {
+                p.lectura = true
+            } else if (v == "cerrado") {
+                p.lectura = false
+            } else if (v == "vacio") {
+                toast("Esta página no parece un artículo")
+            } else {
+                toast("No se pudo abrir el modo lectura")
+            }
+        }
+    }
+
+    /** Mensajes «optimo-lectura:…» que envía la vista de lectura por la consola de la página. */
+    private fun alMensajeLectura(p: Pestana, m: String) {
+        if (m.startsWith("prefs:")) {
+            Lectura.guardarPrefs(ajustes, m.substring(6))
+        } else if (m == "cerrar") {
+            p.lectura = false
+            if (pestanaVoz === p) {
+                lector.parar()
+                pestanaVoz = null
+            }
+        } else if (m == "voz" && p.lectura) {
+            alternarVoz(p)
+        }
+    }
+
+    private fun marcarVoz(p: Pestana, activa: Boolean) {
+        p.web?.evaluateJavascript("window.__optimoLectura&&window.__optimoLectura.voz(" + activa + ")", null)
+    }
+
+    private fun alternarVoz(p: Pestana) {
+        if (lector.hablando && pestanaVoz === p) {
+            lector.parar()
+            pestanaVoz = null
+            marcarVoz(p, false)
+            return
+        }
+        val w = p.web ?: return
+        w.evaluateJavascript("window.__optimoLectura?window.__optimoLectura.texto():''") { crudo ->
+            var texto = ""
+            var idioma = ""
+            try {
+                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
+                if (v is String && v.isNotEmpty()) {
+                    val o = org.json.JSONObject(v)
+                    texto = o.optString("texto")
+                    idioma = o.optString("lang")
+                }
+            } catch (e: Exception) {
+                texto = ""
+            }
+            if (texto.isEmpty()) {
+                toast("No hay texto para leer")
+            } else {
+                pestanaVoz = p
+                lector.alTerminar = {
+                    val q = pestanaVoz
+                    pestanaVoz = null
+                    if (q != null) marcarVoz(q, false)
+                }
+                lector.leer(texto, idioma)
+                marcarVoz(p, true)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- descargas, externos, intents
@@ -3364,6 +3626,13 @@ class MainActivity : Activity() {
 
         override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
             super.onPageStarted(view, url, favicon)
+            if (p.lectura) {
+                p.lectura = false
+                if (pestanaVoz === p) {
+                    lector.parar()
+                    pestanaVoz = null
+                }
+            }
             if (view != null) anuncios.alEmpezar(view, url)
             if (view != null) agenteDev.alEmpezar(view)
             if (view != null) silenciador.alEmpezar(view, p.silenciada)
@@ -3511,6 +3780,10 @@ class MainActivity : Activity() {
         override fun onConsoleMessage(m: ConsoleMessage?): Boolean {
             if (m == null) return false
             val msg = m.message() ?: return false
+            if (msg.startsWith("optimo-lectura:")) {
+                alMensajeLectura(p, msg.substring(15))
+                return true
+            }
             // Lo que ya tiene el agente (marcado con el valor aleatorio) no se duplica.
             if (msg.startsWith(agenteDev.marca) || msg.take(40).contains(agenteDev.nonce)) return false
             val nivel = when (m.messageLevel()) {
