@@ -223,3 +223,9 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - El selector de elementos de «Personalizar este sitio» ya no falla cuando lo que se toca es `html`/`body` pero hay elementos encima (usa la pila de elementos del punto).
 - Límite: si la página genera nombres de clase aleatorios en cada carga, la regla guardada puede no volver a coincidir; entonces hay que repetir «Solo ahora».
 - Probado en Chromium con muros simulados (capa fija que se recrea, Shadow DOM cerrado, iframe fijo); sin probar en la web real ni en dispositivo, y sin compilar el Kotlin.
+
+## 1.11.4 — «Quitar capa» también detecta avisos dentro de la página
+
+- Algunos avisos «Adblocker detectado» no son una capa fija sino una tarjeta dentro del flujo de la página (caso de clksz.com). «Quitar capa que tapa la página» ahora también los busca por su texto («adblock», «bloqueador de anuncios»…), elige la tarjeta más ajustada y la marca por defecto si tiene botones o enlaces. Un párrafo que solo menciona el tema no se marca.
+- Se evita listar dos veces la misma capa.
+- Probado en Chromium con una tarjeta simulada como la de la captura; en la web real y en el móvil, sin probar.
