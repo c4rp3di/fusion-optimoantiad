@@ -85,9 +85,7 @@ En 1.7.3 el aviso salía bien pero el vídeo se pausaba al cambiar de pestaña, 
   Coste: la página de fondo sigue pintándose, algo más de batería mientras haya una pestaña sonando de fondo.
 - **Carátula:** la primera petición de datos se hace ~0,8 s después de arrancar el servicio (antes ~4 s). La carátula solo aparece con el servicio en marcha
   (app fuera de pantalla con audio sonando); con la app abierta no hay servicio. Si el audio se pausaba por el fallo anterior, el servicio ni arrancaba.
-- **Ajustes › Reproducción en segundo plano › «Diagnóstico del audio (copiar y enviar)»:** muestra el estado de los medios de la pestaña, el tamaño de la ventana,
-  el registro de eventos pause/play/resize/ended (los anota `segundo_plano.js` en páginas de YouTube) y el estado de la carátula (datos recibidos, URL de la imagen,
-  error de descarga). Sirve para saber, sin logcat, qué ocurre si vuelve a pausarse.
+- (El menú «Diagnóstico del audio» de esta versión se quitó en 1.11.5.)
 
 ## 1.7.5 — Carátula del vídeo que suena
 
@@ -229,3 +227,10 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - Algunos avisos «Adblocker detectado» no son una capa fija sino una tarjeta dentro del flujo de la página (caso de clksz.com). «Quitar capa que tapa la página» ahora también los busca por su texto («adblock», «bloqueador de anuncios»…), elige la tarjeta más ajustada y la marca por defecto si tiene botones o enlaces. Un párrafo que solo menciona el tema no se marca.
 - Se evita listar dos veces la misma capa.
 - Probado en Chromium con una tarjeta simulada como la de la captura; en la web real y en el móvil, sin probar.
+
+## 1.11.5 — Posición y duración en la sesión multimedia; se quita el diagnóstico
+
+- La pantalla de bloqueo y el panel de control muestran ahora la **barra de progreso** (posición y duración) de lo que suena. Se leen del `<video>`/`<audio>` de la página (el que está reproduciendo, o el primero) y la barra avanza sola entre actualizaciones.
+- Se puede **arrastrar la barra** para buscar: Optimo coloca `currentTime` del vídeo de la página. En directos o cuando la duración es desconocida no hay barra de búsqueda.
+- Se elimina el diagnóstico del audio (menú, registro `__optimoLog` en `segundo_plano.js` y `ServicioSegundoPlano.diag`).
+- Probado el JS con un DOM simulado; el Kotlin, sin compilar con el SDK y sin probar en el móvil.
