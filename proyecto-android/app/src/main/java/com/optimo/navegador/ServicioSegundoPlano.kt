@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.SystemClock
 import java.io.ByteArrayOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -51,6 +52,11 @@ class ServicioSegundoPlano : Service() {
     private var urlImagen = ""
     private var imagen: Bitmap? = null
     private var generacionImagen = 0
+
+    // Posición y duración del vídeo de la página (la posición avanza sola entre consultas mientras suena).
+    private var posicionMs = -1L
+    private var duracionMs = -1L
+    private var momentoPosicion = 0L
 
     private val vigilante = object : Runnable {
         override fun run() {
@@ -147,7 +153,7 @@ class ServicioSegundoPlano : Service() {
     /** Aplica una orden (pausar/reanudar) a la página y refleja el estado enseguida. */
     private fun orden(accion: String) {
         manejador?.invoke(accion)
-        reproduciendo = accion == "reanudar"
+        fijarReproduciendo(accion == "reanudar")
         sinAudio = 0
         ciclosEnPausa = 0
         actualizarNotificacion()
@@ -160,14 +166,14 @@ class ServicioSegundoPlano : Service() {
             sinAudio = 0
             ciclosEnPausa = 0
             if (!reproduciendo) {
-                reproduciendo = true
+                fijarReproduciendo(true)
                 actualizarNotificacion()
             }
             return
         }
         sinAudio++
         if (sinAudio >= 2 && reproduciendo) {
-            reproduciendo = false
+            fijarReproduciendo(false)
             actualizarNotificacion()
         }
         if (!reproduciendo) {
@@ -199,6 +205,13 @@ class ServicioSegundoPlano : Service() {
                 override fun onPause() {
                     orden("pausar")
                 }
+
+                override fun onSeekTo(pos: Long) {
+                    posicionMs = pos
+                    momentoPosicion = SystemClock.elapsedRealtime()
+                    manejador?.invoke("buscar:" + pos)
+                    estadoSesion(false)
+                }
             })
             s.isActive = true
             sesion = s
@@ -208,17 +221,41 @@ class ServicioSegundoPlano : Service() {
         }
     }
 
-    private fun estadoSesion() {
+    /** Posición actual en ms (la última leída más lo que ha pasado si suena), o «desconocida». */
+    private fun posicionActual(): Long {
+        if (posicionMs < 0) return PlaybackState.PLAYBACK_POSITION_UNKNOWN
+        var p = posicionMs
+        if (reproduciendo) p += SystemClock.elapsedRealtime() - momentoPosicion
+        if (duracionMs > 0 && p > duracionMs) p = duracionMs
+        return p
+    }
+
+    /** Cambia reproduciendo/pausado congelando antes la posición, para que la barra no siga corriendo en pausa. */
+    private fun fijarReproduciendo(nuevo: Boolean) {
+        if (nuevo == reproduciendo) return
+        val p = posicionActual()
+        if (p >= 0) {
+            posicionMs = p
+            momentoPosicion = SystemClock.elapsedRealtime()
+        }
+        reproduciendo = nuevo
+    }
+
+    private fun estadoSesion(conMetadatos: Boolean = true) {
         val s = sesion ?: return
         try {
             val estado = if (reproduciendo) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED
+            var acciones = PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE
+            if (duracionMs > 0) acciones = acciones or PlaybackState.ACTION_SEEK_TO
             s.setPlaybackState(
                 PlaybackState.Builder()
-                    .setActions(PlaybackState.ACTION_PLAY or PlaybackState.ACTION_PAUSE or PlaybackState.ACTION_PLAY_PAUSE)
-                    .setState(estado, PlaybackState.PLAYBACK_POSITION_UNKNOWN, if (reproduciendo) 1f else 0f)
+                    .setActions(acciones)
+                    .setState(estado, posicionActual(), if (reproduciendo) 1f else 0f)
                     .build()
             )
+            if (!conMetadatos) return
             val b = MediaMetadata.Builder().putString(MediaMetadata.METADATA_KEY_TITLE, titulo)
+            if (duracionMs > 0) b.putLong(MediaMetadata.METADATA_KEY_DURATION, duracionMs)
             if (artista.isNotBlank()) b.putString(MediaMetadata.METADATA_KEY_ARTIST, artista)
             val img = imagen
             if (img != null) {
@@ -315,9 +352,7 @@ class ServicioSegundoPlano : Service() {
 
     // ---------------------------------------------------------------- carátula y datos de lo que suena
 
-    private fun nuevosMetadatos(t: String, a: String, img: String, alt: String) {
-        diag = "datos recibidos · imagen: " + (if (img.isBlank()) "(la página no da ninguna)" else img.take(110)) +
-            (if (alt.isBlank()) "" else " · alternativa: " + alt.take(60))
+    private fun nuevosMetadatos(t: String, a: String, img: String, alt: String, pos: Long, dur: Long) {
         var cambio = false
         val nuevoTitulo = t.trim()
         if (nuevoTitulo.isNotEmpty() && nuevoTitulo != titulo) {
@@ -334,7 +369,16 @@ class ServicioSegundoPlano : Service() {
             urlImagen = u
             cargarImagen(u, alt.trim())
         }
-        if (cambio) actualizarNotificacion()
+        val nuevaDuracion = if (dur > 0) dur else -1L
+        if (nuevaDuracion != duracionMs) {
+            duracionMs = nuevaDuracion
+            cambio = true
+        }
+        if (pos >= 0) {
+            posicionMs = pos
+            momentoPosicion = SystemClock.elapsedRealtime()
+        }
+        if (cambio) actualizarNotificacion() else if (pos >= 0) estadoSesion(false)
     }
 
     /**
@@ -350,31 +394,18 @@ class ServicioSegundoPlano : Service() {
                 (alternativa.startsWith("https://") || alternativa.startsWith("http://"))
             ) intentos.add(alternativa)
             var mapa: Bitmap? = null
-            var usada = url
-            val fallos = StringBuilder()
             for (u in intentos) {
                 try {
                     mapa = descargarImagen(u)
-                    if (mapa != null) {
-                        usada = u
-                        break
-                    }
-                    fallos.append(" [").append(u.takeLast(40)).append(": respuesta no válida]")
+                    if (mapa != null) break
                 } catch (e: Exception) {
-                    fallos.append(" [").append(u.takeLast(40)).append(": ").append(e.javaClass.simpleName).append("]")
+                    mapa = null
                 }
             }
             val resultado = mapa
-            val elegida = usada
-            val motivos = fallos.toString()
             principal.post {
                 if (generacion == generacionImagen) {
                     imagen = resultado
-                    diag = if (resultado != null) {
-                        "imagen puesta (" + resultado.width + "×" + resultado.height + ") " + elegida.take(90)
-                    } else {
-                        "no se pudo usar la imagen:" + motivos
-                    }
                     actualizarNotificacion()
                 }
             }
@@ -452,13 +483,9 @@ class ServicioSegundoPlano : Service() {
         @Volatile
         private var instancia: ServicioSegundoPlano? = null
 
-        /** Último estado de la carátula (para Ajustes › Diagnóstico del audio). */
-        @Volatile
-        var diag: String = ""
-
-        /** Título, artista e imagen de lo que suena (los lee MainActivity de la página). Siempre en el hilo principal. */
-        fun metadatos(titulo: String, artista: String, imagen: String, alternativa: String) {
-            instancia?.nuevosMetadatos(titulo, artista, imagen, alternativa)
+        /** Título, artista, imagen, posición y duración (ms, -1 si se desconocen) de lo que suena. Siempre en el hilo principal. */
+        fun metadatos(titulo: String, artista: String, imagen: String, alternativa: String, posicion: Long, duracion: Long) {
+            instancia?.nuevosMetadatos(titulo, artista, imagen, alternativa, posicion, duracion)
         }
 
         /** Arranca el servicio en primer plano. Devuelve false si el sistema no lo permite. */
