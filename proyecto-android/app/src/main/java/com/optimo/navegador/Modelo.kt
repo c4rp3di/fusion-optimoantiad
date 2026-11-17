@@ -56,6 +56,12 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** URL http original cuando se intento mejorar a https (para el respaldo si falla). */
     var mejoradoDesde: String? = null
 
+    /** Pestaña silenciada por el usuario (altavoz de la barra de direcciones, del candado o de la lista de pestañas). */
+    var silenciada: Boolean = false
+
+    /** Último estado conocido: algún vídeo/audio de la pestaña suena de verdad (para mostrar el altavoz 🔊). */
+    var suena: Boolean = false
+
     /** Ultimo flujo de video/audio visto en la pagina (m3u8, mpd, mp4...). Se escribe desde hilos de red. */
     @Volatile var medioDetectado: String? = null
 }
