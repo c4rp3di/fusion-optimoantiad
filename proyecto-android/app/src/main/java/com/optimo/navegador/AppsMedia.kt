@@ -135,6 +135,7 @@ object AppsMedia {
                 if (!ua.isNullOrBlank()) { cab.add("User-Agent"); cab.add(ua) }
                 if (cab.isNotEmpty()) i.putExtra("headers", cab.toTypedArray())
             }
+            i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(i)
             true
         } catch (e: Exception) {
