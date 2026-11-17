@@ -207,3 +207,5 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - La voz sigue mientras la app esté viva en segundo plano, pero no hay servicio ni controles de notificación para ella.
 
 **Pruebas:** los tres scripts (lectura, elegir elemento, CSS con CSP estricta) se probaron en Chromium con Playwright sobre páginas de ejemplo. El Kotlin **no se ha compilado ni probado en dispositivo**: revisado a mano (llaves y paréntesis). Si Fusion da errores, pasa el log.
+
+**1.11.1:** corrige un error de compilación en `Lectura.kt` (tipo nulo al leer el script de lectura).
