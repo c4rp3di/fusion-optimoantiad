@@ -1470,6 +1470,7 @@ class MainActivity : Activity() {
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
         if (!p.inicio && p.url.startsWith("http")) {
+            if (!p.privada) add("Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) }
             val ok = ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))
             add("Emergentes y redirecciones en este sitio: " + (if (ok) "permitidas" else "bloqueadas")) {
                 if (ajustes.emergentes == 2) {
@@ -1536,7 +1537,7 @@ class MainActivity : Activity() {
             mostrarAjustes()
         }
         add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
-        add("Borrar historial, caché y cookies") { confirmarBorrado() }
+        add("Privacidad y datos…") { mostrarPrivacidad() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
     }
@@ -1995,9 +1996,199 @@ class MainActivity : Activity() {
         toast("Datos de navegación borrados")
     }
 
+    // ---------------------------------------------------------------- privacidad y datos guardados
+
+    private fun tamanoDir(d: File): Long {
+        var t = 0L
+        try {
+            val hijos = d.listFiles() ?: return d.length()
+            for (h in hijos) t += if (h.isDirectory) tamanoDir(h) else h.length()
+        } catch (e: Exception) {
+        }
+        return t
+    }
+
+    private fun formatoTamano(b: Long): String =
+        if (b < 1024L * 1024L) (b / 1024L).toString() + " KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", b / 1048576.0)
+
+    private fun etiquetaPermiso(t: String): String = when (t) {
+        "camara" -> "cámara"
+        "microfono" -> "micrófono"
+        "ubicacion" -> "ubicación"
+        else -> t
+    }
+
+    private fun borrarCache() {
+        var hecho = false
+        for (q in pestanas) {
+            val w = q.web
+            if (w != null) {
+                w.clearCache(true)
+                hecho = true
+                break
+            }
+        }
+        if (!hecho) {
+            try {
+                File(cacheDir, "WebView").deleteRecursively()
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    private fun confirmarAccionPrivacidad(titulo: String, mensaje: String, boton: String, accion: () -> Unit) {
+        nuevoDialogo()
+            .setTitle(titulo)
+            .setMessage(mensaje)
+            .setPositiveButton(boton) { _, _ ->
+                accion()
+                toast("Hecho")
+                mostrarPrivacidad()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
+            .setOnCancelListener { mostrarPrivacidad() }
+            .show()
+    }
+
+    /** Ajustes › Privacidad y datos: qué guarda Optimo, cuánto, y cómo controlarlo o borrarlo. */
+    private fun mostrarPrivacidad() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Guardar historial: " + si(ajustes.guardarHistorial)) {
+            ajustes.guardarHistorial = !ajustes.guardarHistorial
+            if (!ajustes.guardarHistorial && historial.todos().isNotEmpty()) {
+                nuevoDialogo()
+                    .setTitle("Historial desactivado")
+                    .setMessage("¿Quieres borrar también el historial que ya está guardado (" + historial.todos().size + " páginas)?")
+                    .setPositiveButton("Borrar") { _, _ ->
+                        historial.vaciar()
+                        toast("Historial borrado")
+                        mostrarPrivacidad()
+                    }
+                    .setNegativeButton("Conservar") { _, _ -> mostrarPrivacidad() }
+                    .setOnCancelListener { mostrarPrivacidad() }
+                    .show()
+            } else {
+                mostrarPrivacidad()
+            }
+        }
+        add("Guardar pestañas abiertas al cerrar: " + si(ajustes.guardarSesion)) {
+            ajustes.guardarSesion = !ajustes.guardarSesion
+            if (!ajustes.guardarSesion) borrarSesionGuardada()
+            mostrarPrivacidad()
+        }
+        add("Borrar historial (" + historial.todos().size + " páginas)") {
+            confirmarAccionPrivacidad("Borrar historial", "Se borrará el historial de navegación. Los marcadores se conservan.", "Borrar") {
+                historial.vaciar()
+            }
+        }
+        add("Borrar caché (" + formatoTamano(tamanoDir(cacheDir)) + ")") {
+            confirmarAccionPrivacidad("Borrar caché", "Las páginas se volverán a descargar la próxima vez que las abras.", "Borrar") {
+                borrarCache()
+            }
+        }
+        add("Borrar cookies y datos de sitios") {
+            confirmarAccionPrivacidad("Borrar cookies y datos de sitios", "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local.", "Borrar") {
+                CookieManager.getInstance().removeAllCookies(null)
+                CookieManager.getInstance().flush()
+                WebStorage.getInstance().deleteAllData()
+            }
+        }
+        add("Permisos concedidos a sitios (" + ajustes.totalPermisos() + ")…") { mostrarPermisosSitios() }
+        add("Reglas de anuncios añadidas (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Borrar todo: historial, caché, cookies y permisos") {
+            confirmarAccionPrivacidad(
+                "Borrar todo",
+                "Se borrarán el historial, la caché, las cookies, el almacenamiento de los sitios y los permisos concedidos. Los marcadores y las reglas se conservan.",
+                "Borrar todo"
+            ) {
+                borrarDatos()
+                borrarCache()
+                ajustes.quitarTodosPermisos()
+            }
+        }
+        opciones("Privacidad y datos", items)
+    }
+
+    private fun mostrarPermisosSitios() {
+        val sitios = ajustes.sitiosConPermisos()
+        if (sitios.isEmpty()) {
+            toast("Ningún sitio tiene permisos guardados")
+            mostrarPrivacidad()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (sitio in sitios) {
+            val texto = sitio + " — " + ajustes.permisosDe(sitio).joinToString(", ") { t -> etiquetaPermiso(t) }
+            items.add(Pair<String, () -> Unit>(texto, { mostrarPrivacidadSitio(sitio) }))
+        }
+        opciones("Permisos concedidos", items)
+    }
+
+    /** Datos y permisos de un sitio concreto (menú ⋮ › Privacidad de este sitio, o desde la lista de permisos). */
+    private fun mostrarPrivacidadSitio(host: String) {
+        val h = host.lowercase().removePrefix("www.")
+        if (h.isEmpty()) return
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        val permisos = ajustes.permisosDe(h)
+        for (t in permisos) {
+            add("Revocar permiso de " + etiquetaPermiso(t)) {
+                ajustes.quitarPermiso(h, t)
+                toast("Permiso revocado: " + etiquetaPermiso(t))
+                mostrarPrivacidadSitio(h)
+            }
+        }
+        if (permisos.isEmpty()) add("Sin permisos guardados (te preguntará cada vez)") { mostrarPrivacidadSitio(h) }
+        add("Reglas de ocultar elementos en este sitio: " + ReglasUsuario.selectoresPara(h).size) { mostrarReglasUsuario() }
+        add("Borrar cookies y almacenamiento de este sitio") {
+            nuevoDialogo()
+                .setTitle("Borrar datos de " + h)
+                .setMessage("Se cerrará tu sesión en este sitio y se borrará su almacenamiento local. Los demás sitios no se tocan.")
+                .setPositiveButton("Borrar") { _, _ ->
+                    borrarDatosSitio(h)
+                    toast("Datos de " + h + " borrados. Recarga la página")
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+        opciones(h, items)
+    }
+
+    /** Cookies (del sitio y de su dominio base) y almacenamiento local de un sitio. Solo el perfil normal. */
+    private fun borrarDatosSitio(host: String) {
+        val cm = CookieManager.getInstance()
+        val base = dominioBase(host)
+        val hosts = LinkedHashSet<String>()
+        hosts.add(host)
+        hosts.add(base)
+        hosts.add("www." + base)
+        for (x in hosts) {
+            val url = "https://" + x + "/"
+            val cookies = cm.getCookie(url) ?: continue
+            for (par in cookies.split(";")) {
+                val nombre = par.substringBefore('=').trim()
+                if (nombre.isEmpty()) continue
+                for (dom in listOf("", "; Domain=" + x, "; Domain=." + x)) {
+                    cm.setCookie(url, nombre + "=; Max-Age=0; Path=/" + dom)
+                }
+            }
+        }
+        cm.flush()
+        try {
+            WebStorage.getInstance().deleteOrigin("https://" + host)
+            WebStorage.getInstance().deleteOrigin("http://" + host)
+        } catch (e: Exception) {
+        }
+    }
+
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.9.1")
+            .setTitle("Optimo 1.10.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -2979,7 +3170,15 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- sesion
 
+    private fun borrarSesionGuardada() {
+        getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE).edit().clear().apply()
+    }
+
     private fun guardarSesion() {
+        if (!ajustes.guardarSesion) {
+            borrarSesionGuardada()
+            return
+        }
         val arr = JSONArray()
         var activa = 0
         var n = 0
@@ -3002,7 +3201,7 @@ class MainActivity : Activity() {
         try {
             val sp = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE)
             val cifrada = sp.getString("urls_c", null)
-            val texto = if (cifrada != null) AlmacenSeguro.descifrarTexto(cifrada, "sesion") else sp.getString("urls", null)
+            val texto = if (!ajustes.guardarSesion) null else if (cifrada != null) AlmacenSeguro.descifrarTexto(cifrada, "sesion") else sp.getString("urls", null)
             if (texto != null) {
                 val arr = JSONArray(texto)
                 val n = minOf(arr.length(), 10)
@@ -3187,7 +3386,7 @@ class MainActivity : Activity() {
             fijarUrl(p, url)
             val titulo = view?.title ?: ""
             if (titulo.isNotEmpty() && !p.inicio) p.titulo = titulo
-            if (!p.privada && !p.inicio && url != null && titulo != Paginas.TITULO_ERROR &&
+            if (ajustes.guardarHistorial && !p.privada && !p.inicio && url != null && titulo != Paginas.TITULO_ERROR &&
                 (url.startsWith("http://") || url.startsWith("https://"))
             ) {
                 historial.agregar(Entrada(if (titulo.isNotEmpty()) titulo else url, url, System.currentTimeMillis()))
@@ -3418,15 +3617,18 @@ class MainActivity : Activity() {
             val soportados = ArrayList<String>()
             val permisosAndroid = ArrayList<String>()
             val etiquetas = ArrayList<String>()
+            val tipos = ArrayList<String>()
             for (r in request.resources) {
                 if (r == PermissionRequest.RESOURCE_VIDEO_CAPTURE) {
                     soportados.add(r)
                     permisosAndroid.add(Manifest.permission.CAMERA)
                     etiquetas.add("la cámara")
+                    tipos.add("camara")
                 } else if (r == PermissionRequest.RESOURCE_AUDIO_CAPTURE) {
                     soportados.add(r)
                     permisosAndroid.add(Manifest.permission.RECORD_AUDIO)
                     etiquetas.add("el micrófono")
+                    tipos.add("microfono")
                 }
             }
             if (soportados.isEmpty()) {
@@ -3435,22 +3637,34 @@ class MainActivity : Activity() {
             }
             val origen = request.origin.host ?: ""
             val recursos = soportados.toTypedArray()
-            nuevoDialogo()
+            val conceder: () -> Unit = {
+                val faltan = ArrayList<String>()
+                for (perm in permisosAndroid) {
+                    if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) faltan.add(perm)
+                }
+                if (faltan.isEmpty()) {
+                    request.grant(recursos)
+                } else {
+                    pendientePermisosWeb = Pair(request, recursos)
+                    requestPermissions(faltan.toTypedArray(), REQ_PERMISOS_WEB)
+                }
+            }
+            // Permiso que dejaste concedido «siempre» a este sitio (nunca en pestañas privadas).
+            if (!p.privada && tipos.all { t -> ajustes.permisoRecordado(origen, t) }) {
+                conceder()
+                return
+            }
+            val b = nuevoDialogo()
                 .setTitle("Permiso del sitio")
                 .setMessage(origen + " quiere usar " + etiquetas.joinToString(" y ") + ".")
-                .setPositiveButton("Permitir") { _, _ ->
-                    val faltan = ArrayList<String>()
-                    for (perm in permisosAndroid) {
-                        if (checkSelfPermission(perm) != PackageManager.PERMISSION_GRANTED) faltan.add(perm)
-                    }
-                    if (faltan.isEmpty()) {
-                        request.grant(recursos)
-                    } else {
-                        pendientePermisosWeb = Pair(request, recursos)
-                        requestPermissions(faltan.toTypedArray(), REQ_PERMISOS_WEB)
-                    }
+                .setPositiveButton("Permitir") { _, _ -> conceder() }
+            if (!p.privada && origen.isNotEmpty()) {
+                b.setNeutralButton("Siempre en este sitio") { _, _ ->
+                    for (t in tipos) ajustes.recordarPermiso(origen, t)
+                    conceder()
                 }
-                .setNegativeButton("Denegar") { _, _ -> request.deny() }
+            }
+            b.setNegativeButton("Denegar") { _, _ -> request.deny() }
                 .setOnCancelListener { request.deny() }
                 .show()
         }
@@ -3460,18 +3674,30 @@ class MainActivity : Activity() {
             callback: GeolocationPermissions.Callback?
         ) {
             if (origin == null || callback == null) return
-            nuevoDialogo()
-                .setTitle("Ubicación")
-                .setMessage(Omnibox.hostDe(origin) + " quiere conocer tu ubicación.")
-                .setPositiveButton("Permitir") { _, _ ->
-                    if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
-                        callback.invoke(origin, true, false)
-                    } else {
-                        pendienteUbicacion = Pair(callback, origin)
-                        requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_UBICACION)
-                    }
+            val sitio = Omnibox.hostDe(origin)
+            val conceder: () -> Unit = {
+                if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
+                    callback.invoke(origin, true, false)
+                } else {
+                    pendienteUbicacion = Pair(callback, origin)
+                    requestPermissions(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION), REQ_UBICACION)
                 }
-                .setNegativeButton("Denegar") { _, _ -> callback.invoke(origin, false, false) }
+            }
+            if (!p.privada && ajustes.permisoRecordado(sitio, "ubicacion")) {
+                conceder()
+                return
+            }
+            val b = nuevoDialogo()
+                .setTitle("Ubicación")
+                .setMessage(sitio + " quiere conocer tu ubicación.")
+                .setPositiveButton("Permitir") { _, _ -> conceder() }
+            if (!p.privada && sitio.isNotEmpty()) {
+                b.setNeutralButton("Siempre en este sitio") { _, _ ->
+                    ajustes.recordarPermiso(sitio, "ubicacion")
+                    conceder()
+                }
+            }
+            b.setNegativeButton("Denegar") { _, _ -> callback.invoke(origin, false, false) }
                 .setOnCancelListener { callback.invoke(origin, false, false) }
                 .show()
         }
