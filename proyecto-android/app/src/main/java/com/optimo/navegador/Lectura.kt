@@ -45,7 +45,8 @@ object Lectura {
         try {
             val o = JSONObject(json)
             ajustes.lecturaTam = o.optInt("tam", ajustes.lecturaTam)
-            ajustes.lecturaTema = o.optString("tema", "")
+            val tema = o.optString("tema", "")
+            if (tema.isNotEmpty()) ajustes.lecturaTema = tema
             ajustes.lecturaFuente = o.optString("fuente", "serif")
             ajustes.lecturaInter = o.optInt("inter", ajustes.lecturaInter)
         } catch (e: Exception) {
@@ -69,6 +70,13 @@ class LectorVoz(private val ctx: Context) {
     /** Se llama (en el hilo principal) cuando termina la lectura o falla. */
     var alTerminar: (() -> Unit)? = null
 
+    /** Se llama (en el hilo principal) con el motivo si no se puede hablar. */
+    var alFallo: ((String) -> Unit)? = null
+
+    /** Velocidad y tono (1.0 = normal). */
+    var velocidad: Float = 1f
+    var tono: Float = 1f
+
     fun leer(texto: String, idioma: String) {
         parar()
         hablando = true
@@ -82,7 +90,7 @@ class LectorVoz(private val ctx: Context) {
                 if (listo && pend != null && hablando) {
                     hablar(pend.first, pend.second)
                 } else if (!listo) {
-                    terminar()
+                    fallar("No se pudo iniciar la voz. Comprueba en «ajustes de voz de Android» que hay un motor de síntesis instalado")
                 }
             }
         } else if (listo) {
@@ -99,6 +107,12 @@ class LectorVoz(private val ctx: Context) {
             t.setLanguage(if (t.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE) loc else Locale.getDefault())
         } catch (e: Exception) {
             // Se queda con el idioma por defecto.
+        }
+        try {
+            t.setSpeechRate(velocidad)
+            t.setPitch(tono)
+        } catch (e: Exception) {
+            // Se queda con los valores por defecto.
         }
         val trozos = trocear(texto, minOf(TextToSpeech.getMaxSpeechInputLength() - 100, 3000))
         if (trozos.isEmpty()) {
@@ -118,7 +132,19 @@ class LectorVoz(private val ctx: Context) {
             }
         })
         for (i in trozos.indices) {
-            t.speak(trozos[i], TextToSpeech.QUEUE_ADD, null, if (i == trozos.size - 1) "ultimo" else "p$i")
+            val r = t.speak(trozos[i], TextToSpeech.QUEUE_ADD, null, if (i == trozos.size - 1) "ultimo" else "p$i")
+            if (r != TextToSpeech.SUCCESS) {
+                fallar("La voz no pudo leer el texto. Revisa el motor de voz en los ajustes de Android")
+                return
+            }
+        }
+    }
+
+    private fun fallar(motivo: String) {
+        parar()
+        principal.post {
+            alFallo?.invoke(motivo)
+            alTerminar?.invoke()
         }
     }
 
