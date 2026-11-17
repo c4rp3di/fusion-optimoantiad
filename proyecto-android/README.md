@@ -175,3 +175,9 @@ Ajustes › «Ventanas emergentes y redirecciones…» (probado el caso de pági
 
 ## Pendientes
 Ver PENDIENTES-Optimo.md (oferta de Play en Optimo, eficiencia y batería).
+
+## 1.9.2 — Ajustes de eficiencia y falsa oferta de vídeo
+
+- «Reproducir vídeo de la página en otra app…» ya no se ofrece con recursos de `youtube.com`, `youtu.be`, `youtube-nocookie.com` ni `googlevideo.com`, ni con rutas de interfaz `/s/...` (`ReproductorExterno.esDetectable`).
+- Servicio de segundo plano: bloqueo Wi-Fi `WIFI_MODE_FULL` (antes `FULL_LOW_LATENCY`/`FULL_HIGH_PERF`) y cierre tras ~80 s en pausa (antes ~5 min).
+- Sin compilar ni probar en dispositivo (igual que 1.9.1). Siguen pendientes: sondeo de tamaño de medios, espaciar scripts de vigilancia y prioridad del renderer.
