@@ -53,6 +53,48 @@ function(){
         halladas.push({el:t0,anfitrion:t0,r:r0,z:parseInt(s0.zIndex,10)||0,fuerte:!mult});
       }
     }
+    // Avisos «Adblocker detectado» que no son una capa fija: tarjetas dentro del flujo de la página. Se buscan por su texto.
+    var RX=/ad[\s-]?block(er)?|bloqueador(es)? de (anuncios|publicidad)|ad[\s-]?blocker/i;
+    function txt(n){ return (n.textContent||'').replace(/\s+/g,' ').trim(); }
+    try{
+      var tw=document.createTreeWalker(document.body||document.documentElement,NodeFilter.SHOW_TEXT,null), nodo, vistosTxt=[];
+      while((nodo=tw.nextNode())){
+        if(!RX.test(nodo.nodeValue)) continue;
+        var el0=nodo.parentElement;
+        if(!el0||/^(SCRIPT|STYLE|NOSCRIPT|TITLE|OPTION)$/.test(el0.tagName)) continue;
+        var r1=el0.getBoundingClientRect();
+        if(r1.width===0||r1.height===0) continue;
+        var st1=getComputedStyle(el0);
+        if(st1.display==='none'||st1.visibility==='hidden') continue;
+        var cur=el0, len=txt(cur).length;
+        for(var dd=0;dd<8;dd++){
+          var pa=cur.parentElement;
+          if(!pa||pa===document.body||pa===document.documentElement) break;
+          var pl=txt(pa).length;
+          if(pl>1500||pl>len*4+400) break;
+          cur=pa; len=pl;
+        }
+        // Baja al envoltorio más ajustado que siga teniendo todo el texto (sin arrastrar logotipos ni márgenes).
+        for(var dn=0;dn<8;dn++){
+          var hijos=[], hh=cur.children;
+          for(var hi=0;hi<hh.length;hi++){ if(txt(hh[hi]).length>0) hijos.push(hh[hi]); }
+          if(hijos.length===1&&txt(hijos[0]).length>=len-5){ cur=hijos[0]; len=txt(cur).length; } else break;
+        }
+        if(vistosTxt.indexOf(cur)>=0) continue;
+        vistosTxt.push(cur);
+        var rc=cur.getBoundingClientRect();
+        if(rc.height<80||rc.width<vw*0.4) continue;
+        var tarjeta=len<1500&&!!cur.querySelector('button,a,[role="button"]');
+        halladas.push({el:cur,anfitrion:cur,r:rc,z:0,fuerte:tarjeta});
+      }
+    }catch(e){}
+    // Una misma capa encontrada por dos caminos cuenta una sola vez.
+    var unicas=[];
+    halladas.forEach(function(c){
+      var igual=unicas.filter(function(u){ return u.anfitrion===c.anfitrion; })[0];
+      if(igual){ igual.fuerte=igual.fuerte||c.fuerte; } else unicas.push(c);
+    });
+    halladas=unicas;
     // Si una capa contiene a otra, basta con la exterior.
     var res=[], usados={};
     halladas.forEach(function(c){
