@@ -434,6 +434,47 @@ class Ajustes(contexto: Context) {
             sp.edit().putString("magnet_app", v).apply()
         }
 
+    // ---------------------------------------------------------------- bloqueo de anuncios pausado por sitio
+
+    @Volatile
+    private var pausadosCache: Set<String>? = null
+
+    private fun normalizarSitio(host: String): String = host.trim().lowercase().removePrefix("www.")
+
+    private fun pausados(): Set<String> {
+        var c = pausadosCache
+        if (c == null) {
+            c = HashSet(sp.getStringSet("bloqueo_pausado", emptySet()) ?: emptySet())
+            pausadosCache = c
+        }
+        return c
+    }
+
+    /** ¿Está pausado el bloqueo de anuncios en [host]? Vale también para sus subdominios. */
+    fun bloqueoPausadoEn(host: String): Boolean {
+        val h = normalizarSitio(host)
+        if (h.isEmpty()) return false
+        val p = pausados()
+        if (p.isEmpty()) return false
+        return p.any { h == it || h.endsWith("." + it) }
+    }
+
+    fun pausarBloqueoEn(host: String, pausar: Boolean) {
+        val h = normalizarSitio(host)
+        if (h.isEmpty()) return
+        val s = HashSet(pausados())
+        if (pausar) s.add(h) else s.remove(h)
+        sp.edit().putStringSet("bloqueo_pausado", s).apply()
+        pausadosCache = s
+    }
+
+    fun sitiosPausados(): List<String> = pausados().sorted()
+
+    fun reanudarTodosLosSitios() {
+        sp.edit().remove("bloqueo_pausado").apply()
+        pausadosCache = emptySet()
+    }
+
     // ---------------------------------------------------------------- modo lectura
 
     var lecturaTam: Int
