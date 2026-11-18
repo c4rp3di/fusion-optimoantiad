@@ -783,7 +783,8 @@ class MainActivity : Activity() {
         herramientas = PanelDev(
             this, paleta, ajustes, agenteDev, contenedor,
             { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogo() },
-            { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() }
+            { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() },
+            { modo, a, b -> reglaDevTools(modo, a, b) }
         )
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
@@ -1438,9 +1439,14 @@ class MainActivity : Activity() {
             add("Compartir página") { compartir(p.url) }
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
             if (p.url.startsWith("http")) {
+                val pausadoAqui = bloqueoPausadoEnPagina(p.url)
+                if (!p.privada && (ajustes.bloquearAnuncios || pausadoAqui)) {
+                    add("Bloqueo de anuncios en este sitio: " + (if (pausadoAqui) "pausado (reanudar)" else "activo (pausar)")) { alternarPausaBloqueo(p) }
+                }
                 add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
-                add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
+                // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
+                if (!p.privada) add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
             }
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
@@ -2072,6 +2078,7 @@ class MainActivity : Activity() {
             }
         }
         add("Permisos concedidos a sitios (" + ajustes.totalPermisos() + ")…") { mostrarPermisosSitios() }
+        add("Sitios con el bloqueo de anuncios pausado (" + ajustes.sitiosPausados().size + ")…") { mostrarSitiosPausados() }
         add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
         add("Borrar todo: historial, caché, cookies y permisos") {
             confirmarAccionPrivacidad(
@@ -2163,7 +2170,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.11.4")
+            .setTitle("Optimo 1.12.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -3084,6 +3091,81 @@ class MainActivity : Activity() {
         opciones("Lectura y voz", items)
     }
 
+    // ---------------------------------------------------------------- reglas permanentes desde las herramientas de desarrollo
+
+    /** Guarda una regla del sitio abierto (la misma que «Personalizar este sitio») y la aplica ya en la página. */
+    private fun reglaDevTools(modo: String, a: String, b: String): String {
+        val p = actual ?: return "No hay pestaña activa"
+        val w = p.web ?: return "No hay página cargada"
+        if (p.privada) return "En pestañas privadas no se guardan reglas"
+        val host = (try { Uri.parse(w.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
+        val sitio = ReglasUsuario.clave(host)
+        if (sitio.isEmpty()) return "Solo se guardan reglas en páginas http/https"
+        val nuevo: Boolean
+        val css: String
+        when (modo) {
+            "ocultar" -> {
+                nuevo = ReglasUsuario.agregarOcultar(sitio, a)
+                css = a + "{display:none!important}"
+            }
+            "estilo" -> {
+                nuevo = ReglasUsuario.agregarCss(sitio, a, b)
+                css = b
+            }
+            "cssPropio" -> {
+                nuevo = ReglasUsuario.fijarCssPropio(sitio, a)
+                css = a
+            }
+            else -> return "Regla desconocida"
+        }
+        if (!nuevo) return if (modo == "cssPropio") "El CSS es demasiado largo (máximo 20 000 caracteres)" else "Esa regla ya estaba guardada en $sitio"
+        reinstalarAnuncios()
+        if (css.isNotBlank()) anuncios.aplicarCssAhora(w, css)
+        return "Guardado en $sitio. Se aplicará en tus visitas (Reglas de este sitio)"
+    }
+
+    // ---------------------------------------------------------------- bloqueo de anuncios pausado por sitio
+
+    /** ¿Está pausado el bloqueo en el sitio de [url] (la página, no el recurso que pide)? */
+    private fun bloqueoPausadoEnPagina(url: String): Boolean {
+        if (url.isEmpty()) return false
+        val host = try { Uri.parse(url).host } catch (e: Exception) { null } ?: return false
+        return ajustes.bloqueoPausadoEn(host)
+    }
+
+    /** Menú ⋮ › «Bloqueo de anuncios en este sitio»: pausa o reanuda el bloqueo solo en ese dominio y recarga. */
+    private fun alternarPausaBloqueo(p: Pestana) {
+        val host = (try { Uri.parse(p.url).host } catch (e: Exception) { null } ?: "").lowercase().removePrefix("www.")
+        if (host.isEmpty()) return
+        val pausar = !ajustes.bloqueoPausadoEn(host)
+        ajustes.pausarBloqueoEn(host, pausar)
+        reinstalarAnuncios()
+        for (q in pestanas) {
+            val w = q.web ?: continue
+            if (bloqueoPausadoEnPagina(q.url) == pausar && q.url.isNotEmpty()) w.reload()
+        }
+        toast(if (pausar) "Bloqueo pausado en $host. Recargando…" else "Bloqueo reanudado en $host. Recargando…")
+    }
+
+    private fun mostrarSitiosPausados() {
+        val sitios = ajustes.sitiosPausados()
+        if (sitios.isEmpty()) {
+            toast("No hay sitios con el bloqueo pausado")
+            mostrarPrivacidad()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (sitio in sitios) {
+            items.add(Pair<String, () -> Unit>("Reanudar el bloqueo en $sitio", {
+                ajustes.pausarBloqueoEn(sitio, false)
+                reinstalarAnuncios()
+                toast("Bloqueo reanudado en $sitio. Recarga sus pestañas")
+                mostrarSitiosPausados()
+            }))
+        }
+        opciones("Bloqueo pausado en estos sitios", items)
+    }
+
     // ---------------------------------------------------------------- capas que tapan la página (muros anti-bloqueador, modales)
 
     /** Busca capas a pantalla completa que tapan la página y permite ocultarlas ahora o siempre en este sitio. */
@@ -3749,7 +3831,7 @@ class MainActivity : Activity() {
                     }
                 }
             }
-            if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame) {
+            if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame && !bloqueoPausadoEnPagina(p.url)) {
                 val respuesta = anuncios.interceptar(request)
                 if (respuesta != null) {
                     p.bloqueados.incrementAndGet()
