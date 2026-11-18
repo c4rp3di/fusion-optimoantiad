@@ -241,7 +241,12 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
         }
         if (sb.isEmpty()) return null
         // El indicador evita ejecutar dos veces lo mismo cuando coinciden el script de «*» y el del sitio.
-        return "(function(){ if(window.__optimoAds) return; window.__optimoAds=1;\n$sb})();"
+        // Sitios con el bloqueo pausado por el usuario: este script no hace nada en ellos (ni en sus subdominios).
+        val pausa = JSONArray()
+        for (h in ajustes.sitiosPausados()) pausa.put(h)
+        val guardia = if (pausa.length() == 0) "" else
+            "var P=$pausa,h0=location.hostname;for(var i0=0;i0<P.length;i0++){if(h0===P[i0]||h0.endsWith('.'+P[i0]))return;}\n"
+        return "(function(){ if(window.__optimoAds) return; $guardia window.__optimoAds=1;\n$sb})();"
     }
 
     /** Script con las reglas del usuario para [host]: oculta lo marcado y aplica sus estilos (una hoja por regla: una inválida no estropea el resto). */
