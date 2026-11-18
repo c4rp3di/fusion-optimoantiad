@@ -56,7 +56,9 @@ class PanelDev(
     private val dialogo: () -> AlertDialog.Builder,
     private val avisar: (String) -> Unit,
     private val copiar: (String) -> Unit,
-    private val alCambiarCaptura: () -> Unit
+    private val alCambiarCaptura: () -> Unit,
+    /** Guarda una regla permanente del sitio abierto: modo «ocultar» (a = selector), «estilo» (a = nombre, b = CSS) o «cssPropio» (a = CSS). Devuelve el mensaje para el usuario. */
+    private val reglaSitio: (String, String, String) -> String
 ) {
     private val h = Handler(Looper.getMainLooper())
     private val raiz = LinearLayout(act)
@@ -987,7 +989,14 @@ class PanelDev(
     private fun menuCssGlobal() {
         consulta("cssActual()") { actual ->
             pedirTexto("CSS inyectado en la página", actual ?: "", true) { t ->
-                consulta("css(" + AgenteDev.lit(t) + ")") { r -> avisar(if (r == "ok") "CSS aplicado" else (r ?: "Error")) }
+                consulta("css(" + AgenteDev.lit(t) + ")") { r ->
+                    if (r == "ok") {
+                        avisar("CSS aplicado")
+                        if (t.isNotBlank()) preguntarGuardarCss(t)
+                    } else {
+                        avisar(r ?: "Error")
+                    }
+                }
             }
         }
     }
@@ -1010,7 +1019,8 @@ class PanelDev(
         if (id <= 0) return
         val etiquetas = listOf(
             "Editar atributo…", "Añadir atributo…", "Editar HTML del elemento…", "Editar texto (nodo de texto)…",
-            "Añadir estilo en línea…", "Eliminar elemento", "Copiar selector", "Copiar HTML", "Inyectar CSS en la página…"
+            "Añadir estilo en línea…", "Eliminar elemento", "Copiar selector", "Copiar HTML", "Inyectar CSS en la página…",
+            "★ Eliminar y recordar en este sitio…", "★ Guardar estilo en este sitio…", "Copiar XPath", "Duplicar elemento"
         )
         elegirDeLista("Editar", etiquetas) { i ->
             when (i) {
@@ -1031,12 +1041,83 @@ class PanelDev(
                 4 -> pedirTexto("Añadir al style del elemento", "color: red;", false) { d -> aplicarYRefrescar("estiloAdd($id, " + AgenteDev.lit(d) + ")") }
                 5 -> dialogo().setTitle("Eliminar elemento").setMessage("Se quita de la página (hasta recargarla).")
                     .setPositiveButton("Eliminar") { _, _ -> seleccionado = 0; aplicarYRefrescar("borrar($id)") }
+                    .setNeutralButton("Recordar en el sitio") { _, _ -> guardarOcultarSitio(id) }
                     .setNegativeButton("Cancelar", null).show()
                 6 -> consultaObj("info($id)") { o -> copiar(o.optString("sel")); avisar("Selector copiado") }
                 7 -> consultaObj("info($id)") { o -> copiar(o.optString("html")); avisar("HTML copiado") }
-                else -> menuCssGlobal()
+                8 -> menuCssGlobal()
+                9 -> guardarOcultarSitio(id)
+                10 -> guardarEstiloSitio(id)
+                11 -> consulta("xpath($id)") { x -> if (x.isNullOrEmpty()) avisar("No se pudo calcular") else { copiar(x); avisar("XPath copiado") } }
+                else -> aplicarYRefrescar("duplicar($id)")
             }
         }
+    }
+
+    // --- reglas permanentes del sitio (las mismas de «Personalizar este sitio»)
+
+    /** Oculta el elemento en cada visita al sitio: guarda una regla con un selector corto y estable. */
+    private fun guardarOcultarSitio(id: Int) {
+        consultaObj("selGuardar($id)") { o ->
+            if (o.has("err")) {
+                avisar(o.optString("err"))
+                return@consultaObj
+            }
+            val sel = o.optString("sel")
+            val n = o.optInt("n", 1)
+            dialogo().setTitle("Ocultar siempre en este sitio")
+                .setMessage(
+                    "Regla: ocultar\n" + sel + "\n\nCoincide con " + n + (if (n == 1) " elemento." else " elementos.") +
+                        (if (n > 3) "\nSi son demasiados, elige un elemento más concreto." else "")
+                )
+                .setPositiveButton("Guardar") { _, _ ->
+                    avisar(reglaSitio("ocultar", sel, ""))
+                    seleccionado = 0
+                    refrescarArbol()
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
+    }
+
+    /** Guarda como regla del sitio un estilo para el elemento (se añade «!important» para que gane a los de la página). */
+    private fun guardarEstiloSitio(id: Int) {
+        consultaObj("selGuardar($id)") { o ->
+            if (o.has("err")) {
+                avisar(o.optString("err"))
+                return@consultaObj
+            }
+            val sel = o.optString("sel")
+            val n = o.optInt("n", 1)
+            pedirTexto("Estilo para el sitio · $sel ($n coincidencias)", "color: red;", false) { d ->
+                val decl = conImportante(d)
+                if (decl.isEmpty()) {
+                    avisar("Escribe alguna propiedad, p. ej. color: red;")
+                } else {
+                    avisar(reglaSitio("estilo", "Estilo: " + DevFormato.cortar(sel, 60), "$sel{$decl}"))
+                }
+            }
+        }
+    }
+
+    private fun conImportante(d: String): String {
+        val sb = StringBuilder()
+        for (par in d.split(";")) {
+            val t = par.trim()
+            if (t.isEmpty() || !t.contains(":")) continue
+            sb.append(t)
+            if (!t.contains("!important", ignoreCase = true)) sb.append(" !important")
+            sb.append("; ")
+        }
+        return sb.toString().trim()
+    }
+
+    private fun preguntarGuardarCss(css: String) {
+        dialogo().setTitle("¿Guardar en este sitio?")
+            .setMessage("Este CSS solo vale hasta recargar la página. ¿Quieres guardarlo como CSS propio del sitio para que se aplique en cada visita?")
+            .setPositiveButton("Guardar") { _, _ -> avisar(reglaSitio("cssPropio", css, "")) }
+            .setNegativeButton("No", null)
+            .show()
     }
 
     private fun editarAtributo(id: Int) {
@@ -1522,6 +1603,7 @@ class PanelDev(
         barra.addView(boton("Código fuente", 12f) { verFuente(null) }, lp(0, dp(38), 1.3f))
         barra.addView(boton("Scripts y CSS", 12f) { listarFuentes() }, lp(0, dp(38), 1.2f))
         barra.addView(boton("Copiar", 12f) { copiar(informe); avisar("Informe copiado") }, lp(0, dp(38), 1f))
+        barra.addView(boton("Diagnóstico", 12f) { copiar(diagnosticoCompleto()); avisar("Diagnóstico copiado") }, lp(0, dp(38), 1.3f))
         col.addView(barra, lp(MATCH, WRAP))
         val sv = ScrollView(act)
         sv.setBackgroundColor(paleta.fondo)
@@ -1536,6 +1618,34 @@ class PanelDev(
         pie.tag = "pieCaptura"
         col.addView(pie, lp(MATCH, WRAP))
         return col
+    }
+
+    /** Informe para compartir: datos de la página, errores y avisos de la consola y peticiones bloqueadas o fallidas. Sin cookies, cabeceras ni cuerpos, y sin parámetros de las URL. */
+    private fun diagnosticoCompleto(): String {
+        val p = pestanaActual()
+        val sb = StringBuilder()
+        sb.append("Diagnóstico de Óptimo DevTools\n\n")
+        sb.append(informe.ifEmpty { "(abre antes la pestaña Info para cargar los datos de la página)\n" }).append("\n")
+        if (p != null) {
+            val d = p.dev
+            val todas = ArrayList<EntradaConsola>(d.copiaConsola())
+            todas.addAll(d.agenteConsola)
+            todas.sortBy { it.ts }
+            val graves = todas.filter { it.nivel == "error" || it.nivel == "warn" }
+            sb.append("Consola: ").append(graves.size).append(" errores y avisos\n")
+            for (e in graves.takeLast(40)) {
+                sb.append("  [").append(e.nivel).append("] ").append(DevFormato.cortar(e.texto.replace('\n', ' '), 300)).append("\n")
+            }
+            val red = filasRed(d)
+            val malas = red.filter { it.bloqueado || it.estado >= 400 || it.err != null }
+            sb.append("\nRed: ").append(red.size).append(" peticiones, ").append(malas.size).append(" bloqueadas o con error\n")
+            for (e in malas.takeLast(60)) {
+                val estado = if (e.bloqueado) "BLOQUEADA" else if (e.err != null) "ERROR" else e.estado.toString()
+                sb.append("  ").append(estado).append(" ").append(e.metodo).append(" ").append(DevFormato.cortar(e.url.substringBefore('?'), 200)).append("\n")
+            }
+        }
+        sb.append("\n(No incluye cookies, cabeceras, cuerpos ni parámetros de las URL.)\n")
+        return sb.toString()
     }
 
     private fun capturaTexto(): String =
@@ -1573,6 +1683,8 @@ class PanelDev(
                 sb.append("  primer byte ").append(nav.optInt("ttfb")).append("  ·  descarga ").append(nav.optInt("desc")).append("\n")
                 sb.append("  DOMContentLoaded ").append(nav.optInt("dcl")).append("  ·  carga completa ").append(nav.optInt("carga")).append("\n")
                 if (o.has("fcp")) sb.append("  primer contenido visible ").append(o.optInt("fcp")).append("\n")
+                if (o.has("lcp")) sb.append("  contenido principal (LCP) ").append(o.optInt("lcp")).append("\n")
+                sb.append("  saltos de diseño (CLS) ").append(o.optDouble("cls")).append("\n")
                 sb.append("  protocolo ").append(nav.optString("proto")).append("  ·  ").append(DevFormato.tam(nav.optLong("tam"))).append("\n")
             }
             val mem = o.optJSONObject("mem")
