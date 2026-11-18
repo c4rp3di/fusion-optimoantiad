@@ -274,3 +274,18 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - Probado en Chromium: XPath (HTML, SVG, comillas), pausa/reanudación, etiqueta y regresión de consola, red, DOM, edición y selección táctil; los patrones de redacción, con `java.util.regex`. El Kotlin, sin compilar con el SDK ni probado en el móvil.
 - Se mantiene todo lo de 1.12.0 (guardar reglas, duplicar, LCP/CLS).
 
+## 1.12.2 — DevTools: estilo rápido, sin teclear
+
+Pensado para el móvil: cambiar el aspecto de un elemento y guardarlo como regla del sitio **sin escribir nada**.
+- **🎨 Estilo rápido** (Elementos › Editar › «🎨 Estilo rápido», o el botón 🎨 de la pantalla Estilos): una pantalla dentro del panel, con la página
+  visible arriba, donde cada ajuste es un toque y se ve en vivo: color del texto y del fondo (paleta), letra más grande/pequeña (±2 px), negrita,
+  alineación, margen y relleno (±8 px o ninguno), opacidad, ancho/alto, quitar la fijación de una barra (`position: static`), bordes, esquinas y sombra.
+  Los ajustes relativos se calculan sobre el valor real del elemento y se acumulan (A+ dos veces = +4 px).
+- **💾 Guardar** guarda como regla del sitio (la misma de «Reglas de este sitio») **solo lo que tú cambiaste**: el agente anota los cambios de estilo
+  hechos desde el inspector (no el `style` que ya traía la página). Antes de guardar se muestra la regla, el selector estable y a cuántos elementos afecta.
+- **↶ Deshacer** devuelve el elemento a como estaba (si no tenía `style`, se quita el atributo).
+- «★ Guardar estilo en este sitio…» ya no pide escribir la propiedad: guarda los cambios hechos con Estilo rápido (o con «Añadir estilo en línea»,
+  que sigue existiendo para quien quiera escribir) y, si aún no hay cambios, abre Estilo rápido.
+- Probado en Chromium: ajustes acumulativos, mínimo 0, solo se registra lo cambiado, la regla guardada reproduce el aspecto sin estilos en línea,
+  deshacer con y sin `style` previo. El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
