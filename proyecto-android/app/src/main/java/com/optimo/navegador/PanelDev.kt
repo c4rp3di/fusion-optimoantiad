@@ -308,14 +308,24 @@ class PanelDev(
         raiz.visibility = View.VISIBLE
         ajustarAlto()
         seleccionarTab(tab)
-        agente.asegurar(web) { recargarTab() }
+        listoAgente(web)
         h.removeCallbacks(sondeo)
         h.postDelayed(sondeo, 700)
+    }
+
+    /** Asegura el agente en la página, lo saca de la pausa y recarga la pestaña visible. */
+    private fun listoAgente(web: WebView) {
+        agente.asegurar(web) {
+            consulta("pausar(false)") { }
+            recargarTab()
+        }
     }
 
     fun ocultar() {
         if (eligiendo) detenerElegir()
         consulta("quitarResalte()") { }
+        // Con el panel cerrado el agente no registra nada (salvo que se pidiera captura desde el inicio).
+        if (!ajustes.devCaptura) consulta("pausar(true)") { }
         cerrarPila()
         visible = false
         raiz.visibility = View.GONE
@@ -342,6 +352,9 @@ class PanelDev(
 
     /** Empieza a cargarse una página nueva en la pestaña activa. */
     fun alNavegar() {
+        informe = ""
+        infoUrl = ""
+        infoTitulo = ""
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -356,10 +369,13 @@ class PanelDev(
     fun alCargada() {
         if (!visible) return
         val web = webActual() ?: return
-        agente.asegurar(web) { recargarTab() }
+        listoAgente(web)
     }
 
     fun alCambiarPestana() {
+        informe = ""
+        infoUrl = ""
+        infoTitulo = ""
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -367,7 +383,7 @@ class PanelDev(
         eligiendo = false
         seleccionarTab(tab)
         val web = webActual() ?: return
-        agente.asegurar(web) { recargarTab() }
+        listoAgente(web)
     }
 
     private fun seleccionarTab(i: Int) {
@@ -687,6 +703,16 @@ class PanelDev(
         listaArbol = lista
         col.addView(lista, lp(MATCH, 0, 1f))
 
+        // Jerarquía del elemento seleccionado (html › body › div.caja › p)
+        val migas = texto("", 11f, paleta.tenue, true)
+        migas.setPadding(dp(8), dp(3), dp(8), dp(3))
+        migas.setSingleLine(true)
+        migas.ellipsize = TextUtils.TruncateAt.START
+        migas.setBackgroundColor(paleta.barra)
+        rutaTexto = migas
+        col.addView(migas, lp(MATCH, WRAP))
+        actualizarMigas()
+
         val barra = LinearLayout(act)
         barra.orientation = LinearLayout.HORIZONTAL
         barra.gravity = Gravity.CENTER_VERTICAL
@@ -702,6 +728,40 @@ class PanelDev(
         return col
     }
 
+    private var rutaTexto: TextView? = null
+
+    private fun nombreNodo(n: NodoVista): String {
+        val m = Regex("^<([A-Za-z][A-Za-z0-9-]*)").find(n.et) ?: return if (n.t == 3) "#texto" else "…"
+        var r = m.groupValues[1]
+        val id = Regex("\\sid=\"([^\"]*)\"").find(n.et)
+        val cl = Regex("\\sclass=\"([^\"\\s]*)").find(n.et)
+        if (id != null && id.groupValues[1].isNotEmpty()) r += "#" + id.groupValues[1]
+        else if (cl != null && cl.groupValues[1].isNotEmpty()) r += "." + cl.groupValues[1]
+        return r
+    }
+
+    private fun actualizarMigas() {
+        val tv = rutaTexto ?: return
+        val idx = arbol.indexOfFirst { it.id == seleccionado }
+        if (seleccionado <= 0 || idx < 0) {
+            tv.text = "Sin selección: toca un elemento o usa «Elegir»"
+            return
+        }
+        val partes = ArrayList<String>()
+        var nivel = arbol[idx].nivel
+        partes.add(nombreNodo(arbol[idx]))
+        var k = idx - 1
+        while (k >= 0 && nivel > 0) {
+            if (arbol[k].nivel < nivel) {
+                nivel = arbol[k].nivel
+                partes.add(nombreNodo(arbol[k]))
+            }
+            k--
+        }
+        partes.reverse()
+        tv.text = partes.joinToString(" › ")
+    }
+
     private fun conSeleccion(f: (Int) -> Unit) {
         if (seleccionado > 0) f(seleccionado) else avisar("Toca un elemento del árbol o usa «Elegir»")
     }
@@ -709,6 +769,7 @@ class PanelDev(
     private fun notificarArbol() {
         adaptadorArbol.datos = ArrayList(arbol)
         adaptadorArbol.notifyDataSetChanged()
+        actualizarMigas()
     }
 
     private fun parseNodos(arr: JSONArray?, nivel: Int): List<NodoVista> {
@@ -790,6 +851,7 @@ class PanelDev(
     private fun seleccionar(id: Int) {
         seleccionado = id
         adaptadorArbol.notifyDataSetChanged()
+        actualizarMigas()
         consulta("resaltar($id)") { }
     }
 
@@ -1593,6 +1655,8 @@ class PanelDev(
 
     private var textoInfo: TextView? = null
     private var informe = ""
+    private var infoUrl = ""
+    private var infoTitulo = ""
 
     private fun construirInfo(): View {
         val col = LinearLayout(act)
@@ -1621,11 +1685,20 @@ class PanelDev(
     }
 
     /** Informe para compartir: datos de la página, errores y avisos de la consola y peticiones bloqueadas o fallidas. Sin cookies, cabeceras ni cuerpos, y sin parámetros de las URL. */
+    /** El informe de la pestaña Info listo para compartir: la URL sin credenciales, consulta ni fragmento, y el título redactado. */
+    private fun informeSeguro(): String {
+        var t = informe
+        if (t.isEmpty()) return t
+        if (infoUrl.isNotEmpty()) t = t.replace(infoUrl, DevFormato.sinParametros(infoUrl))
+        if (infoTitulo.isNotEmpty()) t = t.replace(infoTitulo, DevFormato.cortar(DevFormato.redactarTexto(infoTitulo), 200))
+        return t
+    }
+
     private fun diagnosticoCompleto(): String {
         val p = pestanaActual()
         val sb = StringBuilder()
         sb.append("Diagnóstico de Óptimo DevTools\n\n")
-        sb.append(informe.ifEmpty { "(abre antes la pestaña Info para cargar los datos de la página)\n" }).append("\n")
+        sb.append(informeSeguro().ifEmpty { "(abre antes la pestaña Info para cargar los datos de la página)\n" }).append("\n")
         if (p != null) {
             val d = p.dev
             val todas = ArrayList<EntradaConsola>(d.copiaConsola())
@@ -1634,17 +1707,17 @@ class PanelDev(
             val graves = todas.filter { it.nivel == "error" || it.nivel == "warn" }
             sb.append("Consola: ").append(graves.size).append(" errores y avisos\n")
             for (e in graves.takeLast(40)) {
-                sb.append("  [").append(e.nivel).append("] ").append(DevFormato.cortar(e.texto.replace('\n', ' '), 300)).append("\n")
+                sb.append("  [").append(e.nivel).append("] ").append(DevFormato.cortar(DevFormato.redactarTexto(e.texto.replace('\n', ' ')), 300)).append("\n")
             }
             val red = filasRed(d)
             val malas = red.filter { it.bloqueado || it.estado >= 400 || it.err != null }
             sb.append("\nRed: ").append(red.size).append(" peticiones, ").append(malas.size).append(" bloqueadas o con error\n")
             for (e in malas.takeLast(60)) {
                 val estado = if (e.bloqueado) "BLOQUEADA" else if (e.err != null) "ERROR" else e.estado.toString()
-                sb.append("  ").append(estado).append(" ").append(e.metodo).append(" ").append(DevFormato.cortar(e.url.substringBefore('?'), 200)).append("\n")
+                sb.append("  ").append(estado).append(" ").append(e.metodo).append(" ").append(DevFormato.cortar(DevFormato.sinParametros(e.url), 200)).append("\n")
             }
         }
-        sb.append("\n(No incluye cookies, cabeceras, cuerpos ni parámetros de las URL.)\n")
+        sb.append("\n(No incluye cookies, cabeceras, cuerpos ni parámetros de las URL. Los valores que parecen secretos en los mensajes de consola van como [redactado].)\n")
         return sb.toString()
     }
 
@@ -1699,6 +1772,8 @@ class PanelDev(
             sb.append("  captura desde el inicio: ").append(if (ajustes.devCaptura) "sí" else "no").append("\n")
             sb.append("\nAgente de usuario\n  ").append(o.optString("ua")).append("\n")
             informe = sb.toString()
+            infoUrl = o.optString("url")
+            infoTitulo = o.optString("titulo")
             tv.text = informe
         }
     }
