@@ -158,6 +158,46 @@ object DevFormato {
 
     fun cortar(s: String, n: Int): String = if (s.length > n) s.substring(0, n) + "…" else s
 
+    // --- redacción de secretos al compartir (patrones probados con java.util.regex)
+
+    private val PARAM_SENSIBLE = Regex(
+        "([?&;#][^=&#\\s]*(?:token|secret|passw|pwd|apikey|api_key|api-key|auth|signature|session|credential|jwt)[^=&#\\s]*=|[?&;#](?:key|sig|sid|code)=)[^&#\\s]*",
+        RegexOption.IGNORE_CASE
+    )
+    /** Credenciales dentro de la URL: «usuario:clave@» o un token suelto como «ghp_xxx@». */
+    private val USERINFO = Regex("(https?://)[^/\\s@]+@", RegexOption.IGNORE_CASE)
+    private val BEARER = Regex("\\b(Bearer|Basic)\\s+[A-Za-z0-9._~+/=-]{8,}", RegexOption.IGNORE_CASE)
+    private val JWT = Regex("\\beyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]*")
+    private val CLAVE_VALOR = Regex(
+        "\\b(password|passwd|pwd|secret|token|api[_-]?key|authorization|cookie)\\b(\\s*[:=]\\s*)[\"']?(?:(?:Bearer|Basic)\\s+)?[^\\s\"',;&]+[\"']?",
+        RegexOption.IGNORE_CASE
+    )
+    private val LARGA = Regex("(?=[A-Za-z0-9+/_=-]*\\d)(?=[A-Za-z0-9+/_=-]*[A-Za-z])[A-Za-z0-9+/_=-]{32,}")
+
+    /** La URL sin credenciales, sin «?consulta» y sin «#fragmento» (los tokens OAuth suelen ir en el fragmento). */
+    fun sinParametros(url: String): String {
+        var s = USERINFO.replace(url, "\$1")
+        val i = s.indexOfAny(charArrayOf('?', '#'))
+        if (i >= 0) s = s.substring(0, i)
+        return s
+    }
+
+    /** Conserva la URL pero tapa credenciales y los valores de parámetros que suelen ser secretos. */
+    fun redactarUrl(url: String): String {
+        val s = USERINFO.replace(url, "\$1[redactado]@")
+        return PARAM_SENSIBLE.replace(s, "\$1[redactado]")
+    }
+
+    /** Para texto libre (consola, título): además de las URL, Bearer/Basic, JWT, «clave: valor» sensibles y cadenas largas. */
+    fun redactarTexto(t: String): String {
+        var s = redactarUrl(t)
+        s = BEARER.replace(s, "\$1 [redactado]")
+        s = JWT.replace(s, "[jwt redactado]")
+        s = CLAVE_VALOR.replace(s, "\$1\$2[redactado]")
+        s = LARGA.replace(s, "[…redactado]")
+        return s
+    }
+
     /** Reconstruye la petición como orden curl (solo las cabeceras que puso la página). */
     fun curl(metodo: String, url: String, cabeceras: Map<String, String>): String {
         fun q(s: String) = "'" + s.replace("'", "'\\''") + "'"
