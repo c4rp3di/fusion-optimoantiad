@@ -10,6 +10,7 @@
   var MAX = 500;
   var seq = 0, ver = 0;
   var cons = [], red = [];
+  var activo = true;   // false = en pausa (panel cerrado): todo pasa sin registrarse
 
   function corto(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + '…(' + (s.length - n) + ' más)' : s; }
   function recortar(s, n) { s = String(s); return s.length > n ? s.slice(0, n) + '…' : s; }
@@ -138,12 +139,14 @@
       if (typeof console[nv] === 'function') orig[nv] = console[nv];
     });
     var emitir = function (nivel, txt) {
+      if (!activo) { try { orig.log.call(console, txt); } catch (e) { } return; }
       agregar(cons, { t: nivel, m: txt, o: origen() });
       try { orig.log.call(console, MARCA + txt); } catch (e) { }
     };
     ['log', 'info', 'warn', 'error', 'debug'].forEach(function (nv) {
       if (!orig[nv]) return;
       console[nv] = function () {
+        if (!activo) { try { return orig[nv].apply(console, arguments); } catch (e) { } return; }
         try { emitir(nv, formatear(arguments)); } catch (e) { }
       };
     });
@@ -223,6 +226,7 @@
     var of = window.fetch;
     if (typeof of === 'function') {
       window.fetch = function (input, init) {
+        if (!activo) return of.apply(this, arguments);
         var e = null, ini = performance.now();
         try {
           var url, met = 'GET', hd = null;
@@ -260,7 +264,7 @@
       var mapa = new WeakMap();
       var oOpen = XP.open, oSend = XP.send, oSet = XP.setRequestHeader;
       XP.open = function (met, url) {
-        try { var e = nuevaRed('xhr', String(met).toUpperCase(), absoluta(String(url))); e.rq = {}; mapa.set(this, e); } catch (x) { }
+        if (activo) try { var e = nuevaRed('xhr', String(met).toUpperCase(), absoluta(String(url))); e.rq = {}; mapa.set(this, e); } catch (x) { }
         return oOpen.apply(this, arguments);
       };
       XP.setRequestHeader = function (k, v) {
@@ -307,6 +311,7 @@
       window.WebSocket = new Proxy(OW, {
         construct: function (t, args, nt) {
           var ws = Reflect.construct(t, args, nt);
+          if (!activo) return ws;
           try {
             var ini = performance.now();
             var e = nuevaRed('ws', 'WS', String(args[0]));
@@ -338,6 +343,7 @@
   }
   var navE = null;
   function rt(ent) {
+    if (!activo) return;
     try {
       var it = ent.initiatorType;
       if (it === 'fetch' || it === 'xmlhttprequest') return;
@@ -498,15 +504,17 @@
   function xpath(i) {
     var n = nodo(i);
     if (!n || n.nodeType !== 1) return '';
-    var partes = [];
+    var partes = [], xh = 'http://www.w3.org/1999/xhtml';
     for (var x = n; x && x.nodeType === 1; x = x.parentNode) {
-      var k = 1, s = x;
-      while ((s = s.previousElementSibling)) { if (s.localName === x.localName) k++; }
-      partes.unshift(x.localName + '[' + k + ']');
-      if (x.id && document.getElementById(x.id) === x) { partes[0] = '*[@id="' + x.id.replace(/"/g, '') + '"]'; break; }
+      var k = 1, s = x, html = x.namespaceURI === xh;
+      while ((s = s.previousElementSibling)) { if (s.localName === x.localName && (s.namespaceURI === xh) === html) k++; }
+      // SVG/MathML: en un documento HTML, XPath solo los alcanza con local-name().
+      partes.unshift((html ? x.localName : '*[local-name()="' + x.localName + '"]') + '[' + k + ']');
+      if (x.id && x.id.indexOf('"') < 0 && document.getElementById(x.id) === x) { partes[0] = '*[@id="' + x.id + '"]'; break; }
     }
     return '//' + partes.join('/');
   }
+  function pausar(b) { activo = !b; return 'ok'; }
   function duplicar(i) {
     var n = nodo(i);
     if (!n || n.nodeType !== 1 || !n.parentNode || n === document.documentElement) return 'No se puede duplicar este nodo';
@@ -631,6 +639,11 @@
     ov = document.createElement('div');
     ov.setAttribute('data-optimo-dev', '1');
     ov.style.cssText = 'position:fixed;z-index:2147483647;pointer-events:none;box-sizing:border-box;background:rgba(111,168,220,.4);outline:2px solid #1a73e8;display:none;left:0;top:0;width:0;height:0';
+    var et = document.createElement('div');
+    et.setAttribute('data-optimo-dev', '1');
+    et.style.cssText = 'position:absolute;left:0;top:-20px;max-width:90vw;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font:11px/16px monospace;color:#fff;background:#1a73e8;padding:1px 5px;border-radius:3px;pointer-events:none';
+    ov.appendChild(et);
+    ov._et = et;
     document.documentElement.appendChild(ov);
     return ov;
   }
@@ -639,6 +652,10 @@
     o.style.display = 'block';
     o.style.left = r.left + 'px'; o.style.top = r.top + 'px';
     o.style.width = r.width + 'px'; o.style.height = r.height + 'px';
+    if (o._et) {
+      o._et.textContent = nodoStr(n) + '  ' + Math.round(r.width) + '×' + Math.round(r.height);
+      o._et.style.top = r.top < 22 ? '2px' : '-20px';
+    }
   }
   function resaltar(i) {
     try {
@@ -817,7 +834,7 @@
     consola: consola, red: redLista, detalleRed: redDetalle, limpiarConsola: limpiarConsola, limpiarRed: limpiarRed,
     hijos: hijos, camino: camino, info: info, estilos: estilos,
     attr: attr, html: html, texto: texto, borrar: borrar, estiloAdd: estiloAdd, css: css, cssActual: cssActual,
-    selGuardar: selGuardar, xpath: xpath, duplicar: duplicar,
+    selGuardar: selGuardar, xpath: xpath, duplicar: duplicar, pausar: pausar,
     resaltar: resaltar, quitarResalte: quitarResalte, elegir: elegir, elegido: elegido,
     ev: ev, almacen: almacen, almSet: almSet, almDel: almDel, almVer: almVer,
     fuentes: fuentes, rend: rend, traer: traer, bd: bd, leer: leer
