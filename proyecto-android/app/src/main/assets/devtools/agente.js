@@ -514,6 +514,60 @@
     }
     return '//' + partes.join('/');
   }
+
+  // ------------------------------------------------------------ cambios de estilo hechos desde el inspector (se pueden guardar como regla)
+  var cambios = {}, bases = {};   // por id de nodo: {propiedad: valor} y el atributo style original (null si no tenía)
+  function guardarBase(i, n) { if (!(i in bases)) bases[i] = n.hasAttribute('style') ? n.getAttribute('style') : null; }
+  function parsearEstilo(css) {
+    var o = {};
+    try {
+      var t = document.createElement('div');
+      t.style.cssText = css || '';
+      for (var k = 0; k < t.style.length; k++) o[t.style[k]] = t.style.getPropertyValue(t.style[k]);
+    } catch (e) { }
+    return o;
+  }
+  function registrarDiff(i, viejoCss, nuevoCss) {
+    var a = parsearEstilo(viejoCss), b = parsearEstilo(nuevoCss), hay = false, k;
+    for (k in b) {
+      if (a[k] !== b[k]) { (cambios[i] || (cambios[i] = {}))[k] = b[k]; hay = true; }
+    }
+    return hay;
+  }
+  // Lo que se guardaría: selector estable + los estilos cambiados (con !important para ganar a los de la página).
+  function guardable(i) {
+    var n = nodo(i);
+    if (!n || n.nodeType !== 1) return JSON.stringify({ err: 'Selecciona un elemento (no un nodo de texto)' });
+    if (n === document.documentElement || n === document.body) return JSON.stringify({ err: 'No se guardan reglas sobre <html> ni <body>' });
+    var sel = selEstable(n, false), c = cuentaSel(sel);
+    if (c > 6) { sel = selEstable(n, true); c = cuentaSel(sel); }
+    if (!sel) return JSON.stringify({ err: 'No se pudo construir un selector' });
+    var props = cambios[i] || {}, partes = [], k;
+    for (k in props) partes.push(k + ':' + props[k] + '!important');
+    return JSON.stringify({ sel: sel, n: c, tag: n.localName, props: props, css: partes.length ? sel + '{' + partes.join(';') + '}' : '' });
+  }
+  function olvidar(i) { delete cambios[i]; delete bases[i]; return 'ok'; }
+  function deshacerEstilos(i) {
+    try {
+      var n = nodo(i);
+      if (!n || n.nodeType !== 1) return 'El elemento ya no existe';
+      if (i in bases) { if (bases[i] === null) n.removeAttribute('style'); else n.setAttribute('style', bases[i]); }
+      delete cambios[i]; delete bases[i];
+      return 'ok';
+    } catch (e) { return 'Error: ' + e.message; }
+  }
+  // Suma [delta] px al valor calculado de cada propiedad (separadas por comas), sin bajar de [minimo]: «+2 px» sin teclear.
+  function ajustarPx(i, props, delta, minimo) {
+    var n = nodo(i);
+    if (!n || n.nodeType !== 1) return 'El elemento ya no existe';
+    var cs = getComputedStyle(n), ps = String(props).split(','), decl = [];
+    for (var k = 0; k < ps.length; k++) {
+      var v = parseFloat(cs.getPropertyValue(ps[k]));
+      if (isNaN(v)) v = 0;
+      decl.push(ps[k] + ':' + Math.max(minimo, Math.round((v + delta) * 10) / 10) + 'px');
+    }
+    return estiloAdd(i, decl.join(';'));
+  }
   function pausar(b) { activo = !b; return 'ok'; }
   function duplicar(i) {
     var n = nodo(i);
@@ -580,7 +634,10 @@
     try {
       var n = nodo(i);
       if (!n || n.nodeType !== 1) return 'El nodo ya no existe';
-      if (valor === null || valor === undefined) n.removeAttribute(nombre); else n.setAttribute(nombre, valor);
+      var antes = (nombre === 'style') ? (n.getAttribute('style') || '') : '';
+      if (nombre === 'style') guardarBase(i, n);
+      if (valor === null || valor === undefined) { n.removeAttribute(nombre); if (nombre === 'style') { delete cambios[i]; delete bases[i]; } }
+      else { n.setAttribute(nombre, valor); if (nombre === 'style') registrarDiff(i, antes, valor); }
       return 'ok';
     } catch (e) { return 'Error: ' + e.message; }
   }
@@ -612,8 +669,10 @@
     try {
       var n = nodo(i);
       if (!n || n.nodeType !== 1) return 'El nodo ya no existe';
-      n.style.cssText = (n.style.cssText ? n.style.cssText + ';' : '') + decl;
-      return 'ok';
+      guardarBase(i, n);
+      var antes = n.style.cssText;
+      n.style.cssText = (antes ? antes + ';' : '') + decl;
+      return registrarDiff(i, antes, n.style.cssText) ? 'ok' : 'Ya estaba así, o la declaración no es válida';
     } catch (e) { return 'Error: ' + e.message; }
   }
   function css(txt) {
@@ -835,6 +894,7 @@
     hijos: hijos, camino: camino, info: info, estilos: estilos,
     attr: attr, html: html, texto: texto, borrar: borrar, estiloAdd: estiloAdd, css: css, cssActual: cssActual,
     selGuardar: selGuardar, xpath: xpath, duplicar: duplicar, pausar: pausar,
+    guardable: guardable, olvidar: olvidar, deshacerEstilos: deshacerEstilos, ajustarPx: ajustarPx,
     resaltar: resaltar, quitarResalte: quitarResalte, elegir: elegir, elegido: elegido,
     ev: ev, almacen: almacen, almSet: almSet, almDel: almDel, almVer: almVer,
     fuentes: fuentes, rend: rend, traer: traer, bd: bd, leer: leer
