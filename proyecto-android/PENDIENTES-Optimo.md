@@ -1,6 +1,6 @@
 # Pendientes de Optimo y Optimo Play
 
-Estado (1.9.2, 1.10.0 y 1.11.0 aplican: oferta en YouTube y Wi-Fi/cierre en pausa del servicio): Optimo 1.7.2 y Optimo Play 0.2.1 entregados. Nada de lo siguiente está aplicado.
+Estado (1.9.2, 1.10.0, 1.11.0 y 1.11.7 aplican: oferta en YouTube y Wi-Fi/cierre en pausa del servicio): Optimo 1.7.2 y Optimo Play 0.2.1 entregados. Nada de lo siguiente está aplicado.
 
 ## 1. Oferta de «Reproducir en Optimo Play» (Optimo)
 Causa confirmada con el panel Información: Optimo detectó `youtube.com/s/search/audio/success.mp3` (sonido de interfaz de 6.636 bytes)
