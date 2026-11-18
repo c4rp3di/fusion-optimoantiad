@@ -234,3 +234,33 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - Se puede **arrastrar la barra** para buscar: Optimo coloca `currentTime` del vídeo de la página. En directos o cuando la duración es desconocida no hay barra de búsqueda.
 - Se elimina el diagnóstico del audio (menú, registro `__optimoLog` en `segundo_plano.js` y `ServicioSegundoPlano.diag`).
 - Probado el JS con un DOM simulado; el Kotlin, sin compilar con el SDK y sin probar en el móvil.
+
+## 1.11.6 — Pausar el bloqueo en un sitio
+
+- Menú ⋮ › **«Bloqueo de anuncios en este sitio: activo (pausar)»**: pausa o reanuda el bloqueo solo en ese dominio (y sus subdominios) y recarga la pestaña. En un sitio pausado no se bloquean peticiones ni actúan los scripts de página de Óptimo (ocultar huecos, saltar anuncios, datos de anuncios de YouTube). El bloqueo normal sigue en el resto de sitios.
+- Tus **reglas propias** (ocultar elementos, estilos) se siguen aplicando en un sitio pausado.
+- Ajustes › Privacidad y datos › **«Sitios con el bloqueo de anuncios pausado»**: lista para reanudar cada uno.
+- El menú muestra la opción aunque el bloqueo global esté desactivado solo si el sitio está pausado (para poder reanudarlo).
+- Límite: en la primera petición tras un cambio de dirección dentro de una pestaña puede usarse todavía el sitio anterior para decidir; recargar lo corrige.
+- Probada la lógica de los scripts en Chromium; Kotlin sin compilar con el SDK ni probado en el móvil.
+
+## 1.11.7 — Menos trabajo de fondo en los scripts de saltar anuncios
+
+- `skip_yt.js` y `skip_generico.js` pasan de `setInterval` fijo a una cadencia **adaptable**: 500 ms (YouTube) / 1 s (resto) con la app delante; **2 s en segundo plano** (usan el indicador `__optimoBg` que ya pone Optimo al salir); y se espacian hasta 1,5 s (YouTube) / 4 s (resto) cuando llevan un rato sin encontrar anuncios, volviendo a la cadencia normal al haber cambios en la página o un anuncio.
+- Menos CPU y menos despertares en pestañas abiertas mucho tiempo y en reproducción con la pantalla apagada.
+- **No se toca la prioridad del renderer** (`RENDERER_PRIORITY_IMPORTANT`): bajarla sin probarla en un móvil podría cortar el audio de fondo, y la ganancia esperada es pequeña. Queda como pendiente a medir.
+- Ya aplicado antes: Wi-Fi `WIFI_MODE_FULL` y cierre del servicio a los ~80 s en pausa (1.9.2).
+- JS probado en Chromium; sin medir consumo real (falta la comparación de batería con `dumpsys batterystats`).
+
+## 1.12.0 — DevTools: guardar lo que haces como regla del sitio
+
+- **Elementos › ✎ Editar** (menú de edición del elemento seleccionado):
+  - **★ Eliminar y recordar en este sitio…**: guarda una regla de *ocultar* con un selector corto y estable (id o clases; posicional si no hay otra forma) y muestra **a cuántos elementos afecta** antes de guardar. También hay un botón «Recordar en el sitio» en el diálogo de «Eliminar elemento». Se oculta con CSS, no quitándolo del DOM, para no romper los scripts de la página.
+  - **★ Guardar estilo en este sitio…**: escribes las propiedades (p. ej. `color: red;`) y se guarda como regla de estilo (con `!important`).
+  - **Inyectar CSS en la página…**: tras aplicarlo pregunta si guardarlo como **CSS propio del sitio**.
+  - **Copiar XPath** y **Duplicar elemento** (nuevos).
+- Lo guardado es lo mismo que «Personalizar este sitio»: aparece en «Reglas de este sitio» y se aplica en cada visita. Editar texto, HTML o atributos **no** se guarda (las páginas repintan esos nodos): siguen siendo temporales.
+- **Info:** ahora muestra el contenido principal (LCP) y los saltos de diseño (CLS), y el botón **«Diagnóstico»** copia un informe para compartir: datos de la página, errores y avisos de la consola y peticiones bloqueadas o fallidas. No incluye cookies, cabeceras, cuerpos ni parámetros de las URL.
+- **Pestañas privadas:** no se guardan reglas ni pausas de bloqueo desde ellas (se guardarían en disco con el nombre del sitio). Nota: «Bloquear un anuncio (tocar)» y la pulsación larga siguen guardando reglas también en privadas, como antes.
+- Agente (`agente.js`): nuevas funciones `selGuardar`, `xpath` y `duplicar`; observadores de LCP y CLS. Probadas en Chromium (selector, XPath, duplicado, métricas). El Kotlin del panel, sin compilar con el SDK ni probado en el móvil.
+- No incluido todavía: modo sencillo y Óptimo Inspector (auditoría), inspector CSS de reglas aplicadas con casillas, red avanzada y HAR (ver `Optimo-DevTools-plan.md`, entregas 1.13 y 1.14).
