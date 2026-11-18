@@ -467,6 +467,52 @@
     }
     return partes.join(' > ');
   }
+  // ------------------------------------------------------------ guardar como regla del sitio
+  var lcpMs = 0, clsVal = 0;
+  try { new PerformanceObserver(function (l) { var e = l.getEntries(); if (e.length) lcpMs = Math.round(e[e.length - 1].startTime); }).observe({ type: 'largest-contentful-paint', buffered: true }); } catch (e) { }
+  try { new PerformanceObserver(function (l) { l.getEntries().forEach(function (x) { if (!x.hadRecentInput) clsVal += x.value; }); }).observe({ type: 'layout-shift', buffered: true }); } catch (e) { }
+  function cuentaSel(s) { try { return document.querySelectorAll(s).length; } catch (e) { return 0; } }
+  // Selector corto y estable (id o clases; posicional si no hay otra forma): el que se guarda en las reglas del sitio.
+  function selEstable(n0, posicional) {
+    var p = [], m = n0;
+    for (var d = 0; m && m.nodeType === 1 && m !== document.body && m !== document.documentElement && d < (posicional ? 12 : 5); d++, m = m.parentElement) {
+      var t = m.localName;
+      if (m.id && !/\d{4,}/.test(m.id)) { p.unshift(t + '#' + esc(m.id)); break; }
+      var cl = posicional ? [] : (typeof m.className === 'string' ? m.className : '').trim().split(/\s+/).filter(function (c) { return c && !/\d{3,}/.test(c); }).slice(0, 2);
+      if (cl.length) { t += '.' + cl.map(esc).join('.'); }
+      else { var k = 1, s2 = m; while ((s2 = s2.previousElementSibling)) { if (s2.localName === m.localName) k++; } t += ':nth-of-type(' + k + ')'; }
+      p.unshift(t);
+      if (!posicional && cuentaSel(p.join('>')) === 1) break;
+    }
+    return p.join('>');
+  }
+  function selGuardar(i) {
+    var n = nodo(i);
+    if (!n || n.nodeType !== 1) return JSON.stringify({ err: 'Selecciona un elemento (no un nodo de texto)' });
+    if (n === document.documentElement || n === document.body) return JSON.stringify({ err: 'No se guardan reglas sobre <html> ni <body>' });
+    var s = selEstable(n, false), c = cuentaSel(s);
+    if (c > 6) { s = selEstable(n, true); c = cuentaSel(s); }
+    if (!s) return JSON.stringify({ err: 'No se pudo construir un selector' });
+    return JSON.stringify({ sel: s, n: c, tag: n.localName });
+  }
+  function xpath(i) {
+    var n = nodo(i);
+    if (!n || n.nodeType !== 1) return '';
+    var partes = [];
+    for (var x = n; x && x.nodeType === 1; x = x.parentNode) {
+      var k = 1, s = x;
+      while ((s = s.previousElementSibling)) { if (s.localName === x.localName) k++; }
+      partes.unshift(x.localName + '[' + k + ']');
+      if (x.id && document.getElementById(x.id) === x) { partes[0] = '*[@id="' + x.id.replace(/"/g, '') + '"]'; break; }
+    }
+    return '//' + partes.join('/');
+  }
+  function duplicar(i) {
+    var n = nodo(i);
+    if (!n || n.nodeType !== 1 || !n.parentNode || n === document.documentElement) return 'No se puede duplicar este nodo';
+    n.parentNode.insertBefore(n.cloneNode(true), n.nextSibling);
+    return 'ok';
+  }
   function info(i) {
     var n = nodo(i);
     if (!n) return JSON.stringify({ err: 'El nodo ya no existe' });
@@ -737,6 +783,8 @@
       }
       performance.getEntriesByType('paint').forEach(function (p) { if (p.name === 'first-contentful-paint') o.fcp = Math.round(p.startTime); });
     } catch (e) { }
+    if (lcpMs) o.lcp = lcpMs;
+    o.cls = Math.round(clsVal * 1000) / 1000;
     try { if (performance.memory) o.mem = { u: performance.memory.usedJSHeapSize, t: performance.memory.totalJSHeapSize, l: performance.memory.jsHeapSizeLimit }; } catch (e) { }
     return JSON.stringify(o);
   }
@@ -769,6 +817,7 @@
     consola: consola, red: redLista, detalleRed: redDetalle, limpiarConsola: limpiarConsola, limpiarRed: limpiarRed,
     hijos: hijos, camino: camino, info: info, estilos: estilos,
     attr: attr, html: html, texto: texto, borrar: borrar, estiloAdd: estiloAdd, css: css, cssActual: cssActual,
+    selGuardar: selGuardar, xpath: xpath, duplicar: duplicar,
     resaltar: resaltar, quitarResalte: quitarResalte, elegir: elegir, elegido: elegido,
     ev: ev, almacen: almacen, almSet: almSet, almDel: almDel, almVer: almVer,
     fuentes: fuentes, rend: rend, traer: traer, bd: bd, leer: leer
