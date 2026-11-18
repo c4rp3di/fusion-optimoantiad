@@ -1041,6 +1041,7 @@ class PanelDev(
             pintar("")
             filtro.alCambiar { pintar(it) }
             val acciones: List<Pair<String, () -> Unit>> = listOf(
+                "🎨" to { mostrarEstiloRapido(id) },
                 "＋ Estilo" to { pedirTexto("Añadir al style del elemento", "color: red;", false) { d -> aplicarYRefrescar("estiloAdd($id, " + AgenteDev.lit(d) + ")") } },
                 "CSS…" to { menuCssGlobal() }
             )
@@ -1080,38 +1081,42 @@ class PanelDev(
         val id = seleccionado
         if (id <= 0) return
         val etiquetas = listOf(
+            "🎨 Estilo rápido (sin teclear)…",
+            "★ Guardar estilo en este sitio…",
+            "★ Eliminar y recordar en este sitio…",
             "Editar atributo…", "Añadir atributo…", "Editar HTML del elemento…", "Editar texto (nodo de texto)…",
-            "Añadir estilo en línea…", "Eliminar elemento", "Copiar selector", "Copiar HTML", "Inyectar CSS en la página…",
-            "★ Eliminar y recordar en este sitio…", "★ Guardar estilo en este sitio…", "Copiar XPath", "Duplicar elemento"
+            "Añadir estilo en línea (escribir)…", "Eliminar elemento", "Copiar selector", "Copiar HTML", "Copiar XPath",
+            "Duplicar elemento", "Inyectar CSS en la página…"
         )
         elegirDeLista("Editar", etiquetas) { i ->
             when (i) {
-                0 -> editarAtributo(id)
-                1 -> pedirDos("Añadir atributo", "nombre", "valor") { n, v ->
+                0 -> mostrarEstiloRapido(id)
+                1 -> guardarEstiloSitio(id)
+                2 -> guardarOcultarSitio(id)
+                3 -> editarAtributo(id)
+                4 -> pedirDos("Añadir atributo", "nombre", "valor") { n, v ->
                     if (n.isNotBlank()) aplicarYRefrescar("attr($id, " + AgenteDev.lit(n.trim()) + ", " + AgenteDev.lit(v) + ")")
                 }
-                2 -> consultaObj("info($id)") { o ->
+                5 -> consultaObj("info($id)") { o ->
                     pedirTexto("Editar HTML", o.optString("html"), true) { t -> aplicarYRefrescar("html($id, " + AgenteDev.lit(t) + ")"); seleccionado = 0 }
                 }
-                3 -> consultaObj("info($id)") { o ->
+                6 -> consultaObj("info($id)") { o ->
                     if (!o.has("texto")) {
                         avisar("Selecciona una fila de texto (entre comillas)")
                     } else {
                         pedirTexto("Editar texto", o.optString("texto"), true) { t -> aplicarYRefrescar("texto($id, " + AgenteDev.lit(t) + ")") }
                     }
                 }
-                4 -> pedirTexto("Añadir al style del elemento", "color: red;", false) { d -> aplicarYRefrescar("estiloAdd($id, " + AgenteDev.lit(d) + ")") }
-                5 -> dialogo().setTitle("Eliminar elemento").setMessage("Se quita de la página (hasta recargarla).")
+                7 -> pedirTexto("Añadir al style del elemento", "color: red;", false) { d -> aplicarYRefrescar("estiloAdd($id, " + AgenteDev.lit(d) + ")") }
+                8 -> dialogo().setTitle("Eliminar elemento").setMessage("Se quita de la página (hasta recargarla).")
                     .setPositiveButton("Eliminar") { _, _ -> seleccionado = 0; aplicarYRefrescar("borrar($id)") }
                     .setNeutralButton("Recordar en el sitio") { _, _ -> guardarOcultarSitio(id) }
                     .setNegativeButton("Cancelar", null).show()
-                6 -> consultaObj("info($id)") { o -> copiar(o.optString("sel")); avisar("Selector copiado") }
-                7 -> consultaObj("info($id)") { o -> copiar(o.optString("html")); avisar("HTML copiado") }
-                8 -> menuCssGlobal()
-                9 -> guardarOcultarSitio(id)
-                10 -> guardarEstiloSitio(id)
+                9 -> consultaObj("info($id)") { o -> copiar(o.optString("sel")); avisar("Selector copiado") }
+                10 -> consultaObj("info($id)") { o -> copiar(o.optString("html")); avisar("HTML copiado") }
                 11 -> consulta("xpath($id)") { x -> if (x.isNullOrEmpty()) avisar("No se pudo calcular") else { copiar(x); avisar("XPath copiado") } }
-                else -> aplicarYRefrescar("duplicar($id)")
+                12 -> aplicarYRefrescar("duplicar($id)")
+                else -> menuCssGlobal()
             }
         }
     }
@@ -1142,36 +1147,217 @@ class PanelDev(
         }
     }
 
-    /** Guarda como regla del sitio un estilo para el elemento (se añade «!important» para que gane a los de la página). */
-    private fun guardarEstiloSitio(id: Int) {
-        consultaObj("selGuardar($id)") { o ->
+    /**
+     * Guarda como regla del sitio los estilos que has cambiado desde el inspector, sin teclear nada: se toman del registro del agente
+     * (se rellenan con «Estilo rápido»). Si aún no hay cambios, abre «Estilo rápido» para elegirlos con toques.
+     */
+    private fun guardarEstiloSitio(id: Int, desdeRapido: Boolean = false, alGuardar: (() -> Unit)? = null) {
+        consultaObj("guardable($id)") { o ->
             if (o.has("err")) {
                 avisar(o.optString("err"))
                 return@consultaObj
             }
+            val css = o.optString("css")
             val sel = o.optString("sel")
             val n = o.optInt("n", 1)
-            pedirTexto("Estilo para el sitio · $sel ($n coincidencias)", "color: red;", false) { d ->
-                val decl = conImportante(d)
-                if (decl.isEmpty()) {
-                    avisar("Escribe alguna propiedad, p. ej. color: red;")
+            if (css.isEmpty()) {
+                if (desdeRapido) {
+                    avisar("Aún no has cambiado ningún estilo")
                 } else {
-                    avisar(reglaSitio("estilo", "Estilo: " + DevFormato.cortar(sel, 60), "$sel{$decl}"))
+                    avisar("Elige los cambios aquí y luego pulsa 💾 Guardar")
+                    mostrarEstiloRapido(id)
+                }
+                return@consultaObj
+            }
+            val bonito = StringBuilder(sel).append(" {\n")
+            val props = o.optJSONObject("props")
+            if (props != null) {
+                val ks = props.keys()
+                while (ks.hasNext()) {
+                    val k = ks.next()
+                    bonito.append("  ").append(k).append(": ").append(props.optString(k)).append(" !important;\n")
                 }
             }
+            bonito.append("}")
+            dialogo().setTitle("Guardar estilos en este sitio")
+                .setMessage(
+                    bonito.toString() + "\n\nCoincide con " + n + (if (n == 1) " elemento." else " elementos.") +
+                        (if (n > 3) "\nSi son demasiados, elige un elemento más concreto." else "") +
+                        "\n\nSe aplicará en cada visita (Reglas de este sitio)."
+                )
+                .setPositiveButton("Guardar") { _, _ ->
+                    avisar(reglaSitio("estilo", "Estilo: " + DevFormato.cortar(sel, 60), css))
+                    consulta("olvidar($id)") { alGuardar?.invoke() }
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
         }
     }
 
-    private fun conImportante(d: String): String {
-        val sb = StringBuilder()
-        for (par in d.split(";")) {
-            val t = par.trim()
-            if (t.isEmpty() || !t.contains(":")) continue
-            sb.append(t)
-            if (!t.contains("!important", ignoreCase = true)) sb.append(" !important")
-            sb.append("; ")
+    // --- Estilo rápido: cambiar el aspecto de un elemento solo con toques (la página se ve arriba y cambia en vivo)
+
+    private val coloresRapidos = listOf(
+        "#FFFFFF", "#F5F5F5", "#BDBDBD", "#757575", "#424242", "#000000",
+        "#E53935", "#FB8C00", "#FDD835", "#43A047", "#00897B", "#1E88E5", "#3949AB", "#8E24AA", "#D81B60", "#6D4C41"
+    )
+
+    private fun chip(t: String, accion: () -> Unit): TextView {
+        val v = boton(t, 12f, accion)
+        v.background = fondoRedondeado(paleta.campo, dp(8))
+        v.setPadding(dp(12), dp(6), dp(12), dp(6))
+        return v
+    }
+
+    private fun muestraColor(color: String, accion: () -> Unit): View {
+        val v = View(act)
+        val g = GradientDrawable()
+        g.setColor(Color.parseColor(color))
+        g.cornerRadius = dp(8).toFloat()
+        g.setStroke(dp(1), paleta.tenue)
+        v.background = g
+        v.contentDescription = color
+        v.minimumWidth = dp(38)
+        v.minimumHeight = dp(38)
+        v.isClickable = true
+        v.setOnClickListener { accion() }
+        return v
+    }
+
+    private fun mostrarEstiloRapido(id: Int) {
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+
+        val resumen = texto("", 11f, paleta.tenue, true)
+        resumen.setPadding(dp(10), dp(6), dp(10), dp(6))
+        resumen.setBackgroundColor(paleta.barra)
+        col.addView(resumen, lp(MATCH, WRAP))
+
+        val lista = LinearLayout(act)
+        lista.orientation = LinearLayout.VERTICAL
+        lista.setPadding(dp(8), dp(2), dp(8), dp(14))
+        val sv = ScrollView(act)
+        sv.setBackgroundColor(paleta.fondo)
+        sv.addView(lista, FrameLayout.LayoutParams(MATCH, WRAP))
+        col.addView(sv, lp(MATCH, 0, 1f))
+
+        fun refrescarResumen() {
+            consultaObj("guardable($id)") { o ->
+                if (o.has("err")) {
+                    resumen.text = o.optString("err")
+                    return@consultaObj
+                }
+                val n = o.optInt("n")
+                val sb = StringBuilder(DevFormato.cortar(o.optString("sel"), 70))
+                    .append("  ·  ").append(n).append(if (n == 1) " elemento" else " elementos").append("\n")
+                val props = o.optJSONObject("props")
+                if (props == null || props.length() == 0) {
+                    sb.append("Sin cambios todavía: toca un ajuste y se ve arriba al momento")
+                } else {
+                    sb.append("Sin guardar: ")
+                    val ks = props.keys()
+                    var primero = true
+                    while (ks.hasNext()) {
+                        val k = ks.next()
+                        if (!primero) sb.append(", ")
+                        sb.append(k).append(" ").append(DevFormato.cortar(props.optString(k), 18))
+                        primero = false
+                    }
+                }
+                resumen.text = sb.toString()
+            }
         }
-        return sb.toString().trim()
+
+        fun aplicar(decl: String) {
+            consulta("estiloAdd($id, " + AgenteDev.lit(decl) + ")") { r ->
+                if (r != "ok") avisar(r ?: "Error")
+                refrescarResumen()
+            }
+        }
+
+        fun ajustar(props: String, delta: Int, minimo: Int) {
+            consulta("ajustarPx($id, " + AgenteDev.lit(props) + ", $delta, $minimo)") { r ->
+                if (r != "ok") avisar(r ?: "Error")
+                refrescarResumen()
+            }
+        }
+
+        fun fila(titulo: String, vararg chips: View) {
+            val t = texto(titulo, 11f, paleta.tenue)
+            t.setPadding(dp(4), dp(10), dp(4), dp(3))
+            lista.addView(t, lp(MATCH, WRAP))
+            val hs = HorizontalScrollView(act)
+            hs.isHorizontalScrollBarEnabled = false
+            val linea = LinearLayout(act)
+            linea.orientation = LinearLayout.HORIZONTAL
+            for (c in chips) {
+                val par = lp(WRAP, dp(38))
+                par.setMargins(0, 0, dp(6), 0)
+                linea.addView(c, par)
+            }
+            hs.addView(linea, FrameLayout.LayoutParams(WRAP, WRAP))
+            lista.addView(hs, lp(MATCH, WRAP))
+        }
+
+        val colTexto = ArrayList<View>()
+        for (c in coloresRapidos) colTexto.add(muestraColor(c) { aplicar("color:$c") })
+        fila("Color del texto", *colTexto.toTypedArray())
+
+        val colFondo = ArrayList<View>()
+        for (c in coloresRapidos) colFondo.add(muestraColor(c) { aplicar("background-color:$c") })
+        colFondo.add(chip("Transparente") { aplicar("background-color:transparent") })
+        fila("Color de fondo", *colFondo.toTypedArray())
+
+        fila(
+            "Letra",
+            chip("A−") { ajustar("font-size", -2, 6) }, chip("A+") { ajustar("font-size", 2, 6) },
+            chip("Negrita") { aplicar("font-weight:700") }, chip("Normal") { aplicar("font-weight:400") }
+        )
+        fila(
+            "Alinear texto",
+            chip("Izquierda") { aplicar("text-align:left") }, chip("Centro") { aplicar("text-align:center") },
+            chip("Derecha") { aplicar("text-align:right") }, chip("Justificar") { aplicar("text-align:justify") }
+        )
+        val margenes = "margin-top,margin-right,margin-bottom,margin-left"
+        fila(
+            "Margen (por fuera)",
+            chip("−8 px") { ajustar(margenes, -8, 0) }, chip("+8 px") { ajustar(margenes, 8, 0) }, chip("Sin margen") { aplicar("margin:0") }
+        )
+        val rellenos = "padding-top,padding-right,padding-bottom,padding-left"
+        fila(
+            "Relleno (por dentro)",
+            chip("−8 px") { ajustar(rellenos, -8, 0) }, chip("+8 px") { ajustar(rellenos, 8, 0) }, chip("Sin relleno") { aplicar("padding:0") }
+        )
+        fila(
+            "Opacidad",
+            chip("100%") { aplicar("opacity:1") }, chip("75%") { aplicar("opacity:.75") }, chip("50%") { aplicar("opacity:.5") },
+            chip("25%") { aplicar("opacity:.25") }, chip("0%") { aplicar("opacity:0") }
+        )
+        fila(
+            "Tamaño",
+            chip("Ancho auto") { aplicar("width:auto") }, chip("Ancho 100%") { aplicar("width:100%") }, chip("Alto auto") { aplicar("height:auto") }
+        )
+        fila(
+            "Posición",
+            chip("Quitar fijación") { aplicar("position:static") }, chip("Relativa") { aplicar("position:relative") }
+        )
+        fila(
+            "Bordes y sombra",
+            chip("Sin borde") { aplicar("border:none") }, chip("Borde gris") { aplicar("border:1px solid #888") },
+            chip("Esquinas 8 px") { aplicar("border-radius:8px") }, chip("Círculo") { aplicar("border-radius:50%") },
+            chip("Sin sombra") { aplicar("box-shadow:none") }
+        )
+
+        val acciones: List<Pair<String, () -> Unit>> = listOf(
+            "↶ Deshacer" to {
+                consulta("deshacerEstilos($id)") { r ->
+                    avisar(if (r == "ok") "Cambios de estilo deshechos" else (r ?: "Error"))
+                    refrescarResumen()
+                }
+            },
+            "💾 Guardar" to { guardarEstiloSitio(id, true) { refrescarResumen() } }
+        )
+        empujar("🎨 Estilo rápido", col, acciones)
+        refrescarResumen()
     }
 
     private fun preguntarGuardarCss(css: String) {
