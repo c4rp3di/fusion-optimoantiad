@@ -264,3 +264,13 @@ Ajustes › «Privacidad y datos…» (sustituye a «Borrar historial, caché y 
 - **Pestañas privadas:** no se guardan reglas ni pausas de bloqueo desde ellas (se guardarían en disco con el nombre del sitio). Nota: «Bloquear un anuncio (tocar)» y la pulsación larga siguen guardando reglas también en privadas, como antes.
 - Agente (`agente.js`): nuevas funciones `selGuardar`, `xpath` y `duplicar`; observadores de LCP y CLS. Probadas en Chromium (selector, XPath, duplicado, métricas). El Kotlin del panel, sin compilar con el SDK ni probado en el móvil.
 - No incluido todavía: modo sencillo y Óptimo Inspector (auditoría), inspector CSS de reglas aplicadas con casillas, red avanzada y HAR (ver `Optimo-DevTools-plan.md`, entregas 1.13 y 1.14).
+
+## 1.12.1 — DevTools: diagnóstico sin fugas, pausa del agente y mejoras del selector
+
+- **Diagnóstico sin fugas.** El botón «Diagnóstico» de la pestaña Info copiaba la URL de la página completa (con `?consulta` y `#fragmento`, donde suelen ir tokens) y el título, y los mensajes de consola sin tocar, aunque decía no incluir parámetros. Ahora la URL de la página y las de red salen **sin credenciales (`usuario:clave@`, `token@`), sin consulta y sin fragmento**; el título y los mensajes de consola pasan por una redacción de secretos (Bearer/Basic, JWT, `password:`/`token=`…, cadenas largas con aspecto de clave y parámetros sensibles de URL) y salen como `[redactado]`. El informe ya no se arrastra de una página o pestaña anterior.
+- **Pausa del agente.** Al cerrar el panel (y si «captura desde el inicio» está desactivada) el agente de la pestaña deja de registrar consola y red y deja pasar todo; se reanuda al abrir el panel. Solo afecta a la pestaña donde se cerró.
+- **Selector de elementos:** el resaltado en la página muestra ahora una etiqueta con el tipo y las **dimensiones** (`<button#btn.caja> 120×40`), y una barra de **jerarquía** bajo el árbol (`html › body › div.caja › p`).
+- **XPath:** ahora funciona con elementos SVG/MathML (`*[local-name()="circle"]`) y con ids que contienen comillas, que antes no se resolvían.
+- Probado en Chromium: XPath (HTML, SVG, comillas), pausa/reanudación, etiqueta y regresión de consola, red, DOM, edición y selección táctil; los patrones de redacción, con `java.util.regex`. El Kotlin, sin compilar con el SDK ni probado en el móvil.
+- Se mantiene todo lo de 1.12.0 (guardar reglas, duplicar, LCP/CLS).
+
