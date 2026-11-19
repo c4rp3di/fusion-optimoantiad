@@ -16,7 +16,7 @@ object ReproductorExterno {
     private const val ACTIVIDAD = "com.optimo.play.PlayerActivity"
 
     private val EXT_MEDIO = listOf(
-        ".m3u8", ".mpd", ".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".mp3", ".flac", ".m4a", ".ogg", ".opus"
+        ".m3u8", ".m3u", ".mpd", ".mp4", ".mkv", ".webm", ".mov", ".m4v", ".avi", ".mp3", ".flac", ".m4a", ".ogg", ".opus"
     )
 
     fun instalado(ctx: Context): Boolean {
@@ -29,6 +29,37 @@ object ReproductorExterno {
     }
 
     fun esMagnet(url: String): Boolean = url.startsWith("magnet:", true)
+
+    private val HOSTS_MEGA = listOf("mega.nz", "mega.io", "mega.co.nz")
+
+    /** ¿El enlace es de un sitio de Mega (cualquier página)? */
+    fun esHostMega(url: String): Boolean {
+        try {
+            val host = (Uri.parse(url).host ?: "").lowercase()
+            return HOSTS_MEGA.any { host == it || host.endsWith(".$it") }
+        } catch (e: Exception) {
+            return false
+        }
+    }
+
+    /**
+     * Enlace a un archivo o carpeta de Mega: `/file/…`, `/folder/…`, `/embed/…` o el formato antiguo `#!…` / `#F!…`.
+     * No se puede descargar ni leer por HTTP (el contenido va cifrado): lo resuelve Optimo Play o la app de Mega.
+     */
+    fun esMega(url: String): Boolean {
+        try {
+            val u = Uri.parse(url)
+            val esquema = (u.scheme ?: "").lowercase()
+            if (esquema != "https" && esquema != "http") return false
+            if (!esHostMega(url)) return false
+            val ruta = u.path ?: ""
+            val frag = u.fragment ?: ""
+            return ruta.startsWith("/file/") || ruta.startsWith("/folder/") || ruta.startsWith("/embed/") ||
+                frag.startsWith("!") || frag.startsWith("F!")
+        } catch (e: Exception) {
+            return false
+        }
+    }
 
     private val HOSTS_EXCLUIDOS = listOf("youtube.com", "youtu.be", "youtube-nocookie.com", "googlevideo.com")
 
@@ -71,8 +102,9 @@ object ReproductorExterno {
             val i = Intent(Intent.ACTION_VIEW, Uri.parse(url))
             i.setClassName(PAQUETE, ACTIVIDAD)
             if (!titulo.isNullOrBlank()) i.putExtra("title", titulo)
-            if (!referer.isNullOrBlank() && !esMagnet(url)) i.putExtra("referer", referer)
-            if (!ua.isNullOrBlank() && !esMagnet(url)) i.putExtra("user_agent", ua)
+            // Magnets y enlaces de Mega no pasan por la red del navegador: no hacen falta cabeceras ni se cuenta de qué página vienen.
+            if (!referer.isNullOrBlank() && !esMagnet(url) && !esMega(url)) i.putExtra("referer", referer)
+            if (!ua.isNullOrBlank() && !esMagnet(url) && !esMega(url)) i.putExtra("user_agent", ua)
             // Tarea aparte: Optimo Play aparece como su propia tarjeta en Recientes y Optimo queda intacta para volver a ella.
             i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(i)
