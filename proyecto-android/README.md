@@ -331,3 +331,14 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
   - Se ejecuta al cerrar Optimo (atrás hasta salir). Si el proceso muere antes (quitarla de recientes en algunos móviles, o Android que la cierra con ella en segundo plano), queda una marca y la limpieza se hace **al abrirla de nuevo**, antes de cargar nada; la marca solo se quita cuando el borrado de cookies termina. Consecuencia: si Android cierra Optimo por falta de memoria con la opción activada, también se cerrarán tus sesiones.
   - Sin excepciones por sitio: Android no permite listar las cookies de otros sitios ni conservar solo algunas con sus atributos.
 - El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
+## 1.12.7 — Ajustes por sitio y ahorro de datos
+
+- **Ajustes por sitio** (⋮ › «Personalizar este sitio…», no disponible en pestañas privadas porque se guardan en disco con el nombre del sitio):
+  - **Versión de escritorio en este sitio:** se abre siempre en escritorio, sin tocar el interruptor de la pestaña.
+  - **Modo oscuro en este sitio:** según ajustes / siempre / nunca; manda sobre «Oscurecer páginas web».
+  - **Bloqueo de anuncios en este sitio:** atajo a la pausa por sitio que ya existía.
+  - Las reglas valen también para los subdominios (una regla de `example.com` vale para `m.example.com`) y entran en la copia de seguridad. Se aplican **al empezar a navegar** (escrita, enlace o redirección); sin temporizadores. En un enlace tocado, Android puede aplicar el cambio de versión de escritorio a partir de la carga siguiente: si no lo notas, recarga.
+- **Ahorro de datos** (Ajustes › «Ahorro de datos (sin imágenes)»: desactivado / siempre / solo con datos móviles; desactivado por defecto): no carga las imágenes que vienen de la red (`blockNetworkImage`). «Solo con datos móviles» se decide en cada navegación según si la conexión es de datos limitados (también cuenta un Wi-Fi marcado como de uso medido). En el menú ⋮ aparece «Cargar imágenes en esta página» para cargarlas solo esa vez. El vídeo ya no se reproduce solo: el WebView exige un toque (valor por defecto).
+- **Oferta «Reproducir en Optimo Play» en YouTube:** ya estaba resuelta desde 1.12.2 (se verificó en el código); `PENDIENTES-Optimo.md` se actualizó con el estado real de cada punto.
+- El Kotlin, sin compilar con el SDK ni probado en el móvil.
