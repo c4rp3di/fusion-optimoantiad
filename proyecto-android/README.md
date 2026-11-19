@@ -310,3 +310,13 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - Mientras se selecciona se ocultan 🔊/✕ de cada fila para evitar cierres accidentales.
 - Pendiente de una entrega aparte (más delicada): suspender pestañas inactivas, agrupar por categorías. La memoria por pestaña no se puede medir con fiabilidad en WebView, así que no se ofrece.
 - El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
+## 1.12.5 — Suspender pestañas inactivas y ajuste fino de segundo plano
+
+- **Suspender pestañas inactivas** (Ajustes › Segundo plano › «Suspender pestañas inactivas»: desactivado / 15 min / 30 min / 1 h; **desactivado por defecto**). Se destruye el WebView de la pestaña y se conserva su historial, su posición de scroll y los datos de formulario que guarda Chromium (`saveState`, solo en memoria); al volver a ella se restaura con `restoreState` y, si no se pudiera, se recarga su dirección. En la lista de pestañas aparece con 💤.
+  - **Nunca se suspende:** la pestaña activa, la que sigue sonando, la que se lee en voz alta, las privadas, la página de inicio, las que están cargando ni las que tienen **audio sonando, texto escrito sin enviar** (formularios y campos editables) o **un vídeo largo empezado** (se comprueba en la página justo antes de suspender).
+  - **Sin temporizadores:** solo se revisa al cambiar de pestaña, al ocultar la app y cuando el sistema avisa de poca memoria (entonces basta con 2 min sin usar la pestaña).
+  - Límites: se pierde el estado que solo vive en el JavaScript de la página (una aplicación web abierta, un chat en tiempo real) y la posición de un vídeo; por eso el ajuste es opcional.
+- **Servicio de segundo plano:** el servicio se cierra tras ~1 min en pausa (antes ~80 s) y se corrige el comentario obsoleto de «5 min».
+- **`skip_generico.js`:** en segundo plano pasa de 2 s fijos a 4 s cuando lleva rato sin encontrar botones de «saltar anuncio».
+- Probado en Chromium: la comprobación previa a suspender (vacía, formulario limpio/sucio, textarea, casilla, campo editable con y sin texto, campo oculto, vídeo largo empezado). El Kotlin, sin compilar con el SDK ni probado en el móvil.
