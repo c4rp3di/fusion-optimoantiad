@@ -89,7 +89,6 @@ class MainActivity : Activity() {
         private const val MAX_CERRADAS = 10
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
 
-        /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
         /** Cuenta lo guardado por la página; IndexedDB y Cache Storage rellenan su cifra al resolverse. Formato: ls,ss,idb,cache (-1 = no disponible). */
         private const val JS_ALMACEN_CONTAR =
             "(function(){try{var o=[0,0,-1,-1];" +
@@ -101,9 +100,24 @@ class MainActivity : Activity() {
         private const val JS_ALMACEN_LEER =
             "(function(){var v=window.__optAlm;try{delete window.__optAlm}catch(e){}return v||null})()"
 
+        /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
         private const val JS_SUENA =
             "(function(){try{if(window.__optimoMudo)return 0;var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
                 "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
+
+        /**
+         * Antes de suspender una pestaña: 0 = se puede; 1 = suena; 2 = hay texto escrito sin enviar (formularios, campos editables);
+         * 3 = un vídeo largo empezado (su posición no se conserva).
+         */
+        private const val JS_PUEDE_SUSPENDER =
+            "(function(){try{if(!window.__optimoMudo){var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
+                "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;" +
+                "if(e.currentTime>5&&!e.ended&&isFinite(e.duration)&&e.duration>120)return 3;}}" +
+                "var c=document.querySelectorAll('input:not([type=hidden]):not([type=submit]):not([type=button]),textarea');" +
+                "for(var j=0;j<c.length;j++){var x=c[j];if(x.type==='checkbox'||x.type==='radio'){if(x.checked!==x.defaultChecked)return 2;}" +
+                "else if(x.value!==x.defaultValue)return 2;}" +
+                "var ce=document.querySelectorAll('[contenteditable]');for(var k=0;k<ce.length;k++){" +
+                "if(ce[k].isContentEditable&&(ce[k].textContent||'').trim().length>0)return 2;}}catch(x){}return 0;})()"
 
         /** Título, artista e imagen de lo que suena: mediaSession de la página, o og:image / póster como respaldo. */
         private const val JS_META =
@@ -241,6 +255,13 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         enPantalla = false
+        revisarSuspension(false)
+    }
+
+    /** Poca memoria (10–15) o el sistema a punto de recortar procesos (60+): se suspenden pestañas sin uso. 20 es «app oculta», que no cuenta. */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level in 10..15 || level >= 60) revisarSuspension(true)
     }
 
     override fun onPause() {
@@ -1139,6 +1160,9 @@ class MainActivity : Activity() {
 
     private fun activar(p: Pestana) {
         val anterior = actual
+        val ahoraUso = android.os.SystemClock.elapsedRealtime()
+        if (anterior != null) anterior.ultimoUsoMs = ahoraUso
+        p.ultimoUsoMs = ahoraUso
         if (anterior != null && anterior !== p) retirarAnterior(anterior)
         actual = p
         if (p === sonando) {
@@ -1154,6 +1178,7 @@ class MainActivity : Activity() {
                 FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             )
         }
+        if (p.suspendida) restaurarSuspendida(p, w)
         w.onResume()
         if (!p.cargada) {
             p.cargada = true
@@ -1171,7 +1196,79 @@ class MainActivity : Activity() {
         actualizarUi()
         comprobarSuena()
         if (::herramientas.isInitialized) herramientas.alCambiarPestana()
+        revisarSuspension(false)
     }
+
+    // ---------------------------------------------------------------- suspender pestañas inactivas
+
+    private val revisandoSuspension = HashSet<Int>()
+
+    /**
+     * Una pestaña se puede suspender si no es la activa, no suena ni se está leyendo en voz alta, no es privada ni la página de inicio,
+     * ya terminó de cargar y es una web normal.
+     */
+    private fun elegibleSuspension(p: Pestana): Boolean =
+        p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.lectura && !p.suena &&
+            !p.eligiendo && !p.oculta && p.web != null && p.progreso >= 100 && p.url.startsWith("http")
+
+    /**
+     * Se llama solo con eventos (cambio de pestaña, app oculta, poca memoria del sistema), nunca con un temporizador.
+     * [urgente]: el sistema pide memoria; basta con 2 min sin usar la pestaña. Con el ajuste desactivado no hace nada.
+     */
+    private fun revisarSuspension(urgente: Boolean) {
+        val minutos = ajustes.suspenderMin
+        if (minutos <= 0) return
+        val umbral = if (urgente) 2L * 60_000L else minutos * 60_000L
+        val ahora = android.os.SystemClock.elapsedRealtime()
+        for (p in ArrayList(pestanas)) {
+            if (!elegibleSuspension(p) || ahora - p.ultimoUsoMs < umbral) continue
+            val w = p.web ?: continue
+            if (!revisandoSuspension.add(p.id)) continue
+            w.evaluateJavascript(JS_PUEDE_SUSPENDER) { r ->
+                revisandoSuspension.remove(p.id)
+                if (r == "0" && p.web === w && pestanas.contains(p) && elegibleSuspension(p)) suspender(p)
+            }
+        }
+    }
+
+    /** Destruye el WebView de la pestaña conservando su historial, scroll y datos de formulario que guarda Chromium (en memoria). */
+    private fun suspender(p: Pestana) {
+        val w = p.web ?: return
+        if (!elegibleSuspension(p)) return
+        val estado = android.os.Bundle()
+        val guardado = try {
+            w.saveState(estado)
+        } catch (e: Exception) {
+            null
+        }
+        val u = w.url
+        if (u != null && u.startsWith("http")) p.url = u
+        contenedor.removeView(w)
+        w.stopLoading()
+        w.destroy()
+        p.web = null
+        p.suena = false
+        p.suspendida = true
+        p.estadoSuspendida = if (guardado != null) estado else null
+    }
+
+    /** Al volver a una pestaña suspendida: se restaura su estado; si no se puede, se vuelve a cargar su dirección. */
+    private fun restaurarSuspendida(p: Pestana, w: WebView) {
+        p.suspendida = false
+        val estado = p.estadoSuspendida
+        p.estadoSuspendida = null
+        var ok = false
+        if (estado != null) {
+            ok = try {
+                w.restoreState(estado) != null
+            } catch (e: Exception) {
+                false
+            }
+        }
+        if (!ok && p.url.isNotEmpty()) cargarUrl(p, w, p.url)
+    }
+
+    private fun nombreSuspension(min: Int): String = if (min <= 0) "desactivado" else if (min < 60) "$min min" else "1 h"
 
     private fun cerrarPestana(p: Pestana) {
         val idx = pestanas.indexOf(p)
@@ -1215,6 +1312,8 @@ class MainActivity : Activity() {
     }
 
     private fun cargarEn(p: Pestana, url: String) {
+        p.suspendida = false
+        p.estadoSuspendida = null
         p.cargada = true
         p.pendiente = null
         p.inicio = false
@@ -1834,6 +1933,15 @@ class MainActivity : Activity() {
             ajustes.audioPestanas = (ajustes.audioPestanas + 1) % 3
             mostrarSegundoPlano()
         }
+        add("Suspender pestañas inactivas: " + nombreSuspension(ajustes.suspenderMin)) {
+            ajustes.suspenderMin = when (ajustes.suspenderMin) {
+                0 -> 15
+                15 -> 30
+                30 -> 60
+                else -> 0
+            }
+            mostrarSegundoPlano()
+        }
         add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
             ajustes.segundoPlano = !ajustes.segundoPlano
             for (q in pestanas) q.web?.let { aplicarFondo(it) }
@@ -2333,7 +2441,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.4")
+            .setTitle("Optimo 1.12.5")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -2821,7 +2929,7 @@ class MainActivity : Activity() {
                 textos.setOrientation(LinearLayout.VERTICAL)
                 val t1 = TextView(this@MainActivity)
                 t1.text = (if (seleccion) (if (marcadas.contains(p.id)) "☑ " else "☐ ") else "") +
-                    (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") +
+                    (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") + (if (p.suspendida) "💤 " else "") +
                     (if (p.privada) "🕶 " else "") + tituloDe(p)
                 t1.textSize = 16f
                 t1.maxLines = 1
