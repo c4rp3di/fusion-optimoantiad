@@ -153,6 +153,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putInt("audio_pestanas", v).apply()
         }
 
+    /** Minutos sin usar una pestaña antes de suspenderla (0 = nunca). Desactivado por defecto. */
+    var suspenderMin: Int
+        get() = sp.getInt("suspender_min", 0).coerceIn(0, 240)
+        set(v) {
+            sp.edit().putInt("suspender_min", v).apply()
+        }
+
     /** Seguir reproduciendo con la pantalla bloqueada o en segundo plano (servicio + script de visibilidad). */
     var segundoPlano: Boolean
         get() = sp.getBoolean("segundo_plano", true)
