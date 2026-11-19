@@ -37,7 +37,8 @@ Estado: implementadas y fusionadas con 1.7.5; el JS se probó en Chromium con Pl
 Idea: buscar en una página o sitio enlaces de cierto tipo (magnet, Mega, `.torrent`, por extensión de archivo o expresión propia), con rastreo recursivo y profundidad configurable.
 Punto de anclaje ya hecho en 1.12.8: `ProcesadorPagina` / `PaginasGuardadas.procesadores` (páginas que el usuario guarda a propósito; hilo de fondo).
 
-### Fase 1 — extraer y listar (empezar por aquí)
+### Fase 1 — extraer y listar — HECHO en 1.13.0 (pendiente de probar en el móvil)
+- Quedan fuera de la 1.13.0: selección múltiple, búsqueda por texto dentro de la lista, enviar varios a Optimo Play, enlaces de páginas guardadas sin abrirlas.
 - Fuente: la página abierta o una página guardada. Script en el WebView: `a[href]` + búsqueda por expresión regular en el texto (los enlaces de Mega suelen venir escritos como texto).
 - Tipos (con filtros y contador por tipo): magnet, Mega, `.torrent`, listas `.m3u/.m3u8`, vídeo, audio, archivos comprimidos, PDF… más lista de extensiones o expresión propia. Reutilizar `ReproductorExterno.esMedio/esMagnet/esMega`.
 - Lista: cada fila con dos líneas, **nombre** arriba y debajo «tipo · dominio · tamaño si lo hay» (el enlace recortado, se copia completo; origen de la página cuando haya rastreo). Búsqueda por texto, selección múltiple, copiar, compartir, exportar a archivo (selector del sistema), enviar magnets/Mega a Optimo Play.
@@ -56,5 +57,5 @@ Punto de anclaje ya hecho en 1.12.8: `ProcesadorPagina` / `PaginasGuardadas.proc
 - Rastreo largo = batería y datos; con la pantalla apagada haría falta un servicio en primer plano (decisión pendiente: de momento solo con la app abierta).
 
 ### Decisiones pendientes
-- ¿Solo con la app abierta o también en segundo plano? ¿Solo el mismo dominio por defecto? ¿Los resultados solo se ven y copian, o se guardan como lista consultable?
+- Decididas: solo con la app abierta; mismo dominio por defecto y configurable; resultados primero a la vista y copiables, con opción de guardar lista.
 
