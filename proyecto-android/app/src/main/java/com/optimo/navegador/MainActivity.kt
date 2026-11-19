@@ -105,6 +105,10 @@ class MainActivity : Activity() {
         private const val JS_ALMACEN_LEER =
             "(function(){var v=window.__optAlm;try{delete window.__optAlm}catch(e){}return v||null})()"
 
+        /** Instantánea del DOM ya renderizado (para guardar la página); null si supera el máximo. */
+        private const val JS_DOM_INSTANTANEA =
+            "(function(){try{var h='<!doctype html>'+document.documentElement.outerHTML;return h.length>3000000?null:h}catch(e){return null}})()"
+
         /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
         private const val JS_SUENA =
             "(function(){try{if(window.__optimoMudo)return 0;var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
@@ -219,6 +223,7 @@ class MainActivity : Activity() {
         silenciador = Silenciador(this)
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
+        PaginasGuardadas.iniciar(this)
         ListasManager.iniciar(this, ajustes)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
@@ -922,6 +927,9 @@ class MainActivity : Activity() {
         if (p.privada) {
             candado.text = "🕶"
             candado.setTextColor(paleta.texto)
+        } else if (p.sinConexion) {
+            candado.text = "📄"
+            candado.setTextColor(paleta.tenue)
         } else if (p.url.startsWith("https://")) {
             candado.text = "🔒"
             candado.setTextColor(paleta.seguro)
@@ -976,6 +984,7 @@ class MainActivity : Activity() {
     private fun mostrarInfoSitio() {
         val p = actual ?: return
         val estado = when {
+            p.sinConexion -> "Página guardada (sin conexión)"
             p.privada -> "Pestaña privada"
             p.inicio -> "Página de inicio de Optimo"
             p.url.startsWith("https://") -> "Conexión segura (HTTPS)"
@@ -1083,6 +1092,15 @@ class MainActivity : Activity() {
         s.safeBrowsingEnabled = true
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.cacheMode = if (p.privada) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
+        if (p.sinConexion) {
+            // Visor de una página guardada: solo lee su archivo. Sin red (ni imágenes, ni enlaces), sin JavaScript y sin almacenamiento.
+            s.allowFileAccess = true
+            s.javaScriptEnabled = false
+            s.domStorageEnabled = false
+            s.databaseEnabled = false
+            s.blockNetworkLoads = true
+            s.setGeolocationEnabled(false)
+        }
         if (p.escritorio) s.userAgentString = uaEscritorio
         aplicarFondo(w)
         w.setWebViewClient(ClienteWeb(p))
@@ -1114,7 +1132,7 @@ class MainActivity : Activity() {
     private fun aplicarAjustesWeb(w: WebView) {
         val u = w.url
         aplicarOscuro(w, oscuroPara(if (u == null) "" else Omnibox.hostDe(u).lowercase()))
-        w.settings.blockNetworkImage = ahorroActivo()
+        w.settings.blockNetworkImage = imagenesBloqueadas(w)
         gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
     }
 
@@ -1144,6 +1162,9 @@ class MainActivity : Activity() {
         else -> false
     }
 
+    /** El ahorro de datos no se aplica al visor de páginas guardadas (sus recursos vienen del archivo, no de la red). */
+    private fun imagenesBloqueadas(w: WebView): Boolean = ahorroActivo() && !w.settings.blockNetworkLoads
+
     /**
      * Antes de cargar una página (escrita, enlace o redirección de la web): versión de escritorio, modo oscuro y ahorro de datos
      * según las reglas del sitio y los ajustes. Se llama solo al empezar a navegar, sin temporizadores.
@@ -1157,7 +1178,7 @@ class MainActivity : Activity() {
             w.settings.loadWithOverviewMode = true
         }
         aplicarOscuro(w, oscuroPara(h))
-        w.settings.blockNetworkImage = ahorroActivo()
+        w.settings.blockNetworkImage = imagenesBloqueadas(w)
     }
 
     /** Gestor de cookies del perfil al que pertenece el WebView (el privado tiene el suyo). */
@@ -1262,7 +1283,7 @@ class MainActivity : Activity() {
      * ya terminó de cargar y es una web normal.
      */
     private fun elegibleSuspension(p: Pestana): Boolean =
-        p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.lectura && !p.suena &&
+        p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.sinConexion && !p.lectura && !p.suena &&
             !p.eligiendo && !p.oculta && p.web != null && p.progreso >= 100 && p.url.startsWith("http")
 
     /**
@@ -1481,7 +1502,7 @@ class MainActivity : Activity() {
     }
 
     private fun fijarUrl(p: Pestana, url: String?) {
-        if (url == null) return
+        if (url == null || p.sinConexion) return
         if (url.startsWith("optimo://") || ((url.startsWith("data:") || url == "about:blank") && p.inicio)) {
             p.inicio = true
             p.url = ""
@@ -1604,6 +1625,7 @@ class MainActivity : Activity() {
             }
         }
         add("Marcadores") { mostrarMarcadores() }
+        add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
@@ -1622,6 +1644,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
+                if (!p.privada && !p.sinConexion) add("Guardar página para leer sin conexión") { guardarSinConexion(p) }
                 add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
                 // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
@@ -1693,7 +1716,7 @@ class MainActivity : Activity() {
             ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
             for (q in pestanas) {
                 val w = q.web
-                if (w != null) w.settings.blockNetworkImage = ahorroActivo()
+                if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w)
             }
             toast("Se aplica a las páginas que cargues desde ahora")
             mostrarAjustes()
@@ -2167,6 +2190,123 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------------------------------------------------------------- páginas guardadas (sin conexión)
+
+    /** Guarda la página abierta (MHTML con sus recursos + instantánea del DOM) para leerla sin conexión. Nunca en pestañas privadas. */
+    private fun guardarSinConexion(p: Pestana) {
+        val w = p.web ?: return
+        if (p.privada || p.sinConexion || !p.url.startsWith("http")) return
+        if (p.progreso in 0..99) {
+            toast("Espera a que termine de cargar la página")
+            return
+        }
+        if (PaginasGuardadas.todas().size >= PaginasGuardadas.MAX_PAGINAS) {
+            toast("Máximo " + PaginasGuardadas.MAX_PAGINAS + " páginas guardadas: borra alguna")
+            return
+        }
+        val id = PaginasGuardadas.nuevoId()
+        val mht = PaginasGuardadas.archivoMht(id)
+        val titulo = tituloDe(p)
+        val url = p.url
+        toast("Guardando…")
+        try {
+            w.saveWebArchive(mht.absolutePath, false) { ruta ->
+                if (ruta == null || !mht.exists()) {
+                    mht.delete()
+                    toast("No se pudo guardar la página")
+                } else if (mht.length() > PaginasGuardadas.MAX_BYTES_PAGINA) {
+                    mht.delete()
+                    toast("La página es demasiado grande para guardarla (máx. 25 MB)")
+                } else {
+                    capturarHtmlYRegistrar(w, id, titulo, url)
+                }
+            }
+        } catch (e: Exception) {
+            mht.delete()
+            toast("No se pudo guardar la página")
+        }
+    }
+
+    private fun capturarHtmlYRegistrar(w: WebView, id: Long, titulo: String, url: String) {
+        w.evaluateJavascript(JS_DOM_INSTANTANEA) { r ->
+            var tieneHtml = false
+            val htmlArchivo = PaginasGuardadas.archivoHtml(id)
+            try {
+                if (r != null && r != "null") {
+                    val valor = org.json.JSONTokener(r).nextValue()
+                    if (valor is String && valor.isNotEmpty() && valor.length <= PaginasGuardadas.MAX_HTML_CARACTERES) {
+                        htmlArchivo.writeText(valor, Charsets.UTF_8)
+                        tieneHtml = true
+                    }
+                }
+            } catch (e: Exception) {
+                htmlArchivo.delete()
+            }
+            val mht = PaginasGuardadas.archivoMht(id)
+            val bytes = mht.length() + (if (tieneHtml) htmlArchivo.length() else 0L)
+            if (PaginasGuardadas.registrar(id, titulo, url, bytes, tieneHtml) == null) {
+                mht.delete()
+                htmlArchivo.delete()
+                toast("No se pudo guardar la página")
+            } else {
+                toast("Página guardada para leer sin conexión")
+            }
+        }
+    }
+
+    private fun mostrarPaginasGuardadas() {
+        val todas = PaginasGuardadas.todas()
+        if (todas.isEmpty()) {
+            toast("No hay páginas guardadas")
+            return
+        }
+        val fecha = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (pg in todas) {
+            val etiqueta = pg.titulo + "\n" + Omnibox.hostDe(pg.url) + " · " + fecha.format(java.util.Date(pg.fecha)) + " · " + formatoTamano(pg.bytes)
+            items.add(Pair<String, () -> Unit>(etiqueta, { menuPaginaGuardada(pg) }))
+        }
+        items.add(Pair<String, () -> Unit>("Borrar todas…", {
+            nuevoDialogo()
+                .setTitle("Borrar páginas guardadas")
+                .setMessage("Se borrarán las " + todas.size + " páginas guardadas (" + formatoTamano(PaginasGuardadas.totalBytes()) + ").")
+                .setPositiveButton("Borrar") { _, _ ->
+                    PaginasGuardadas.eliminarTodas()
+                    toast("Páginas guardadas borradas")
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }))
+        opciones("Páginas guardadas (" + todas.size + ", " + formatoTamano(PaginasGuardadas.totalBytes()) + ")", items)
+    }
+
+    private fun menuPaginaGuardada(pg: PaginaGuardada) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Abrir sin conexión", { abrirSinConexion(pg) }))
+        items.add(Pair<String, () -> Unit>("Abrir la dirección original", { nuevaPestana(pg.url) }))
+        items.add(Pair<String, () -> Unit>("Eliminar", {
+            PaginasGuardadas.eliminar(pg.id)
+            toast("Página eliminada")
+            if (PaginasGuardadas.todas().isNotEmpty()) mostrarPaginasGuardadas()
+        }))
+        opciones(pg.titulo, items)
+    }
+
+    /** Abre la página guardada en una pestaña visor: sin red, sin JavaScript; los enlaces se abren en una pestaña normal. */
+    private fun abrirSinConexion(pg: PaginaGuardada) {
+        val archivo = PaginasGuardadas.archivoMht(pg.id)
+        if (!archivo.exists()) {
+            toast("El archivo de esta página ya no existe")
+            return
+        }
+        val q = crearPestana(false, null, true, false) ?: return
+        q.sinConexion = true
+        q.url = pg.url
+        q.titulo = pg.titulo
+        activar(q)
+        q.web?.loadUrl("file://" + archivo.absolutePath)
+    }
+
     // ---------------------------------------------------------------- borrar datos al salir
 
     private fun alternarBorrarAlSalir(bit: Int) {
@@ -2406,6 +2546,9 @@ class MainActivity : Activity() {
             ajustes.guardarSesion = !ajustes.guardarSesion
             if (!ajustes.guardarSesion) borrarSesionGuardada()
             mostrarPrivacidad()
+        }
+        add("Páginas guardadas sin conexión (" + PaginasGuardadas.todas().size + ", " + formatoTamano(PaginasGuardadas.totalBytes()) + ")…") {
+            mostrarPaginasGuardadas()
         }
         add("Al salir, borrar cookies y datos de sitios: " + si((ajustes.borrarAlSalir and 1) != 0)) { alternarBorrarAlSalir(1) }
         add("Al salir, borrar historial: " + si((ajustes.borrarAlSalir and 2) != 0)) { alternarBorrarAlSalir(2) }
@@ -2664,7 +2807,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.7")
+            .setTitle("Optimo 1.12.8")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -4314,7 +4457,7 @@ class MainActivity : Activity() {
         var activa = 0
         var n = 0
         for (p in pestanas) {
-            if (p.privada) continue
+            if (p.privada || p.sinConexion) continue
             if (p === actual) activa = n
             arr.put(if (p.inicio) "" else p.url)
             n++
@@ -4426,6 +4569,11 @@ class MainActivity : Activity() {
             val uri = request.url
             val esquema = uri.scheme?.lowercase() ?: return false
             if (esquema == "http" || esquema == "https") {
+                if (p.sinConexion) {
+                    // Visor sin red: un enlace tocado se abre de verdad en una pestaña normal.
+                    if (request.isForMainFrame && request.hasGesture()) nuevaPestana(uri.toString())
+                    return true
+                }
                 // Enlace tocado a un vídeo/audio/torrent: según Ajustes se abre aquí, se pregunta o va a otra app.
                 if (request.isForMainFrame && request.hasGesture() && ajustes.modoMedio != 1) {
                     val u = uri.toString()
