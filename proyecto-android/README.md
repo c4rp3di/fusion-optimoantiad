@@ -320,3 +320,14 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **Servicio de segundo plano:** el servicio se cierra tras ~1 min en pausa (antes ~80 s) y se corrige el comentario obsoleto de «5 min».
 - **`skip_generico.js`:** en segundo plano pasa de 2 s fijos a 4 s cuando lleva rato sin encontrar botones de «saltar anuncio».
 - Probado en Chromium: la comprobación previa a suspender (vacía, formulario limpio/sucio, textarea, casilla, campo editable con y sin texto, campo oculto, vídeo largo empezado). El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
+## 1.12.6 — Copia de seguridad y borrar datos al salir
+
+- **Copia de seguridad** (Ajustes › «Copia de seguridad…»), siempre con una acción manual y con el selector de archivos del sistema (sin permisos nuevos):
+  - **Exportar:** un archivo `.json` con marcadores y carpetas, reglas de sitios y anuncios (ocultar, estilos, dominios) y ajustes. **No incluye** historial, cookies, sesión, permisos de sitios, apps elegidas para multimedia ni «borrar al salir». El archivo va **sin cifrar**: se avisa antes de exportar.
+  - **Importar:** pide confirmación mostrando lo que contiene. Marcadores y reglas se **añaden** a los existentes (carpetas con el mismo nombre se reutilizan; las URL y reglas repetidas se saltan; no se borra nada). Los ajustes de la copia sustituyen a los actuales. Para aplicarlo todo conviene reiniciar Optimo.
+  - **Seguridad de la importación:** tamaño máximo 5 MB; solo se aceptan ajustes de una lista cerrada, con su tipo; solo marcadores `http(s)`; límites de cantidad y longitud. Una copia manipulada no puede escribir otras claves, conceder permisos ni dejar ajustes con un tipo erróneo.
+- **Borrar datos al salir** (Ajustes › Privacidad y datos): tres opciones independientes, desactivadas por defecto: cookies y datos de sitios, historial y caché.
+  - Se ejecuta al cerrar Optimo (atrás hasta salir). Si el proceso muere antes (quitarla de recientes en algunos móviles, o Android que la cierra con ella en segundo plano), queda una marca y la limpieza se hace **al abrirla de nuevo**, antes de cargar nada; la marca solo se quita cuando el borrado de cookies termina. Consecuencia: si Android cierra Optimo por falta de memoria con la opción activada, también se cerrarán tus sesiones.
+  - Sin excepciones por sitio: Android no permite listar las cookies de otros sitios ni conservar solo algunas con sus atributos.
+- El Kotlin, sin compilar con el SDK ni probado en el móvil.
