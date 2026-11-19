@@ -1624,6 +1624,11 @@ class MainActivity : Activity() {
                 elegirAppMedio(medio, null, p, p.web?.settings?.userAgentString, p.titulo)
             }
         }
+        if (!p.privada && ReproductorExterno.esMega(p.url) && AppsMedia.apps(this, p.url, null).isNotEmpty()) {
+            add("▶ Abrir este enlace de Mega en otra app…") {
+                elegirAppMedio(p.url, null, p, null, p.titulo)
+            }
+        }
         add("Marcadores") { mostrarMarcadores() }
         add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
@@ -1689,7 +1694,7 @@ class MainActivity : Activity() {
             mostrarAjustes()
         }
         add("Pantalla de inicio…") { mostrarAjustesInicio() }
-        add("Enlaces multimedia y magnets…") { mostrarAjustesMedia() }
+        add("Enlaces multimedia, magnets y Mega…") { mostrarAjustesMedia() }
         add("Ventanas emergentes y redirecciones…") { mostrarAjustesEmergentes() }
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
@@ -2807,14 +2812,14 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.8")
+            .setTitle("Optimo 1.12.9")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
                     "• Ventanas emergentes: cierra las pestañas de anuncios, limita una por toque y bloquea redirecciones automáticas (Ajustes › Ventanas emergentes y redirecciones; por sitio desde el menú ⋮).\n" +
                     "• Silenciar pestañas: altavoz en la barra de direcciones (aparece si la pestaña suena o está silenciada), en el candado y en la lista de pestañas.\n" +
                     "• Pantalla de inicio editable (Ajustes › Pantalla de inicio): colores, accesos o marcadores, buscador, título e iconos.\n" +
-                    "• Vídeos, audios, torrents y magnets: pregunta si abrirlos aquí o en otra app (Optimo Play u otras); se ajusta en Ajustes.\n" +
+                    "• Vídeos, audios, listas .m3u/.m3u8, torrents, magnets y enlaces de Mega: pregunta si abrirlos aquí o en otra app (Optimo Play u otras); se ajusta en Ajustes.\n" +
                     "• Reproducción en segundo plano (YouTube): sigue sonando con la pantalla bloqueada y, con un vídeo a pantalla completa, pasa a imagen en imagen al salir. Se activa o desactiva en Ajustes.\n" +
                     "• HTTPS primero. Si el sitio no lo ofrece, solo se abre por http si lo confirmas. Los certificados no válidos se bloquean (solo la red local permite continuar, tras confirmar).\n" +
                     "• Pestaña privada: perfil aislado (cookies, almacenamiento y caché propios, que se borran al cerrar la última pestaña privada), sin historial y sin capturas de pantalla.\n" +
@@ -3471,7 +3476,7 @@ class MainActivity : Activity() {
             add("Abrir en pestaña nueva") { nuevaPestana(enlace, privada) }
             add("Copiar enlace") { copiar(enlace) }
             add("Compartir enlace") { compartir(enlace) }
-            if (ReproductorExterno.esMedio(enlace, null)) {
+            if (ReproductorExterno.esMedio(enlace, null) || ReproductorExterno.esMega(enlace)) {
                 if (ReproductorExterno.instalado(this)) {
                     add("Reproducir en Optimo Play") {
                         ReproductorExterno.enviar(this, enlace, null, p.url, web.settings.userAgentString)
@@ -4296,7 +4301,7 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         items.add(Pair("Vídeo, audio y torrents: " + descripcionModoMedia(false)) { elegirModoMedia(false) })
         items.add(Pair("Enlaces magnet: " + descripcionModoMedia(true)) { elegirModoMedia(true) })
-        opciones("Enlaces multimedia y magnets", items)
+        opciones("Enlaces multimedia, magnets y Mega", items)
     }
 
     private fun elegirModoMedia(magnet: Boolean) {
@@ -4577,7 +4582,8 @@ class MainActivity : Activity() {
                 // Enlace tocado a un vídeo/audio/torrent: según Ajustes se abre aquí, se pregunta o va a otra app.
                 if (request.isForMainFrame && request.hasGesture() && ajustes.modoMedio != 1) {
                     val u = uri.toString()
-                    if (ReproductorExterno.esMedio(u, null)) {
+                    // Mega: se pregunta salvo que ya estés navegando por Mega (ahí los enlaces son de su propia web).
+                    if (ReproductorExterno.esMedio(u, null) || (ReproductorExterno.esMega(u) && !ReproductorExterno.esHostMega(p.url))) {
                         // loadUrl no vuelve a pasar por aquí, así que «abrir en el navegador» no pregunta dos veces.
                         gestionarMedio(u, null, p, view.settings.userAgentString, null, "Abrir en el navegador") {
                             view.post { cargarUrl(p, view, u, true) }
