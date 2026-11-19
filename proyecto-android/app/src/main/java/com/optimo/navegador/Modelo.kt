@@ -101,6 +101,13 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Hora (uptimeMillis) del último toque del usuario sobre la página. */
     var toqueMs: Long = 0L
 
+    /** Última vez (elapsedRealtime) que se entró o salió de esta pestaña; sirve para suspender las que llevan mucho sin usarse. */
+    @Volatile var ultimoUsoMs: Long = 0L
+
+    /** Pestaña suspendida: su WebView se destruyó para liberar memoria y se rehace, con su historial y scroll, al volver a ella. */
+    var suspendida: Boolean = false
+    var estadoSuspendida: android.os.Bundle? = null
+
     /** Ultimo flujo de video/audio visto en la pagina (m3u8, mpd, mp4...). Se escribe desde hilos de red. */
     @Volatile var medioDetectado: String? = null
 }
