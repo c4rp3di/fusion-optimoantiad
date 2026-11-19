@@ -2211,6 +2211,28 @@ class MainActivity : Activity() {
 
     /** Extrae los enlaces de la página abierta con `assets/enlaces/extraer.js` y los muestra clasificados. Solo mira esta página. */
     private fun buscarEnlaces(p: Pestana) {
+        val tipos = TipoEnlace.values().filter { it != TipoEnlace.PROPIO }
+        val marcados = BooleanArray(tipos.size) { (ajustes.enlacesTipos shr tipos[it].ordinal) and 1 != 0 }
+        nuevoDialogo()
+            .setTitle("¿Qué enlaces buscar?")
+            .setMultiChoiceItems(Array(tipos.size) { tipos[it].etiqueta }, marcados) { _, i, v -> marcados[i] = v }
+            .setPositiveButton("Buscar") { _, _ ->
+                var m = 0
+                for (i in tipos.indices) if (marcados[i]) m = m or (1 shl tipos[i].ordinal)
+                ajustes.enlacesTipos = m
+                ejecutarBusquedaEnlaces(p)
+            }
+            .setNeutralButton("Filtro propio…") { _, _ ->
+                pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
+                    ajustes.enlacesPropio = t
+                    buscarEnlaces(p)
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun ejecutarBusquedaEnlaces(p: Pestana) {
         val w = p.web
         if (w == null || p.suspendida) {
             toast("Abre la página antes de buscar enlaces")
@@ -2231,9 +2253,16 @@ class MainActivity : Activity() {
             } else {
                 val host = try { Uri.parse(r.url.ifEmpty { p.url }).host ?: "" } catch (e: Exception) { "" }
                 val propio = ajustes.enlacesPropio.let { if (it.isBlank()) null else FiltroPropio(it) }
+                val mascara = ajustes.enlacesTipos
                 val todos = Enlaces.procesar(r.crudos, host, r.titulo.ifBlank { p.titulo }, propio)
+                    .filter { it.tipo == TipoEnlace.PROPIO || (mascara shr it.tipo.ordinal) and 1 != 0 }
                 if (todos.isEmpty()) {
-                    toast("No se encontraron enlaces de los tipos buscados")
+                    nuevoDialogo()
+                        .setTitle("Sin resultados")
+                        .setMessage("No hay enlaces de los tipos elegidos en esta página.")
+                        .setPositiveButton("Cambiar tipos") { _, _ -> buscarEnlaces(p) }
+                        .setNegativeButton("Cerrar", null)
+                        .show()
                 } else {
                     mostrarEnlaces(p, "Enlaces", r.titulo.ifBlank { p.titulo }, r.url.ifEmpty { p.url }, todos, null, true)
                 }
@@ -2346,9 +2375,10 @@ class MainActivity : Activity() {
             items.add(Pair<String, () -> Unit>("Filtro propio: " + (ajustes.enlacesPropio.ifBlank { "ninguno" }).take(30) + "…", {
                 pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
                     ajustes.enlacesPropio = t
-                    buscarEnlaces(p)
+                    ejecutarBusquedaEnlaces(p)
                 }
             }))
+            items.add(Pair<String, () -> Unit>("Cambiar tipos a buscar…", { buscarEnlaces(p) }))
         }
         opciones("Enlaces", items)
     }
