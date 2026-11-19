@@ -33,7 +33,7 @@ import java.net.URL
  *
  * No reproduce nada por sí mismo: el audio lo sigue emitiendo el WebView. Las órdenes de la notificación se
  * pasan a MainActivity mediante [manejador], que las ejecuta como JavaScript en la pestaña actual.
- * El servicio se detiene solo si el audio se para (>5 min en pausa) y MainActivity lo cierra al volver al primer plano.
+ * El servicio se detiene solo si el audio se para (~1 min en pausa) y MainActivity lo cierra al volver al primer plano.
  */
 class ServicioSegundoPlano : Service() {
 
@@ -467,7 +467,7 @@ class ServicioSegundoPlano : Service() {
         private const val CANAL = "optimo_segundo_plano"
         private const val ID_NOTIF = 4401
         private const val PERIODO_MS = 4000L
-        private const val MAX_CICLOS_EN_PAUSA = 20 // ~80 segundos
+        private const val MAX_CICLOS_EN_PAUSA = 15 // ~60 segundos
         private const val TOPE_BLOQUEO_MS = 6L * 60L * 60L * 1000L
 
         /** MainActivity lo rellena: recibe «pausar» o «reanudar» y lo aplica a la página. Siempre en el hilo principal. */
