@@ -91,6 +91,8 @@ class MainActivity : Activity() {
         private const val MAX_PESTANAS = 20
         private const val MAX_CERRADAS = 10
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
+        private val NOMBRES_AHORRO = listOf("desactivado", "siempre", "solo con datos móviles")
+        private val NOMBRES_OSCURO_SITIO = listOf("según ajustes", "siempre", "nunca")
 
         /** Cuenta lo guardado por la página; IndexedDB y Cache Storage rellenan su cifra al resolverse. Formato: ls,ss,idb,cache (-1 = no disponible). */
         private const val JS_ALMACEN_CONTAR =
@@ -1110,13 +1112,52 @@ class MainActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun aplicarAjustesWeb(w: WebView) {
-        val oscuro = ajustes.oscurecerPaginas
+        val u = w.url
+        aplicarOscuro(w, oscuroPara(if (u == null) "" else Omnibox.hostDe(u).lowercase()))
+        w.settings.blockNetworkImage = ahorroActivo()
+        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+    }
+
+    private fun aplicarOscuro(w: WebView, oscuro: Boolean) {
         if (Build.VERSION.SDK_INT >= 33) {
             w.settings.isAlgorithmicDarkeningAllowed = oscuro
         } else if (Build.VERSION.SDK_INT >= 29) {
             w.settings.forceDark = if (oscuro) WebSettings.FORCE_DARK_ON else WebSettings.FORCE_DARK_OFF
         }
-        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+    }
+
+    /** Oscurecer páginas en [host]: la regla del sitio (siempre / nunca) manda sobre el ajuste general. */
+    private fun oscuroPara(host: String): Boolean = when (ajustes.modoOscuroEn(host)) {
+        1 -> true
+        2 -> false
+        else -> ajustes.oscurecerPaginas
+    }
+
+    /** Ahorro de datos activo ahora: siempre, o solo si la conexión actual es de datos limitados (móvil). */
+    private fun ahorroActivo(): Boolean = when (ajustes.ahorroDatos) {
+        1 -> true
+        2 -> try {
+            (getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager).isActiveNetworkMetered
+        } catch (e: Exception) {
+            false
+        }
+        else -> false
+    }
+
+    /**
+     * Antes de cargar una página (escrita, enlace o redirección de la web): versión de escritorio, modo oscuro y ahorro de datos
+     * según las reglas del sitio y los ajustes. Se llama solo al empezar a navegar, sin temporizadores.
+     */
+    private fun prepararNavegacion(p: Pestana, w: WebView, host: String) {
+        val h = host.lowercase()
+        val escritorio = p.escritorio || (h.isNotEmpty() && ajustes.escritorioEn(h))
+        if (escritorio != (w.settings.userAgentString == uaEscritorio)) {
+            w.settings.userAgentString = if (escritorio) uaEscritorio else null
+            w.settings.useWideViewPort = true
+            w.settings.loadWithOverviewMode = true
+        }
+        aplicarOscuro(w, oscuroPara(h))
+        w.settings.blockNetworkImage = ahorroActivo()
     }
 
     /** Gestor de cookies del perfil al que pertenece el WebView (el privado tiene el suyo). */
@@ -1343,6 +1384,7 @@ class MainActivity : Activity() {
     private fun cargarUrl(p: Pestana, w: WebView, url: String, esEnlace: Boolean = false) {
         val sinCifrar = url.startsWith("http://", ignoreCase = true)
         val host = Omnibox.hostDe(url).lowercase()
+        prepararNavegacion(p, w, host)
         if (!sinCifrar || httpPermitido.contains(host) || Omnibox.esLocal(host)) {
             w.loadUrl(url)
             return
@@ -1571,6 +1613,15 @@ class MainActivity : Activity() {
                 if (!p.privada && (ajustes.bloquearAnuncios || pausadoAqui)) {
                     add("Bloqueo de anuncios en este sitio: " + (if (pausadoAqui) "pausado (reanudar)" else "activo (pausar)")) { alternarPausaBloqueo(p) }
                 }
+                if (p.web?.settings?.blockNetworkImage == true) {
+                    add("Cargar imágenes en esta página (ahorro de datos)") {
+                        val w = p.web
+                        if (w != null) {
+                            w.settings.blockNetworkImage = false
+                            w.reload()
+                        }
+                    }
+                }
                 add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
                 // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
@@ -1636,6 +1687,15 @@ class MainActivity : Activity() {
                 val w = q.web
                 if (w != null) aplicarAjustesWeb(w)
             }
+            mostrarAjustes()
+        }
+        add("Ahorro de datos (sin imágenes): " + NOMBRES_AHORRO[ajustes.ahorroDatos]) {
+            ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) w.settings.blockNetworkImage = ahorroActivo()
+            }
+            toast("Se aplica a las páginas que cargues desde ahora")
             mostrarAjustes()
         }
         add("Permitir cookies de terceros: " + si(ajustes.cookiesTerceros)) {
@@ -2604,7 +2664,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.6")
+            .setTitle("Optimo 1.12.7")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -3428,6 +3488,27 @@ class MainActivity : Activity() {
         val items = ArrayList<Pair<String, () -> Unit>>()
         fun add(t: String, a: () -> Unit) {
             items.add(Pair(t, a))
+        }
+        add("Versión de escritorio en este sitio: " + si(ajustes.escritorioEn(sitio))) {
+            ajustes.fijarEscritorioEn(sitio, !ajustes.escritorioEn(sitio))
+            val w = p.web
+            if (w != null) {
+                prepararNavegacion(p, w, sitio)
+                w.reload()
+            }
+            mostrarPersonalizarSitio(p)
+        }
+        add("Modo oscuro en este sitio: " + NOMBRES_OSCURO_SITIO[ajustes.modoOscuroEn(sitio)]) {
+            ajustes.fijarModoOscuroEn(sitio, (ajustes.modoOscuroEn(sitio) + 1) % 3)
+            val w = p.web
+            if (w != null) {
+                prepararNavegacion(p, w, sitio)
+                w.reload()
+            }
+            mostrarPersonalizarSitio(p)
+        }
+        if (ajustes.bloquearAnuncios || bloqueoPausadoEnPagina(p.url)) {
+            add("Bloqueo de anuncios en este sitio: " + (if (bloqueoPausadoEnPagina(p.url)) "pausado" else "activo")) { alternarPausaBloqueo(p) }
         }
         add("Elegir un elemento de la página (tocar)") {
             p.eligiendo = true
@@ -4364,6 +4445,7 @@ class MainActivity : Activity() {
                     }
                 }
                 val host = (uri.host ?: "").lowercase()
+                if (request.isForMainFrame) prepararNavegacion(p, view, host)
                 if (esquema == "http" && request.isForMainFrame &&
                     !httpPermitido.contains(host) && !Omnibox.esLocal(host)
                 ) {
