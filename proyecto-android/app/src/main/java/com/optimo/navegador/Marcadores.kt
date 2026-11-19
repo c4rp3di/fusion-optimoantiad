@@ -246,6 +246,68 @@ class Marcadores(private val archivo: File, private val maximo: Int) {
         }
     }
 
+    /** Mismo formato que el archivo de marcadores (v2), para la copia de seguridad. */
+    fun exportarJson(): JSONObject {
+        val j = JSONObject()
+        j.put("v", 2)
+        val cs = JSONArray()
+        for (c in carpetas) cs.put(JSONObject().put("id", c.id).put("n", c.nombre).put("p", c.padre))
+        j.put("carpetas", cs)
+        val ms = JSONArray()
+        for (m in items) ms.put(JSONObject().put("t", m.titulo).put("u", m.url).put("c", m.carpeta).put("h", m.tiempo))
+        j.put("marcadores", ms)
+        return j
+    }
+
+    /**
+     * Añade lo de una copia a lo que ya hay, sin borrar nada: las carpetas con el mismo nombre y carpeta superior se reutilizan
+     * y las URL que ya existen se saltan. Devuelve (carpetas nuevas, marcadores nuevos).
+     */
+    fun importarJson(j: JSONObject): Pair<Int, Int> {
+        val info = HashMap<Long, Pair<String, Long>>()
+        val cs = j.optJSONArray("carpetas")
+        if (cs != null) {
+            for (i in 0 until minOf(cs.length(), 500)) {
+                val o = cs.optJSONObject(i) ?: continue
+                info[o.optLong("id")] = Pair(o.optString("n").take(120), o.optLong("p"))
+            }
+        }
+        val mapa = HashMap<Long, Long>()
+        mapa[0L] = 0L
+        var nuevasC = 0
+        fun resolver(id: Long, prof: Int): Long {
+            val ya = mapa[id]
+            if (ya != null) return ya
+            val d = info[id] ?: return 0L
+            if (prof > 20) return 0L
+            val padre = resolver(d.second, prof + 1)
+            val existente = carpetas.firstOrNull { it.padre == padre && it.nombre.equals(d.first, true) }
+            val r: Long
+            if (existente != null) {
+                r = existente.id
+            } else {
+                val c = crearCarpeta(d.first, padre)
+                if (c != null) nuevasC++
+                r = c?.id ?: 0L
+            }
+            mapa[id] = r
+            return r
+        }
+        var nuevosM = 0
+        val ms = j.optJSONArray("marcadores")
+        if (ms != null) {
+            // La copia va de más reciente a más antiguo: se añade al revés para conservar el orden.
+            for (i in minOf(ms.length(), 2000) - 1 downTo 0) {
+                val o = ms.optJSONObject(i) ?: continue
+                val u = o.optString("u")
+                if (u.length > 4000 || !(u.startsWith("http://") || u.startsWith("https://"))) continue
+                if (agregar(o.optString("t").take(300), u, resolver(o.optLong("c"), 0))) nuevosM++
+            }
+        }
+        guardarAhora()
+        return Pair(nuevasC, nuevosM)
+    }
+
     private fun guardar() {
         try {
             val j = JSONObject()
