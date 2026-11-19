@@ -87,6 +87,21 @@ class DatosDev {
     fun copiaBloqueos(): List<BloqueoNativo> = synchronized(lock) { ArrayList(bloqueos) }
     fun copiaErrores(): List<ErrorNativo> = synchronized(lock) { ArrayList(errores) }
 
+    /** Dominios bloqueados en la página actual con su número de peticiones, de más a menos (el registro guarda las últimas [MAX]). */
+    fun bloqueadosPorHost(): List<Pair<String, Int>> {
+        val mapa = HashMap<String, Int>()
+        for (b in copiaBloqueos()) {
+            val h = try {
+                android.net.Uri.parse(b.url).host
+            } catch (e: Exception) {
+                null
+            }
+            if (h.isNullOrEmpty()) continue
+            mapa[h] = (mapa[h] ?: 0) + 1
+        }
+        return mapa.entries.sortedByDescending { it.value }.map { Pair(it.key, it.value) }
+    }
+
     fun vaciarConsola() {
         synchronized(lock) { consola.clear() }
         agenteConsola.clear()
