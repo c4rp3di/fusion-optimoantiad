@@ -538,9 +538,51 @@ class Ajustes(contexto: Context) {
     /** Permisos web que se dejaron concedidos «siempre» a un sitio: entradas «sitio|tipo» (tipo: camara, microfono, ubicacion). */
     private fun permisosGuardados(): Set<String> = HashSet(sp.getStringSet("permisos_sitio", emptySet()) ?: emptySet())
 
+    /** Permisos con caducidad: entradas «sitio|tipo|caducaEnMs». Las caducadas se descartan al leer. */
+    private fun permisosTemporales(): Set<String> {
+        val todos = sp.getStringSet("permisos_temp", emptySet()) ?: emptySet()
+        val ahora = System.currentTimeMillis()
+        val vigentes = HashSet<String>()
+        for (e in todos) {
+            val caduca = e.substringAfterLast('|').toLongOrNull() ?: continue
+            if (caduca > ahora) vigentes.add(e)
+        }
+        if (vigentes.size != todos.size) sp.edit().putStringSet("permisos_temp", vigentes).apply()
+        return vigentes
+    }
+
     fun permisoRecordado(host: String, tipo: String): Boolean {
         val h = claveSitio(host)
-        return h.isNotEmpty() && permisosGuardados().contains(h + "|" + tipo)
+        if (h.isEmpty()) return false
+        if (permisosGuardados().contains(h + "|" + tipo)) return true
+        val prefijo = h + "|" + tipo + "|"
+        for (e in permisosTemporales()) {
+            if (e.startsWith(prefijo)) return true
+        }
+        return false
+    }
+
+    /** Concede el permiso solo durante [duracionMs] (p. ej. 1 h). Sustituye a otro temporal anterior del mismo tipo. */
+    fun recordarPermisoTemporal(host: String, tipo: String, duracionMs: Long) {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return
+        val prefijo = h + "|" + tipo + "|"
+        val s = HashSet<String>()
+        for (e in permisosTemporales()) {
+            if (!e.startsWith(prefijo)) s.add(e)
+        }
+        s.add(prefijo + (System.currentTimeMillis() + duracionMs))
+        sp.edit().putStringSet("permisos_temp", s).apply()
+    }
+
+    /** Milisegundos que le quedan a un permiso temporal; 0 si no es temporal (o no existe). */
+    fun restantePermiso(host: String, tipo: String): Long {
+        val prefijo = claveSitio(host) + "|" + tipo + "|"
+        val ahora = System.currentTimeMillis()
+        for (e in permisosTemporales()) {
+            if (e.startsWith(prefijo)) return (e.substringAfterLast('|').toLongOrNull() ?: 0L) - ahora
+        }
+        return 0L
     }
 
     fun recordarPermiso(host: String, tipo: String) {
@@ -552,28 +594,38 @@ class Ajustes(contexto: Context) {
     }
 
     fun quitarPermiso(host: String, tipo: String) {
+        val h = claveSitio(host)
         val s = HashSet(permisosGuardados())
-        s.remove(claveSitio(host) + "|" + tipo)
+        s.remove(h + "|" + tipo)
         sp.edit().putStringSet("permisos_sitio", s).apply()
+        val prefijo = h + "|" + tipo + "|"
+        val t = HashSet<String>()
+        for (e in permisosTemporales()) {
+            if (!e.startsWith(prefijo)) t.add(e)
+        }
+        sp.edit().putStringSet("permisos_temp", t).apply()
     }
 
     /** Tipos de permiso que tiene guardados un sitio. */
     fun permisosDe(host: String): List<String> {
         val h = claveSitio(host)
-        val res = ArrayList<String>()
+        val res = java.util.TreeSet<String>()
         for (e in permisosGuardados()) {
             if (e.substringBefore('|') == h) res.add(e.substringAfter('|'))
         }
-        res.sort()
-        return res
+        for (e in permisosTemporales()) {
+            if (e.substringBefore('|') == h) res.add(e.substringAfter('|').substringBefore('|'))
+        }
+        return ArrayList(res)
     }
 
-    fun sitiosConPermisos(): List<String> = permisosGuardados().map { it.substringBefore('|') }.distinct().sorted()
+    fun sitiosConPermisos(): List<String> =
+        (permisosGuardados() + permisosTemporales()).map { it.substringBefore('|') }.distinct().sorted()
 
-    fun totalPermisos(): Int = permisosGuardados().size
+    fun totalPermisos(): Int = permisosGuardados().size + permisosTemporales().size
 
     fun quitarTodosPermisos() {
-        sp.edit().remove("permisos_sitio").apply()
+        sp.edit().remove("permisos_sitio").remove("permisos_temp").apply()
     }
 }
 
