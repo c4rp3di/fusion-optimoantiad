@@ -360,3 +360,14 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - A Optimo Play se le entrega el mismo `Intent` que a los magnets (`ACTION_VIEW` con la dirección, sin tipo ni cabeceras: no se le pasa la página de origen). **Suponiendo que su `PlayerActivity` ya sabe resolver esas direcciones**; si no es así, hay que revisar en Optimo Play cómo lee el `Intent`.
 - `PENDIENTES-Optimo.md`: se añade el plan del rastreador de enlaces (fases, forma de la lista, límites y decisiones abiertas).
 - El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
+## 1.13.0 — Rastreador de enlaces, fase 1 (página abierta)
+
+- Menú ⋮ › **«Buscar enlaces en la página…»**: extrae los enlaces de la página abierta (también de una guardada sin conexión) con `assets/enlaces/extraer.js` (`a[href]` + búsqueda por expresión regular de magnets y enlaces de Mega escritos como texto) y los clasifica: **Magnet, Mega, Nube** (MediaFire, Drive, Dropbox…), **Torrent, Lista** (.m3u/.m3u8), **Vídeo, Audio, Comprimido, Documento, Imagen** y **Propio** (filtro escrito por ti: extensiones, trozos de dirección o `/regex/`). Solo mira la página abierta; nada de rastreo ni red extra.
+- Cada fila: **nombre** arriba y «tipo · dominio · tamaño» debajo. Magnets: nombre y tamaño del propio enlace (`dn`, `xl`). Archivos: el final de la dirección. **Mega no trae nombre** (va cifrado): se toma del texto del enlace, texto/encabezado cercano o título de la página, y la fila lo indica («nombre: texto cercano»).
+- Duplicados fuera (magnets por infohash). Tope de 5000 enlaces por página.
+- **Mismo dominio por defecto**: los archivos de otros sitios se ocultan (se avisa cuántos) hasta activar «Incluir archivos de otros sitios» en «Más». Magnets, Mega y nubes se muestran siempre, porque casi siempre están en otro sitio.
+- Tocar una fila: copiar enlace o nombre, abrir con otra app / Optimo Play (magnet, Mega, listas, vídeo, audio, torrent), abrir en pestaña nueva, compartir. «Filtrar» por tipo. «Más»: copiar todos (con o sin nombres), **exportar a .txt o .csv** (selector del sistema; el CSV lleva tipo, nombre, origen del nombre, tamaño, enlace y página), **guardar la lista para después**, filtro propio.
+- **Listas guardadas** (máx. 30 de hasta 2000 enlaces), cifradas con Keystore como marcadores y reglas. Menú ⋮ y Ajustes › Privacidad. No se pueden guardar desde pestañas privadas.
+- Copia de seguridad: se añaden `enlaces_propio` y `enlaces_otros` (las listas guardadas no van en la copia).
+- El Kotlin, sin compilar con el SDK ni probado en el móvil; el JS sí se probó en Chromium.
