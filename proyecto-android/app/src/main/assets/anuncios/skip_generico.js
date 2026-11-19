@@ -25,7 +25,7 @@
           if(enAnuncio){ b.click(); hallado=true; }
         }
         if(hallado) ociosos=0; else ociosos++;
-        siguiente=window.__optimoBg?2000:(ociosos>30?4000:(ociosos>10?2000:1000));
+        siguiente=window.__optimoBg?(ociosos>10?4000:2000):(ociosos>30?4000:(ociosos>10?2000:1000));
       } else {
         siguiente=3000;
       }
