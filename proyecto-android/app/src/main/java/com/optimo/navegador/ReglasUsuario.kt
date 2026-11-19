@@ -170,6 +170,48 @@ object ReglasUsuario {
         }
     }
 
+    /** Reglas para la copia de seguridad (mismo formato que el archivo de reglas). */
+    fun exportarJson(): JSONObject {
+        val j = JSONObject()
+        val o = JSONArray()
+        for (r in ocultar) o.put(JSONObject().put("host", r.host).put("sel", r.sel))
+        j.put("ocultar", o)
+        val e = JSONArray()
+        for (r in estilos) e.put(JSONObject().put("host", r.host).put("nombre", r.nombre).put("css", r.css))
+        j.put("estilos", e)
+        val d = JSONArray()
+        for (x in dominios.sorted()) d.put(x)
+        j.put("dominios", d)
+        return j
+    }
+
+    /** Añade las reglas de una copia a las que ya hay (las repetidas se saltan). Devuelve cuántas se añadieron. */
+    fun importarJson(j: JSONObject): Int {
+        var n = 0
+        val o = j.optJSONArray("ocultar")
+        if (o != null) {
+            for (i in 0 until minOf(o.length(), 300)) {
+                val x = o.optJSONObject(i) ?: continue
+                val sel = x.optString("sel")
+                if (sel.length <= 1000 && agregarOcultar(x.optString("host"), sel)) n++
+            }
+        }
+        val e = j.optJSONArray("estilos")
+        if (e != null) {
+            for (i in 0 until minOf(e.length(), 300)) {
+                val x = e.optJSONObject(i) ?: continue
+                if (agregarCss(x.optString("host"), x.optString("nombre"), x.optString("css"))) n++
+            }
+        }
+        val d = j.optJSONArray("dominios")
+        if (d != null) {
+            for (i in 0 until minOf(d.length(), 300)) {
+                if (agregarDominio(d.optString(i))) n++
+            }
+        }
+        return n
+    }
+
     private fun guardar() {
         try {
             val f = archivo ?: return
