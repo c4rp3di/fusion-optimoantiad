@@ -160,6 +160,93 @@ class Ajustes(contexto: Context) {
             sp.edit().putInt("suspender_min", v).apply()
         }
 
+    /** Qué borrar al cerrar Optimo (suma de bits): 1 cookies y datos de sitios, 2 historial, 4 caché. */
+    var borrarAlSalir: Int
+        get() = sp.getInt("borrar_al_salir", 0).coerceIn(0, 7)
+        set(v) {
+            sp.edit().putInt("borrar_al_salir", v).apply()
+        }
+
+    /** Marca: Optimo dejó de estar en pantalla y aún no se ha hecho la limpieza. Si el proceso muere, se hace al volver a abrir. */
+    var salidaPendiente: Boolean
+        get() = sp.getBoolean("salida_pendiente", false)
+        set(v) {
+            sp.edit().putBoolean("salida_pendiente", v).apply()
+        }
+
+    /**
+     * Ajustes que entran en la copia de seguridad, con su tipo (b booleano, i entero, s texto, ss lista de textos). Lista cerrada a propósito:
+     * una copia manipulada no puede escribir otras claves ni de otro tipo. Quedan fuera los permisos de sitios, las apps elegidas
+     * para multimedia/magnets (dependen del móvil) y «borrar al salir» (se decide en cada dispositivo).
+     */
+    private val tiposCopia: Map<String, String> = mapOf(
+        "anuncios" to "b", "cookies3" to "b", "dev_captura" to "b", "guardar_historial" to "b", "guardar_sesion" to "b",
+        "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
+        "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
+        "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
+        "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
+        "inicio_c_acento" to "s", "inicio_c_fondo" to "s", "inicio_c_sup" to "s", "inicio_c_texto" to "s", "inicio_propios" to "s",
+        "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
+        "listas_propias" to "s", "motor" to "s",
+        "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss"
+    )
+
+    fun exportarJson(): org.json.JSONObject {
+        val arr = org.json.JSONArray()
+        val todo = sp.all
+        for ((k, t) in tiposCopia) {
+            val v = todo[k] ?: continue
+            val e = org.json.JSONObject().put("k", k).put("t", t)
+            if (t == "b" && v is Boolean) e.put("v", v)
+            else if (t == "i" && v is Int) e.put("v", v)
+            else if (t == "s" && v is String) e.put("v", v)
+            else if (t == "ss" && v is Set<*>) {
+                val a = org.json.JSONArray()
+                for (x in v) if (x is String) a.put(x)
+                e.put("v", a)
+            } else continue
+            arr.put(e)
+        }
+        return org.json.JSONObject().put("valores", arr)
+    }
+
+    /** Aplica los ajustes de una copia (solo claves y tipos de [tiposCopia]). Devuelve cuántos se aplicaron. */
+    fun importarJson(j: org.json.JSONObject): Int {
+        val arr = j.optJSONArray("valores") ?: return 0
+        val ed = sp.edit()
+        var n = 0
+        for (i in 0 until minOf(arr.length(), 200)) {
+            val e = arr.optJSONObject(i) ?: continue
+            val k = e.optString("k")
+            val t = tiposCopia[k] ?: continue
+            if (e.optString("t") != t || !e.has("v")) continue
+            if (t == "b") {
+                ed.putBoolean(k, e.optBoolean("v"))
+                n++
+            } else if (t == "i") {
+                ed.putInt(k, e.optInt("v"))
+                n++
+            } else if (t == "s") {
+                val s = e.optString("v")
+                if (s.length <= 50000) {
+                    ed.putString(k, s)
+                    n++
+                }
+            } else if (t == "ss") {
+                val a = e.optJSONArray("v") ?: continue
+                val s = HashSet<String>()
+                for (x in 0 until minOf(a.length(), 1000)) {
+                    val c = a.optString(x)
+                    if (c.length <= 2000) s.add(c)
+                }
+                ed.putStringSet(k, s)
+                n++
+            }
+        }
+        ed.apply()
+        return n
+    }
+
     /** Seguir reproduciendo con la pantalla bloqueada o en segundo plano (servicio + script de visibilidad). */
     var segundoPlano: Boolean
         get() = sp.getBoolean("segundo_plano", true)
