@@ -167,6 +167,20 @@ class Ajustes(contexto: Context) {
             sp.edit().putInt("ahorro_datos", v).apply()
         }
 
+    /** Rastreador de enlaces: filtro propio del usuario (extensiones, trozos de dirección o /regex/). */
+    var enlacesPropio: String
+        get() = (sp.getString("enlaces_propio", "") ?: "").take(300)
+        set(v) {
+            sp.edit().putString("enlaces_propio", v.take(300)).apply()
+        }
+
+    /** Rastreador de enlaces: incluir también archivos que están en otros sitios (magnets, Mega y nubes se muestran siempre). */
+    var enlacesOtros: Boolean
+        get() = sp.getBoolean("enlaces_otros", false)
+        set(v) {
+            sp.edit().putBoolean("enlaces_otros", v).apply()
+        }
+
     private fun conjunto(k: String): Set<String> = HashSet(sp.getStringSet(k, emptySet()) ?: emptySet())
 
     /** ¿Está [host] (o un dominio superior suyo) en el conjunto? Una regla de example.com vale también para m.example.com. */
@@ -244,13 +258,13 @@ class Ajustes(contexto: Context) {
      */
     private val tiposCopia: Map<String, String> = mapOf(
         "anuncios" to "b", "cookies3" to "b", "dev_captura" to "b", "guardar_historial" to "b", "guardar_sesion" to "b",
-        "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
+        "enlaces_otros" to "b", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
         "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
         "inicio_c_acento" to "s", "inicio_c_fondo" to "s", "inicio_c_sup" to "s", "inicio_c_texto" to "s", "inicio_propios" to "s",
         "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
-        "listas_propias" to "s", "motor" to "s",
+        "enlaces_propio" to "s", "listas_propias" to "s", "motor" to "s",
         "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss",
         "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss"
     )
