@@ -361,9 +361,10 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - `PENDIENTES-Optimo.md`: se añade el plan del rastreador de enlaces (fases, forma de la lista, límites y decisiones abiertas).
 - El Kotlin, sin compilar con el SDK ni probado en el móvil.
 
-## 1.13.0 — Rastreador de enlaces, fase 1 (página abierta)
+## 1.13.1 — Rastreador de enlaces: elegir tipos antes de buscar (sobre 1.13.0, fase 1 de la página abierta)
 
 - Menú ⋮ › **«Buscar enlaces en la página…»**: extrae los enlaces de la página abierta (también de una guardada sin conexión) con `assets/enlaces/extraer.js` (`a[href]` + búsqueda por expresión regular de magnets y enlaces de Mega escritos como texto) y los clasifica: **Magnet, Mega, Nube** (MediaFire, Drive, Dropbox…), **Torrent, Lista** (.m3u/.m3u8), **Vídeo, Audio, Comprimido, Documento, Imagen** y **Propio** (filtro escrito por ti: extensiones, trozos de dirección o `/regex/`). Solo mira la página abierta; nada de rastreo ni red extra.
+- Al pulsar «Buscar enlaces…» se abre primero una lista con casillas para **elegir qué tipos buscar** (se recuerda; imágenes desactivadas por defecto) y un botón «Filtro propio…». Si no hay resultados se avisa con un diálogo que permite cambiar los tipos.
 - Cada fila: **nombre** arriba y «tipo · dominio · tamaño» debajo. Magnets: nombre y tamaño del propio enlace (`dn`, `xl`). Archivos: el final de la dirección. **Mega no trae nombre** (va cifrado): se toma del texto del enlace, texto/encabezado cercano o título de la página, y la fila lo indica («nombre: texto cercano»).
 - Duplicados fuera (magnets por infohash). Tope de 5000 enlaces por página.
 - **Mismo dominio por defecto**: los archivos de otros sitios se ocultan (se avisa cuántos) hasta activar «Incluir archivos de otros sitios» en «Más». Magnets, Mega y nubes se muestran siempre, porque casi siempre están en otro sitio.
