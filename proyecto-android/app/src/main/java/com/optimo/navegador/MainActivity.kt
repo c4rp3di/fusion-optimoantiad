@@ -69,6 +69,7 @@ import androidx.webkit.ProfileStore
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 
 /**
@@ -85,6 +86,8 @@ class MainActivity : Activity() {
         private const val REQ_UBICACION = 103
         private const val REQ_ALMACENAMIENTO = 104
         private const val REQ_NOTIFICACIONES = 105
+        private const val REQ_EXPORTAR = 106
+        private const val REQ_IMPORTAR = 107
         private const val MAX_PESTANAS = 20
         private const val MAX_CERRADAS = 10
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
@@ -217,6 +220,7 @@ class MainActivity : Activity() {
         ListasManager.iniciar(this, ajustes)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
+        if (ajustes.salidaPendiente) limpiarAlSalir()
         uaEscritorio = calcularUaEscritorio()
         construirUi()
         configurarVentana()
@@ -250,12 +254,14 @@ class MainActivity : Activity() {
     override fun onStart() {
         super.onStart()
         enPantalla = true
+        if (ajustes.salidaPendiente) ajustes.salidaPendiente = false
     }
 
     override fun onStop() {
         super.onStop()
         enPantalla = false
         revisarSuspension(false)
+        if (ajustes.borrarAlSalir != 0 && !isChangingConfigurations) ajustes.salidaPendiente = true
     }
 
     /** Poca memoria (10–15) o el sistema a punto de recortar procesos (60+): se suspenden pestañas sin uso. 20 es «app oculta», que no cuenta. */
@@ -531,6 +537,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        if (isFinishing) limpiarAlSalir()
         lector.cerrar()
         ServicioSegundoPlano.manejador = null
         quitarEscuchaAudio()
@@ -599,6 +606,12 @@ class MainActivity : Activity() {
             val cb = selectorArchivos
             selectorArchivos = null
             cb?.onReceiveValue(WebChromeClient.FileChooserParams.parseResult(resultCode, data))
+        } else if (requestCode == REQ_EXPORTAR && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) escribirCopia(uri)
+        } else if (requestCode == REQ_IMPORTAR && resultCode == RESULT_OK) {
+            val uri = data?.data
+            if (uri != null) leerCopia(uri)
         }
     }
 
@@ -1635,6 +1648,7 @@ class MainActivity : Activity() {
         }
         add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
         add("Lectura y voz…") { mostrarAjustesLectura() }
+        add("Copia de seguridad…") { mostrarCopiaSeguridad() }
         add("Privacidad y datos…") { mostrarPrivacidad() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
@@ -2093,6 +2107,152 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------------------------------------------------------------- borrar datos al salir
+
+    private fun alternarBorrarAlSalir(bit: Int) {
+        ajustes.borrarAlSalir = ajustes.borrarAlSalir xor bit
+        if ((ajustes.borrarAlSalir and bit) != 0) {
+            toast("Se borrará al cerrar Optimo (o al reabrirla, si Android la cierra antes)")
+        }
+        mostrarPrivacidad()
+    }
+
+    /**
+     * Limpieza de «Al salir, borrar…». Se llama al cerrar la app (onDestroy con la actividad terminando) y, si el proceso murió
+     * antes de poder hacerlo (quitarla de recientes, Android que la cierra), al abrirla de nuevo. La marca [Ajustes.salidaPendiente]
+     * solo se quita cuando el borrado de cookies termina de verdad.
+     */
+    private fun limpiarAlSalir() {
+        val m = ajustes.borrarAlSalir
+        if (m == 0) {
+            ajustes.salidaPendiente = false
+            return
+        }
+        if ((m and 2) != 0) {
+            historial.vaciar()
+            cerradas.clear()
+        }
+        if ((m and 4) != 0) borrarCache()
+        if ((m and 1) != 0) {
+            val cm = CookieManager.getInstance()
+            cm.removeAllCookies { _ -> ajustes.salidaPendiente = false }
+            cm.flush()
+            WebStorage.getInstance().deleteAllData()
+        } else {
+            ajustes.salidaPendiente = false
+        }
+    }
+
+    // ---------------------------------------------------------------- copia de seguridad
+
+    private fun mostrarCopiaSeguridad() {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Exportar a un archivo…", { confirmarExportar() }))
+        items.add(Pair<String, () -> Unit>("Importar desde un archivo…", { elegirArchivoCopia() }))
+        opciones("Copia de seguridad\nMarcadores, reglas de sitios y anuncios, y ajustes. No incluye historial, cookies ni permisos de sitios.", items)
+    }
+
+    private fun confirmarExportar() {
+        nuevoDialogo()
+            .setTitle("Exportar copia")
+            .setMessage(
+                "El archivo se guarda SIN cifrar (texto legible) con tus marcadores, reglas y ajustes. " +
+                    "Guárdalo en un sitio privado y no lo compartas. No incluye historial, cookies, contraseñas ni permisos."
+            )
+            .setPositiveButton("Exportar") { _, _ ->
+                val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+                i.addCategory(Intent.CATEGORY_OPENABLE)
+                i.type = "application/json"
+                i.putExtra(
+                    Intent.EXTRA_TITLE,
+                    "optimo-copia-" + java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date()) + ".json"
+                )
+                try {
+                    startActivityForResult(i, REQ_EXPORTAR)
+                } catch (e: Exception) {
+                    toast("Este móvil no tiene selector de archivos")
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    private fun elegirArchivoCopia() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        try {
+            startActivityForResult(i, REQ_IMPORTAR)
+        } catch (e: Exception) {
+            toast("Este móvil no tiene selector de archivos")
+        }
+    }
+
+    private fun escribirCopia(uri: Uri) {
+        try {
+            val j = JSONObject()
+            j.put("optimo", 1)
+            j.put("fecha", System.currentTimeMillis())
+            j.put("ajustes", ajustes.exportarJson())
+            j.put("marcadores", marcadores.exportarJson())
+            j.put("reglas", ReglasUsuario.exportarJson())
+            val bytes = j.toString(2).toByteArray(Charsets.UTF_8)
+            val salida = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("sin salida")
+            salida.use { it.write(bytes) }
+            toast("Copia guardada (" + (bytes.size / 1024 + 1) + " KB)")
+        } catch (e: Exception) {
+            toast("No se pudo guardar la copia")
+        }
+    }
+
+    /** Lee y valida la copia (máx. 5 MB) y pide confirmación antes de aplicarla. */
+    private fun leerCopia(uri: Uri) {
+        val j: JSONObject? = try {
+            val entrada = contentResolver.openInputStream(uri) ?: throw java.io.IOException("sin entrada")
+            val buf = java.io.ByteArrayOutputStream()
+            entrada.use { f ->
+                val b = ByteArray(8192)
+                while (true) {
+                    val n = f.read(b)
+                    if (n < 0) break
+                    buf.write(b, 0, n)
+                    if (buf.size() > 5 * 1024 * 1024) throw java.io.IOException("demasiado grande")
+                }
+            }
+            JSONObject(buf.toString("UTF-8"))
+        } catch (e: Exception) {
+            null
+        }
+        if (j == null || j.optInt("optimo", 0) != 1) {
+            toast("No es una copia válida de Optimo")
+            return
+        }
+        val nM = j.optJSONObject("marcadores")?.optJSONArray("marcadores")?.length() ?: 0
+        val r = j.optJSONObject("reglas")
+        val nR = (r?.optJSONArray("ocultar")?.length() ?: 0) + (r?.optJSONArray("estilos")?.length() ?: 0) +
+            (r?.optJSONArray("dominios")?.length() ?: 0)
+        val nA = j.optJSONObject("ajustes")?.optJSONArray("valores")?.length() ?: 0
+        nuevoDialogo()
+            .setTitle("Importar copia")
+            .setMessage(
+                "La copia tiene " + nM + " marcadores, " + nR + " reglas y " + nA + " ajustes.\n\n" +
+                    "Marcadores y reglas se AÑADEN a los que ya tienes (no se borra nada ni se duplican los repetidos). " +
+                    "Los ajustes de la copia sustituyen a los actuales. Importa solo copias que hayas hecho tú."
+            )
+            .setPositiveButton("Importar") { _, _ ->
+                try {
+                    val ra = ajustes.importarJson(j.optJSONObject("ajustes") ?: JSONObject())
+                    val rm = marcadores.importarJson(j.optJSONObject("marcadores") ?: JSONObject())
+                    val rr = ReglasUsuario.importarJson(j.optJSONObject("reglas") ?: JSONObject())
+                    toast("Importado: " + rm.second + " marcadores, " + rr + " reglas, " + ra + " ajustes. Reinicia Optimo para aplicarlo todo")
+                } catch (e: Exception) {
+                    toast("No se pudo importar la copia")
+                }
+            }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
     private fun borrarDatos() {
         historial.vaciar()
         cerradas.clear()
@@ -2171,7 +2331,7 @@ class MainActivity : Activity() {
                     .setMessage("¿Quieres borrar también el historial que ya está guardado (" + historial.todos().size + " páginas)?")
                     .setPositiveButton("Borrar") { _, _ ->
                         historial.vaciar()
-        cerradas.clear()
+                        cerradas.clear()
                         toast("Historial borrado")
                         mostrarPrivacidad()
                     }
@@ -2187,10 +2347,13 @@ class MainActivity : Activity() {
             if (!ajustes.guardarSesion) borrarSesionGuardada()
             mostrarPrivacidad()
         }
+        add("Al salir, borrar cookies y datos de sitios: " + si((ajustes.borrarAlSalir and 1) != 0)) { alternarBorrarAlSalir(1) }
+        add("Al salir, borrar historial: " + si((ajustes.borrarAlSalir and 2) != 0)) { alternarBorrarAlSalir(2) }
+        add("Al salir, borrar caché: " + si((ajustes.borrarAlSalir and 4) != 0)) { alternarBorrarAlSalir(4) }
         add("Borrar historial (" + historial.todos().size + " páginas)") {
             confirmarAccionPrivacidad("Borrar historial", "Se borrará el historial de navegación. Los marcadores se conservan.", "Borrar") {
                 historial.vaciar()
-        cerradas.clear()
+                cerradas.clear()
             }
         }
         add("Borrar caché (" + formatoTamano(tamanoDir(cacheDir)) + ")") {
@@ -2441,7 +2604,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.5")
+            .setTitle("Optimo 1.12.6")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
