@@ -160,6 +160,69 @@ class Ajustes(contexto: Context) {
             sp.edit().putInt("suspender_min", v).apply()
         }
 
+    /** Ahorro de datos: 0 no, 1 siempre, 2 solo con conexión de datos limitados (móvil). Bloquea las imágenes que vienen de la red. */
+    var ahorroDatos: Int
+        get() = sp.getInt("ahorro_datos", 0).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("ahorro_datos", v).apply()
+        }
+
+    private fun conjunto(k: String): Set<String> = HashSet(sp.getStringSet(k, emptySet()) ?: emptySet())
+
+    /** ¿Está [host] (o un dominio superior suyo) en el conjunto? Una regla de example.com vale también para m.example.com. */
+    private fun enConjunto(k: String, host: String): Boolean {
+        val s = conjunto(k)
+        if (s.isEmpty()) return false
+        var h = claveSitio(host)
+        while (h.isNotEmpty()) {
+            if (s.contains(h)) return true
+            val i = h.indexOf('.')
+            if (i < 0) return false
+            h = h.substring(i + 1)
+        }
+        return false
+    }
+
+    private fun quitarDeConjunto(k: String, host: String) {
+        val s = HashSet(conjunto(k))
+        var h = claveSitio(host)
+        while (h.isNotEmpty()) {
+            s.remove(h)
+            val i = h.indexOf('.')
+            if (i < 0) break
+            h = h.substring(i + 1)
+        }
+        sp.edit().putStringSet(k, s).apply()
+    }
+
+    private fun ponerEnConjunto(k: String, host: String) {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return
+        val s = HashSet(conjunto(k))
+        if (s.size >= 500) return
+        s.add(h)
+        sp.edit().putStringSet(k, s).apply()
+    }
+
+    /** Sitios que siempre se abren con la versión de escritorio. */
+    fun escritorioEn(host: String): Boolean = enConjunto("escritorio_sitios", host)
+
+    fun fijarEscritorioEn(host: String, v: Boolean) {
+        quitarDeConjunto("escritorio_sitios", host)
+        if (v) ponerEnConjunto("escritorio_sitios", host)
+    }
+
+    /** Modo oscuro de páginas en un sitio: 0 según el ajuste general, 1 siempre, 2 nunca. */
+    fun modoOscuroEn(host: String): Int =
+        if (enConjunto("oscuro_si", host)) 1 else if (enConjunto("oscuro_no", host)) 2 else 0
+
+    fun fijarModoOscuroEn(host: String, modo: Int) {
+        quitarDeConjunto("oscuro_si", host)
+        quitarDeConjunto("oscuro_no", host)
+        if (modo == 1) ponerEnConjunto("oscuro_si", host)
+        if (modo == 2) ponerEnConjunto("oscuro_no", host)
+    }
+
     /** Qué borrar al cerrar Optimo (suma de bits): 1 cookies y datos de sitios, 2 historial, 4 caché. */
     var borrarAlSalir: Int
         get() = sp.getInt("borrar_al_salir", 0).coerceIn(0, 7)
@@ -183,12 +246,13 @@ class Ajustes(contexto: Context) {
         "anuncios" to "b", "cookies3" to "b", "dev_captura" to "b", "guardar_historial" to "b", "guardar_sesion" to "b",
         "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
-        "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
+        "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
         "inicio_c_acento" to "s", "inicio_c_fondo" to "s", "inicio_c_sup" to "s", "inicio_c_texto" to "s", "inicio_propios" to "s",
         "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
         "listas_propias" to "s", "motor" to "s",
-        "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss"
+        "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss",
+        "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
