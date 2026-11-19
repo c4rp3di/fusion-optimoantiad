@@ -1,14 +1,11 @@
 # Pendientes de Optimo y Optimo Play
 
-Estado (1.9.2, 1.10.0, 1.11.0 y 1.11.7 aplican: oferta en YouTube y Wi-Fi/cierre en pausa del servicio): Optimo 1.7.2 y Optimo Play 0.2.1 entregados. Nada de lo siguiente está aplicado.
+Estado (1.9.2, 1.10.0, 1.11.0 y 1.11.7 aplican: oferta en YouTube y Wi-Fi/cierre en pausa del servicio): Optimo 1.7.2 y Optimo Play 0.2.1 entregados. Revisado contra 1.12.7: lo marcado HECHO está aplicado; el resto sigue pendiente.
 
-## 1. Oferta de «Reproducir en Optimo Play» (Optimo)
-Causa confirmada con el panel Información: Optimo detectó `youtube.com/s/search/audio/success.mp3` (sonido de interfaz de 6.636 bytes)
-y lo envió como si fuera el vídeo. Los vídeos reales (`googlevideo.com/videoplayback`) no tienen extensión y nunca se detectan.
-- Ocultar la oferta en `youtube.com`, `youtu.be`, `youtube-nocookie.com` y `googlevideo.com`.
-- Descartar rutas de interfaz (`/s/...`) y medios minúsculos (sondeo de longitud).
-- Preferir un manifiesto `.m3u8`/`.mpd` frente a un `.mp3`/`.mp4` suelto.
-- Reproducir YouTube dentro de Play: descartado (flujos firmados, cambiantes y contra sus condiciones de uso).
+## 1. Oferta de «Reproducir en Optimo Play» (Optimo) — HECHO (verificado en 1.12.2)
+`ReproductorExterno.esDetectable` ya descarta youtube.com, youtu.be, youtube-nocookie.com y googlevideo.com y las rutas de interfaz `/s/...`, y un manifiesto `.m3u8`/`.mpd`
+manda sobre un `.mp3`/`.mp4` suelto (`MainActivity`, shouldInterceptRequest). Sin hacer, a propósito: sondeo de longitud de medios minúsculos (exigiría una petición extra por recurso).
+Reproducir YouTube dentro de Play: descartado (flujos firmados, cambiantes y contra sus condiciones de uso).
 
 ## 2. Eficiencia y batería (revisión estática, sin medir)
 ### Optimo Play (prioridad alta)
@@ -18,10 +15,10 @@ y lo envió como si fuera el vídeo. Los vídeos reales (`googlevideo.com/videop
 4. Wi-Fi: `WIFI_MODE_FULL` en vez de `FULL_HIGH_PERF` (obsoleto).
 5. Refresco de la interfaz de 400 ms a 1 s con los controles ocultos.
 ### Optimo
-1. Wi-Fi: `WIFI_MODE_FULL` en vez de `FULL_LOW_LATENCY` (solo actúa con pantalla encendida).
-2. Soltar CPU/Wi-Fi y ocultar el WebView a los 30–60 s de pausa (hoy hasta 5 min).
-3. Scripts de vigilancia de anuncios (500 ms YouTube, 1000 ms genérico): espaciarlos a 1,5–2 s en segundo plano.
-4. Prioridad del renderer «importante»: aplicarla solo mientras hay audio.
+1. Wi-Fi `WIFI_MODE_FULL` — HECHO (`ServicioSegundoPlano.tomarBloqueos`).
+2. Soltar CPU/Wi-Fi tras una pausa — HECHO en 1.12.5: el servicio se cierra a los ~60 s en pausa (`MAX_CICLOS_EN_PAUSA` = 15 × 4 s).
+3. Scripts de vigilancia de anuncios — HECHO: `skip_yt.js` (2 s en segundo plano) y `skip_generico.js` (2 s, y 4 s tras un rato sin anuncios).
+4. Prioridad del renderer — parcial: `aplicarFondo` la mantiene mientras «Seguir sonando» esté activado, haya o no audio en ese momento. Medir antes de tocarla.
 ### Medir
 `adb shell dumpsys batterystats` y la pantalla de batería; 30 min con pantalla apagada en cada app.
 
