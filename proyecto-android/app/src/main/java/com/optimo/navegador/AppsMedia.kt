@@ -29,6 +29,7 @@ object AppsMedia {
         val r = url.substringBefore('?').substringBefore('#').lowercase()
         return when {
             r.endsWith(".m3u8") -> "application/x-mpegURL"
+            r.endsWith(".m3u") -> "audio/x-mpegurl"
             r.endsWith(".mpd") -> "application/dash+xml"
             r.endsWith(".torrent") -> "application/x-bittorrent"
             r.endsWith(".mp4") -> "video/mp4"
@@ -47,7 +48,8 @@ object AppsMedia {
 
     private fun intentVer(url: String, magnet: Boolean, mime: String?): Intent {
         val i = Intent(Intent.ACTION_VIEW)
-        if (magnet) i.data = Uri.parse(url) else i.setDataAndType(Uri.parse(url), tipoDe(url, mime))
+        // Magnets y enlaces de Mega no tienen tipo de contenido: se entregan solo con la dirección.
+        if (magnet || ReproductorExterno.esMega(url)) i.data = Uri.parse(url) else i.setDataAndType(Uri.parse(url), tipoDe(url, mime))
         return i
     }
 
@@ -100,7 +102,8 @@ object AppsMedia {
         val vistos = HashSet<String>()
         for (u in listOf(
             "https://example.com/v.mp4", "https://example.com/a.mp3",
-            "https://example.com/v.m3u8", "https://example.com/f.torrent"
+            "https://example.com/v.m3u8", "https://example.com/l.m3u", "https://example.com/f.torrent",
+            "https://mega.nz/file/abcdefgh#clave"
         )) {
             for (a in apps(ctx, u, null)) {
                 if (vistos.add(a.paquete)) res.add(a)
@@ -128,7 +131,7 @@ object AppsMedia {
             val i = intentVer(url, magnet, mime)
             i.setClassName(app.paquete, app.actividad)
             if (!titulo.isNullOrBlank()) i.putExtra("title", titulo)
-            if (!magnet) {
+            if (!magnet && !ReproductorExterno.esMega(url)) {
                 // Convención de MX Player y similares para reproductores que aceptan cabeceras.
                 val cab = ArrayList<String>()
                 if (!referer.isNullOrBlank()) { cab.add("Referer"); cab.add(referer) }
