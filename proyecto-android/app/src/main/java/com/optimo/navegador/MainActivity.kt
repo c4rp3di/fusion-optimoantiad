@@ -88,6 +88,7 @@ class MainActivity : Activity() {
         private const val REQ_NOTIFICACIONES = 105
         private const val REQ_EXPORTAR = 106
         private const val REQ_IMPORTAR = 107
+        private const val REQ_EXPORTAR_ENLACES = 108
         private const val MAX_PESTANAS = 20
         private const val MAX_CERRADAS = 10
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
@@ -224,6 +225,7 @@ class MainActivity : Activity() {
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         PaginasGuardadas.iniciar(this)
+        ListasEnlaces.iniciar(this)
         ListasManager.iniciar(this, ajustes)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
@@ -619,6 +621,11 @@ class MainActivity : Activity() {
         } else if (requestCode == REQ_IMPORTAR && resultCode == RESULT_OK) {
             val uri = data?.data
             if (uri != null) leerCopia(uri)
+        } else if (requestCode == REQ_EXPORTAR_ENLACES) {
+            val contenido = enlacesPorExportar
+            enlacesPorExportar = null
+            val uri = data?.data
+            if (resultCode == RESULT_OK && uri != null && contenido != null) escribirEnlaces(uri, contenido)
         }
     }
 
@@ -1631,6 +1638,8 @@ class MainActivity : Activity() {
         }
         add("Marcadores") { mostrarMarcadores() }
         add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
+        if (!p.inicio && p.url.startsWith("http")) add("Buscar enlaces en la página…") { buscarEnlaces(p) }
+        if (ListasEnlaces.todas().isNotEmpty()) add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
             add("Compartir página") { compartir(p.url) }
@@ -2195,6 +2204,229 @@ class MainActivity : Activity() {
             .show()
     }
 
+
+    // ---------------------------------------------------------------- rastreador de enlaces (fase 1: la página abierta)
+
+    private var enlacesPorExportar: String? = null
+
+    /** Extrae los enlaces de la página abierta con `assets/enlaces/extraer.js` y los muestra clasificados. Solo mira esta página. */
+    private fun buscarEnlaces(p: Pestana) {
+        val w = p.web
+        if (w == null || p.suspendida) {
+            toast("Abre la página antes de buscar enlaces")
+            return
+        }
+        if (p.progreso in 0..99) toast("La página aún está cargando: puede faltar algún enlace")
+        val js = try {
+            assets.open("enlaces/extraer.js").bufferedReader().use { it.readText() }.trim()
+        } catch (e: Exception) {
+            toast("No se pudo preparar la búsqueda")
+            return
+        }
+        toast("Buscando enlaces…")
+        w.evaluateJavascript(js) { bruto ->
+            val r = Enlaces.leerResultado(bruto)
+            if (r == null) {
+                toast("No se pudieron leer los enlaces de esta página")
+            } else {
+                val host = try { Uri.parse(r.url.ifEmpty { p.url }).host ?: "" } catch (e: Exception) { "" }
+                val propio = ajustes.enlacesPropio.let { if (it.isBlank()) null else FiltroPropio(it) }
+                val todos = Enlaces.procesar(r.crudos, host, r.titulo.ifBlank { p.titulo }, propio)
+                if (todos.isEmpty()) {
+                    toast("No se encontraron enlaces de los tipos buscados")
+                } else {
+                    mostrarEnlaces(p, "Enlaces", r.titulo.ifBlank { p.titulo }, r.url.ifEmpty { p.url }, todos, null, true)
+                }
+            }
+        }
+    }
+
+    /** ¿Se muestra este enlace con los ajustes actuales? Magnets, Mega y nubes se ven siempre; los archivos de otros sitios solo si se activó. */
+    private fun enlaceVisible(e: EnlaceEncontrado, filtro: TipoEnlace?): Boolean {
+        if (filtro != null && e.tipo != filtro) return false
+        if (!e.externo) return true
+        return when (e.tipo) {
+            TipoEnlace.MAGNET, TipoEnlace.MEGA, TipoEnlace.NUBE -> true
+            else -> ajustes.enlacesOtros
+        }
+    }
+
+    private fun lineaEnlace(e: EnlaceEncontrado): String {
+        val sb = StringBuilder(e.tipo.etiqueta)
+        if (e.host.isNotEmpty() && e.tipo != TipoEnlace.MAGNET) sb.append(" · ").append(e.host)
+        if (e.tamano >= 0) sb.append(" · ").append(formatoTamano(e.tamano))
+        if (!Enlaces.nombreFiable(e.origenNombre) && e.origenNombre != "dirección") sb.append(" · nombre: ").append(e.origenNombre)
+        return sb.toString()
+    }
+
+    /**
+     * Diálogo con la lista. [guardada] = la lista viene de una lista ya guardada (no se puede volver a guardar ni se rehace la búsqueda).
+     */
+    private fun mostrarEnlaces(
+        p: Pestana, titulo: String, fuenteTitulo: String, fuenteUrl: String,
+        todos: List<EnlaceEncontrado>, filtro: TipoEnlace?, nueva: Boolean
+    ) {
+        val visibles = todos.filter { enlaceVisible(it, filtro) }
+        val ocultos = todos.size - todos.count { enlaceVisible(it, null) }
+        val vista = ListView(this)
+        val adaptador = object : ArrayAdapter<EnlaceEncontrado>(
+            this, android.R.layout.simple_list_item_2, android.R.id.text1, visibles
+        ) {
+            override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
+                val v = super.getView(pos, convertView, parent)
+                val e = visibles[pos]
+                val t1 = v.findViewById<TextView>(android.R.id.text1)
+                val t2 = v.findViewById<TextView>(android.R.id.text2)
+                t1.text = e.nombre
+                t1.maxLines = 2
+                t1.ellipsize = android.text.TextUtils.TruncateAt.END
+                t2.text = lineaEnlace(e)
+                t2.maxLines = 2
+                t1.setTextColor(paleta.texto)
+                t2.setTextColor(paleta.tenue)
+                return v
+            }
+        }
+        vista.adapter = adaptador
+        val cabecera = (if (filtro != null) filtro.etiqueta + ": " else "") + visibles.size + " enlaces" +
+            (if (ocultos > 0) " (" + ocultos + " de otros sitios ocultos)" else "")
+        vista.setOnItemClickListener { _, _, i, _ -> menuEnlace(p, visibles[i]) }
+        nuevoDialogo()
+            .setTitle(cabecera)
+            .setView(vista)
+            .setPositiveButton("Más") { _, _ ->
+                menuMasEnlaces(p, fuenteTitulo, fuenteUrl, todos, visibles, filtro, nueva)
+            }
+            .setNeutralButton("Filtrar") { _, _ -> filtrarEnlaces(p, fuenteTitulo, fuenteUrl, todos, filtro, nueva) }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
+
+    private fun filtrarEnlaces(p: Pestana, ft: String, fu: String, todos: List<EnlaceEncontrado>, filtro: TipoEnlace?, nueva: Boolean) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Todos (" + todos.count { enlaceVisible(it, null) } + ")", { mostrarEnlaces(p, "", ft, fu, todos, null, nueva) }))
+        for (t in TipoEnlace.values()) {
+            val n = todos.count { enlaceVisible(it, t) }
+            if (n > 0) items.add(Pair<String, () -> Unit>(t.etiqueta + " (" + n + ")", { mostrarEnlaces(p, "", ft, fu, todos, t, nueva) }))
+        }
+        opciones("Mostrar solo…", items)
+    }
+
+    private fun menuEnlace(p: Pestana, e: EnlaceEncontrado) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Copiar enlace", { copiar(e.url) }))
+        items.add(Pair<String, () -> Unit>("Copiar nombre", { copiar(e.nombre) }))
+        if (AppsMedia.apps(this, e.url, null).isNotEmpty() &&
+            (e.tipo == TipoEnlace.MAGNET || e.tipo == TipoEnlace.MEGA || e.tipo == TipoEnlace.LISTA || e.tipo == TipoEnlace.VIDEO || e.tipo == TipoEnlace.AUDIO || e.tipo == TipoEnlace.TORRENT)
+        ) {
+            items.add(Pair<String, () -> Unit>("Abrir con otra app…", { elegirAppMedio(e.url, null, p, null, e.nombre) }))
+        }
+        if (e.url.startsWith("http")) items.add(Pair<String, () -> Unit>("Abrir en una pestaña nueva", { nuevaPestana(e.url, p.privada) }))
+        items.add(Pair<String, () -> Unit>("Compartir enlace", { compartir(e.url) }))
+        opciones(e.nombre.take(80), items)
+    }
+
+    private fun menuMasEnlaces(
+        p: Pestana, ft: String, fu: String, todos: List<EnlaceEncontrado>, visibles: List<EnlaceEncontrado>,
+        filtro: TipoEnlace?, nueva: Boolean
+    ) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Copiar los " + visibles.size + " enlaces", { copiar(Enlaces.texto(visibles)) }))
+        items.add(Pair<String, () -> Unit>("Copiar con nombres", { copiar(Enlaces.textoConNombres(visibles)) }))
+        items.add(Pair<String, () -> Unit>("Exportar a archivo (.txt)…", { exportarEnlaces(Enlaces.texto(visibles), "txt", "text/plain", ft) }))
+        items.add(Pair<String, () -> Unit>("Exportar a archivo (.csv)…", { exportarEnlaces(Enlaces.csv(visibles, fu), "csv", "text/csv", ft) }))
+        if (nueva && !p.privada) {
+            items.add(Pair<String, () -> Unit>("Guardar esta lista para después…", { guardarListaEnlaces(ft, fu, visibles) }))
+        }
+        if (nueva) {
+            items.add(Pair<String, () -> Unit>("Incluir archivos de otros sitios: " + si(ajustes.enlacesOtros), {
+                ajustes.enlacesOtros = !ajustes.enlacesOtros
+                mostrarEnlaces(p, "", ft, fu, todos, filtro, nueva)
+            }))
+            items.add(Pair<String, () -> Unit>("Filtro propio: " + (ajustes.enlacesPropio.ifBlank { "ninguno" }).take(30) + "…", {
+                pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
+                    ajustes.enlacesPropio = t
+                    buscarEnlaces(p)
+                }
+            }))
+        }
+        opciones("Enlaces", items)
+    }
+
+    private fun guardarListaEnlaces(ft: String, fu: String, visibles: List<EnlaceEncontrado>) {
+        pedirTextoOpcional("Nombre de la lista", ft.ifBlank { "Lista de enlaces" }) { nombre ->
+            val l = ListasEnlaces.guardar(nombre, fu, visibles)
+            if (l == null) toast("No se pudo guardar (máximo " + ListasEnlaces.MAX_LISTAS + " listas)")
+            else toast("Lista guardada (" + l.items.size + " enlaces)")
+        }
+    }
+
+    private fun exportarEnlaces(contenido: String, ext: String, mime: String, ft: String) {
+        enlacesPorExportar = contenido
+        val i = Intent(Intent.ACTION_CREATE_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = mime
+        val base = ft.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').take(40).ifEmpty { "enlaces" }
+        i.putExtra(Intent.EXTRA_TITLE, "enlaces-" + base + "." + ext)
+        try {
+            startActivityForResult(i, REQ_EXPORTAR_ENLACES)
+        } catch (e: Exception) {
+            enlacesPorExportar = null
+            toast("Este móvil no tiene selector de archivos")
+        }
+    }
+
+    private fun escribirEnlaces(uri: Uri, contenido: String) {
+        try {
+            val bytes = contenido.toByteArray(Charsets.UTF_8)
+            val salida = contentResolver.openOutputStream(uri, "wt") ?: throw java.io.IOException("sin salida")
+            salida.use { it.write(bytes) }
+            toast("Lista exportada")
+        } catch (e: Exception) {
+            toast("No se pudo guardar el archivo")
+        }
+    }
+
+    private fun mostrarListasEnlaces() {
+        val listas = ListasEnlaces.todas()
+        if (listas.isEmpty()) {
+            toast("No hay listas guardadas")
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        val fmt = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
+        for (l in listas) {
+            items.add(Pair<String, () -> Unit>(l.nombre + "\n" + l.items.size + " enlaces · " + fmt.format(java.util.Date(l.fecha)), { menuListaEnlaces(l) }))
+        }
+        items.add(Pair<String, () -> Unit>("Borrar todas las listas…", {
+            nuevoDialogo()
+                .setTitle("Borrar listas")
+                .setMessage("Se borrarán las " + listas.size + " listas de enlaces guardadas.")
+                .setPositiveButton("Borrar") { _, _ ->
+                    ListasEnlaces.eliminarTodas()
+                    toast("Listas borradas")
+                }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }))
+        opciones("Listas de enlaces", items)
+    }
+
+    private fun menuListaEnlaces(l: ListaEnlaces) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Ver la lista", {
+            val p = actual
+            if (p != null) mostrarEnlaces(p, "", l.nombre, l.fuente, l.items, null, false)
+        }))
+        if (l.fuente.startsWith("http")) items.add(Pair<String, () -> Unit>("Abrir la página de origen", { nuevaPestana(l.fuente) }))
+        items.add(Pair<String, () -> Unit>("Borrar esta lista", {
+            ListasEnlaces.eliminar(l.id)
+            toast("Lista borrada")
+            if (ListasEnlaces.todas().isNotEmpty()) mostrarListasEnlaces()
+        }))
+        opciones(l.nombre.take(80), items)
+    }
+
     // ---------------------------------------------------------------- páginas guardadas (sin conexión)
 
     /** Guarda la página abierta (MHTML con sus recursos + instantánea del DOM) para leerla sin conexión. Nunca en pestañas privadas. */
@@ -2555,6 +2787,7 @@ class MainActivity : Activity() {
         add("Páginas guardadas sin conexión (" + PaginasGuardadas.todas().size + ", " + formatoTamano(PaginasGuardadas.totalBytes()) + ")…") {
             mostrarPaginasGuardadas()
         }
+        add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
         add("Al salir, borrar cookies y datos de sitios: " + si((ajustes.borrarAlSalir and 1) != 0)) { alternarBorrarAlSalir(1) }
         add("Al salir, borrar historial: " + si((ajustes.borrarAlSalir and 2) != 0)) { alternarBorrarAlSalir(2) }
         add("Al salir, borrar caché: " + si((ajustes.borrarAlSalir and 4) != 0)) { alternarBorrarAlSalir(4) }
