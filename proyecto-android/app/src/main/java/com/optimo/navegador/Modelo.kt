@@ -104,6 +104,9 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Última vez (elapsedRealtime) que se entró o salió de esta pestaña; sirve para suspender las que llevan mucho sin usarse. */
     @Volatile var ultimoUsoMs: Long = 0L
 
+    /** Visor de una página guardada: sin red, sin JavaScript y con acceso de lectura a su archivo (ver [PaginasGuardadas]). */
+    var sinConexion: Boolean = false
+
     /** Pestaña suspendida: su WebView se destruyó para liberar memoria y se rehace, con su historial y scroll, al volver a ella. */
     var suspendida: Boolean = false
     var estadoSuspendida: android.os.Bundle? = null
