@@ -86,9 +86,21 @@ class MainActivity : Activity() {
         private const val REQ_ALMACENAMIENTO = 104
         private const val REQ_NOTIFICACIONES = 105
         private const val MAX_PESTANAS = 20
+        private const val MAX_CERRADAS = 10
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
 
         /** 1 si algún vídeo o audio de la página suena de verdad (no en silencio). */
+        /** Cuenta lo guardado por la página; IndexedDB y Cache Storage rellenan su cifra al resolverse. Formato: ls,ss,idb,cache (-1 = no disponible). */
+        private const val JS_ALMACEN_CONTAR =
+            "(function(){try{var o=[0,0,-1,-1];" +
+                "try{o[0]=localStorage.length}catch(e){}try{o[1]=sessionStorage.length}catch(e){}" +
+                "function g(){window.__optAlm=o.join(',')}g();" +
+                "try{if(window.indexedDB&&indexedDB.databases)indexedDB.databases().then(function(l){o[2]=l.length;g()}).catch(function(){})}catch(e){}" +
+                "try{if(window.caches)caches.keys().then(function(l){o[3]=l.length;g()}).catch(function(){})}catch(e){}" +
+                "}catch(e){}})()"
+        private const val JS_ALMACEN_LEER =
+            "(function(){var v=window.__optAlm;try{delete window.__optAlm}catch(e){}return v||null})()"
+
         private const val JS_SUENA =
             "(function(){try{if(window.__optimoMudo)return 0;var v=document.querySelectorAll('video,audio');for(var i=0;i<v.length;i++){var e=v[i];" +
                 "if(!e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0)return 1;}}catch(x){}return 0;})()"
@@ -938,6 +950,9 @@ class MainActivity : Activity() {
         items.add(Pair(if (p.silenciada) "🔊 Activar el sonido de esta pestaña" else "🔇 Silenciar esta pestaña") {
             alternarSilencio(p)
         })
+        if (!p.privada && !p.inicio && p.url.startsWith("http")) {
+            items.add(Pair("🛡 Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) })
+        }
         if (!p.inicio && p.url.isNotEmpty()) {
             items.add(Pair("Copiar dirección") { copiar(p.url) })
             items.add(Pair("Compartir página") { compartir(p.url) })
@@ -1161,6 +1176,7 @@ class MainActivity : Activity() {
     private fun cerrarPestana(p: Pestana) {
         val idx = pestanas.indexOf(p)
         if (idx < 0) return
+        recordarCerrada(p)
         pestanas.removeAt(idx)
         if (p === sonando) {
             sonando = null
@@ -1466,6 +1482,7 @@ class MainActivity : Activity() {
         add("Ir a la página de inicio") { mostrarInicio(p) }
         add("Descargas") { abrirDescargas() }
         add("Ajustes") { mostrarAjustes() }
+        if (cerradas.isNotEmpty()) add("Reabrir pestaña cerrada (" + cerradas.size + ")…") { mostrarCerradas() }
         add("Cerrar todas las pestañas") { cerrarTodas() }
         val partes = ArrayList<String>()
         if (ajustes.bloquearAnuncios) partes.add("Bloqueados en esta página: " + p.bloqueados.get())
@@ -1970,6 +1987,7 @@ class MainActivity : Activity() {
 
     private fun borrarDatos() {
         historial.vaciar()
+        cerradas.clear()
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
@@ -2045,6 +2063,7 @@ class MainActivity : Activity() {
                     .setMessage("¿Quieres borrar también el historial que ya está guardado (" + historial.todos().size + " páginas)?")
                     .setPositiveButton("Borrar") { _, _ ->
                         historial.vaciar()
+        cerradas.clear()
                         toast("Historial borrado")
                         mostrarPrivacidad()
                     }
@@ -2063,6 +2082,7 @@ class MainActivity : Activity() {
         add("Borrar historial (" + historial.todos().size + " páginas)") {
             confirmarAccionPrivacidad("Borrar historial", "Se borrará el historial de navegación. Los marcadores se conservan.", "Borrar") {
                 historial.vaciar()
+        cerradas.clear()
             }
         }
         add("Borrar caché (" + formatoTamano(tamanoDir(cacheDir)) + ")") {
@@ -2119,7 +2139,7 @@ class MainActivity : Activity() {
         }
         val permisos = ajustes.permisosDe(h)
         for (t in permisos) {
-            add("Revocar permiso de " + etiquetaPermiso(t)) {
+            add("Revocar permiso de " + etiquetaPermiso(t) + textoRestante(ajustes.restantePermiso(h, t))) {
                 ajustes.quitarPermiso(h, t)
                 toast("Permiso revocado: " + etiquetaPermiso(t))
                 mostrarPrivacidadSitio(h)
@@ -2127,6 +2147,16 @@ class MainActivity : Activity() {
         }
         if (permisos.isEmpty()) add("Sin permisos guardados (te preguntará cada vez)") { mostrarPrivacidadSitio(h) }
         add("Reglas de ocultar elementos en este sitio: " + ReglasUsuario.selectoresPara(h).size) { mostrarReglasUsuario() }
+        add("Cookies de este sitio (" + cookiesDeSitio(h).size + ")…") { mostrarCookiesSitio(h) }
+        val pa = actual
+        val enPagina = pa != null && !pa.privada && !pa.inicio && pa.web != null &&
+            dominioBase(Omnibox.hostDe(pa.url)) == dominioBase(h)
+        if (enPagina && pa != null) {
+            add("Almacenamiento de la página abierta…") { inspeccionarAlmacenamiento(pa) }
+            if (pa.bloqueados.get() > 0) {
+                add("Rastreadores bloqueados en esta página: " + pa.bloqueados.get() + "…") { mostrarBloqueadosPagina(pa, h) }
+            }
+        }
         add("Borrar cookies y almacenamiento de este sitio") {
             nuevoDialogo()
                 .setTitle("Borrar datos de " + h)
@@ -2139,6 +2169,139 @@ class MainActivity : Activity() {
                 .show()
         }
         opciones(h, items)
+    }
+
+    /** «Recordar…» en un permiso: 1 hora, 24 horas o siempre. Si se cierra sin elegir, se deniega (la petición no puede quedar colgada). */
+    private fun elegirDuracionPermiso(sitio: String, tipos: List<String>, conceder: () -> Unit, denegar: () -> Unit) {
+        var decidido = false
+        nuevoDialogo()
+            .setTitle("Recordar permiso en " + sitio)
+            .setItems(arrayOf("Durante 1 hora", "Durante 24 horas", "Siempre en este sitio")) { _, i ->
+                decidido = true
+                for (t in tipos) {
+                    when (i) {
+                        0 -> ajustes.recordarPermisoTemporal(sitio, t, 60L * 60L * 1000L)
+                        1 -> ajustes.recordarPermisoTemporal(sitio, t, 24L * 60L * 60L * 1000L)
+                        else -> ajustes.recordarPermiso(sitio, t)
+                    }
+                }
+                conceder()
+            }
+            .setNegativeButton("Denegar") { _, _ ->
+                decidido = true
+                denegar()
+            }
+            .setOnCancelListener { if (!decidido) denegar() }
+            .show()
+    }
+
+    private fun textoRestante(ms: Long): String {
+        if (ms <= 0L) return ""
+        val min = (ms / 60000L).toInt()
+        return if (min >= 60) " (caduca en " + (min / 60) + " h)" else " (caduca en " + maxOf(min, 1) + " min)"
+    }
+
+    /** Dominios con los que se prueban las cookies de un sitio: él mismo, su dominio base y «www.». */
+    private fun hostsCookies(host: String): List<String> {
+        val base = dominioBase(host)
+        val hosts = LinkedHashSet<String>()
+        hosts.add(host)
+        hosts.add(base)
+        hosts.add("www." + base)
+        return ArrayList(hosts)
+    }
+
+    /** Nombre y tamaño del valor de cada cookie del sitio (el valor no se muestra). Solo el perfil normal. */
+    private fun cookiesDeSitio(host: String): List<Pair<String, Int>> {
+        val cm = CookieManager.getInstance()
+        val res = LinkedHashMap<String, Int>()
+        for (x in hostsCookies(host)) {
+            val cookies = cm.getCookie("https://" + x + "/") ?: continue
+            for (par in cookies.split(";")) {
+                val nombre = par.substringBefore('=').trim()
+                if (nombre.isEmpty() || res.containsKey(nombre)) continue
+                res[nombre] = par.substringAfter('=', "").length
+            }
+        }
+        return res.entries.map { Pair(it.key, it.value) }
+    }
+
+    private fun borrarCookie(host: String, nombre: String) {
+        val cm = CookieManager.getInstance()
+        for (x in hostsCookies(host)) {
+            val url = "https://" + x + "/"
+            for (dom in listOf("", "; Domain=" + x, "; Domain=." + x)) {
+                cm.setCookie(url, nombre + "=; Max-Age=0; Path=/" + dom)
+            }
+        }
+        cm.flush()
+    }
+
+    private fun mostrarCookiesSitio(h: String) {
+        val lista = cookiesDeSitio(h)
+        if (lista.isEmpty()) {
+            toast("Sin cookies guardadas para " + h)
+            mostrarPrivacidadSitio(h)
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for ((nombre, largo) in lista.take(60)) {
+            items.add(Pair<String, () -> Unit>(nombre + "  (" + largo + " car.)", {
+                borrarCookie(h, nombre)
+                toast("Cookie borrada: " + nombre)
+                mostrarCookiesSitio(h)
+            }))
+        }
+        opciones("Cookies de " + h + " (toca una para borrarla)", items)
+    }
+
+    /** Dominios bloqueados en la página (solo lectura; el registro guarda los últimos 500 bloqueos). */
+    private fun mostrarBloqueadosPagina(p: Pestana, h: String) {
+        val lista = p.dev.bloqueadosPorHost()
+        if (lista.isEmpty()) {
+            toast("Sin bloqueos registrados")
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for ((dominio, n) in lista.take(40)) {
+            items.add(Pair<String, () -> Unit>(dominio + " — " + n, { mostrarPrivacidadSitio(h) }))
+        }
+        opciones("Bloqueados en esta página: " + p.bloqueados.get(), items)
+    }
+
+    /**
+     * Cuenta lo que la página abierta tiene guardado (localStorage, sessionStorage, IndexedDB, Cache Storage).
+     * IndexedDB y Cache Storage responden de forma asíncrona: se lanza la consulta y se lee el resultado un instante después.
+     * Solo informa de la página abierta: Android no permite listar el almacenamiento de otros sitios.
+     */
+    private fun inspeccionarAlmacenamiento(p: Pestana) {
+        val w = p.web ?: return
+        w.evaluateJavascript(JS_ALMACEN_CONTAR, null)
+        manejadorPrincipal.postDelayed({
+            if (isFinishing || p.web !== w) return@postDelayed
+            w.evaluateJavascript(JS_ALMACEN_LEER) { r ->
+                val v = (r ?: "").trim('"').split(',')
+                if (v.size != 4 || actual !== p) return@evaluateJavascript
+                fun n(i: Int): String = if (v[i] == "-1") "no disponible" else v[i]
+                val items = ArrayList<Pair<String, () -> Unit>>()
+                items.add(Pair<String, () -> Unit>("localStorage: " + n(0) + " → borrar", { borrarAlmacen(p, "ls") }))
+                items.add(Pair<String, () -> Unit>("sessionStorage: " + n(1) + " → borrar", { borrarAlmacen(p, "ss") }))
+                items.add(Pair<String, () -> Unit>("IndexedDB: " + n(2) + " → borrar", { borrarAlmacen(p, "idb") }))
+                items.add(Pair<String, () -> Unit>("Cache Storage: " + n(3) + " → borrar", { borrarAlmacen(p, "cache") }))
+                opciones("Almacenamiento de " + Omnibox.hostDe(p.url), items)
+            }
+        }, 400L)
+    }
+
+    private fun borrarAlmacen(p: Pestana, que: String) {
+        val js = when (que) {
+            "ls" -> "try{localStorage.clear()}catch(e){}"
+            "ss" -> "try{sessionStorage.clear()}catch(e){}"
+            "idb" -> "try{indexedDB.databases().then(function(l){l.forEach(function(d){indexedDB.deleteDatabase(d.name)})})}catch(e){}"
+            else -> "try{caches.keys().then(function(k){k.forEach(function(n){caches.delete(n)})})}catch(e){}"
+        }
+        p.web?.evaluateJavascript(js, null)
+        toast("Borrado. Recarga la página")
     }
 
     /** Cookies (del sitio y de su dominio base) y almacenamiento local de un sitio. Solo el perfil normal. */
@@ -2170,7 +2333,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.2")
+            .setTitle("Optimo 1.12.4")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -2590,15 +2753,66 @@ class MainActivity : Activity() {
         refrescar()
     }
 
+    /** Últimas pestañas normales cerradas. Solo en memoria: no se guardan en disco, no se anotan las privadas y se vacía al borrar el historial. */
+    private val cerradas = ArrayList<Pair<String, String>>()
+
+    private fun recordarCerrada(p: Pestana) {
+        if (p.privada || p.esEmergente || !ajustes.guardarHistorial) return
+        val url = if (p.url.startsWith("http")) p.url else (p.pendiente ?: "")
+        if (!url.startsWith("http")) return
+        cerradas.removeAll { it.first == url }
+        cerradas.add(0, Pair(url, p.titulo))
+        while (cerradas.size > MAX_CERRADAS) cerradas.removeAt(cerradas.size - 1)
+    }
+
+    private fun mostrarCerradas() {
+        if (cerradas.isEmpty()) {
+            toast("No hay pestañas cerradas recientes")
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (e in ArrayList(cerradas)) {
+            val etiqueta = if (e.second.isNotEmpty()) e.second + "\n" + e.first else e.first
+            items.add(Pair<String, () -> Unit>(etiqueta, {
+                cerradas.remove(e)
+                nuevaPestana(e.first)
+            }))
+        }
+        items.add(Pair<String, () -> Unit>("Vaciar esta lista", { cerradas.clear() }))
+        opciones("Pestañas cerradas (solo en memoria)", items)
+    }
+
+    /** Lista de pestañas con búsqueda por título o dirección, selección múltiple para cerrar y acceso a las cerradas. */
     private fun mostrarPestanas() {
         val lista = ListView(this)
         var dialogo: AlertDialog? = null
-        val adaptador = object : BaseAdapter() {
-            override fun getCount(): Int = pestanas.size
-            override fun getItem(position: Int): Any = pestanas[position]
-            override fun getItemId(position: Int): Long = pestanas[position].id.toLong()
+        var adaptador: BaseAdapter? = null
+        var filtro = ""
+        var seleccion = false
+        val marcadas = HashSet<Int>()
+        val visibles = ArrayList<Pestana>()
+        var actualizarBarra: () -> Unit = {}
+
+        fun refrescar() {
+            visibles.clear()
+            val palabras = filtro.lowercase().split(' ').filter { it.isNotEmpty() }
+            for (q in pestanas) {
+                val txt = (tituloDe(q) + " " + q.url).lowercase()
+                if (palabras.all { txt.contains(it) }) visibles.add(q)
+            }
+            val ids = HashSet<Int>()
+            for (q in pestanas) ids.add(q.id)
+            marcadas.retainAll(ids)
+            adaptador?.notifyDataSetChanged()
+            actualizarBarra()
+        }
+
+        adaptador = object : BaseAdapter() {
+            override fun getCount(): Int = visibles.size
+            override fun getItem(position: Int): Any = visibles[position]
+            override fun getItemId(position: Int): Long = visibles[position].id.toLong()
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val p = pestanas[position]
+                val p = visibles[position]
                 val fila = LinearLayout(this@MainActivity)
                 fila.setOrientation(LinearLayout.HORIZONTAL)
                 fila.setGravity(Gravity.CENTER_VERTICAL)
@@ -2606,7 +2820,9 @@ class MainActivity : Activity() {
                 val textos = LinearLayout(this@MainActivity)
                 textos.setOrientation(LinearLayout.VERTICAL)
                 val t1 = TextView(this@MainActivity)
-                t1.text = (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") + (if (p.privada) "🕶 " else "") + tituloDe(p)
+                t1.text = (if (seleccion) (if (marcadas.contains(p.id)) "☑ " else "☐ ") else "") +
+                    (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") +
+                    (if (p.privada) "🕶 " else "") + tituloDe(p)
                 t1.textSize = 16f
                 t1.maxLines = 1
                 t1.ellipsize = TextUtils.TruncateAt.END
@@ -2620,22 +2836,98 @@ class MainActivity : Activity() {
                 textos.addView(t1)
                 textos.addView(t2)
                 fila.addView(textos, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (p.silenciada || p.suena) {
-                    val altavoz = boton(if (p.silenciada) "🔇" else "🔊", 18f) {
-                        alternarSilencio(p)
-                        notifyDataSetChanged()
+                if (!seleccion) {
+                    if (p.silenciada || p.suena) {
+                        val altavoz = boton(if (p.silenciada) "🔇" else "🔊", 18f) {
+                            alternarSilencio(p)
+                            notifyDataSetChanged()
+                        }
+                        fila.addView(altavoz, LinearLayout.LayoutParams(44.dp(), 48.dp()))
                     }
-                    fila.addView(altavoz, LinearLayout.LayoutParams(44.dp(), 48.dp()))
+                    val cerrar = boton("✕", 18f) {
+                        cerrarPestana(p)
+                        refrescar()
+                    }
+                    fila.addView(cerrar, LinearLayout.LayoutParams(48.dp(), 48.dp()))
                 }
-                val cerrar = boton("✕", 18f) {
-                    cerrarPestana(p)
-                    notifyDataSetChanged()
-                }
-                fila.addView(cerrar, LinearLayout.LayoutParams(48.dp(), 48.dp()))
                 return fila
             }
         }
         lista.setAdapter(adaptador)
+
+        val campo = EditText(this)
+        campo.hint = "Buscar en pestañas (título o dirección)"
+        campo.isSingleLine = true
+        campo.textSize = 15f
+        campo.setTextColor(paleta.texto)
+        campo.setHintTextColor(paleta.tenue)
+        campo.addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(s: android.text.Editable?) {
+                filtro = s?.toString() ?: ""
+                refrescar()
+            }
+        })
+
+        val btnSel = boton("☑ Seleccionar", 14f) {
+            seleccion = !seleccion
+            marcadas.clear()
+            refrescar()
+        }
+        val btnTodas = boton("Todas", 14f) {
+            val todas = marcadas.size == visibles.size
+            marcadas.clear()
+            if (!todas) for (q in visibles) marcadas.add(q.id)
+            refrescar()
+        }
+        val btnCerrarSel = boton("Cerrar", 14f) {
+            val aCerrar = pestanas.filter { marcadas.contains(it.id) }
+            if (aCerrar.isEmpty()) {
+                toast("Marca alguna pestaña")
+            } else {
+                for (q in aCerrar) cerrarPestana(q)
+                marcadas.clear()
+                seleccion = false
+                refrescar()
+                toast(aCerrar.size.toString() + " pestañas cerradas. Se pueden reabrir desde «↩ Cerradas»")
+            }
+        }
+        val btnCerradas = boton("↩ Cerradas", 14f) {
+            dialogo?.dismiss()
+            mostrarCerradas()
+        }
+        actualizarBarra = {
+            btnSel.text = if (seleccion) "Salir" else "☑ Seleccionar"
+            btnTodas.visibility = if (seleccion) View.VISIBLE else View.GONE
+            btnCerrarSel.visibility = if (seleccion) View.VISIBLE else View.GONE
+            btnCerrarSel.text = "Cerrar (" + marcadas.size + ")"
+            btnCerradas.visibility = if (seleccion) View.GONE else View.VISIBLE
+            btnCerradas.text = "↩ Cerradas (" + cerradas.size + ")"
+        }
+        val barra = LinearLayout(this)
+        barra.setOrientation(LinearLayout.HORIZONTAL)
+        for (b in listOf(btnSel, btnTodas, btnCerrarSel, btnCerradas)) {
+            barra.addView(b, LinearLayout.LayoutParams(0, 40.dp(), 1f))
+        }
+
+        val vacio = TextView(this)
+        vacio.text = "Sin coincidencias"
+        vacio.setTextColor(paleta.tenue)
+        vacio.gravity = Gravity.CENTER
+        vacio.setPadding(16.dp(), 24.dp(), 16.dp(), 24.dp())
+        vacio.visibility = View.GONE
+
+        val raiz = LinearLayout(this)
+        raiz.setOrientation(LinearLayout.VERTICAL)
+        raiz.setPadding(16.dp(), 4.dp(), 16.dp(), 0)
+        raiz.addView(campo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        raiz.addView(barra, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        raiz.addView(vacio)
+        raiz.addView(lista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        lista.emptyView = vacio
+
+        refrescar()
         // Qué pestañas suenan ahora: se pregunta a cada página y se refresca la lista según llegan las respuestas.
         for (q in pestanas) {
             if (q.silenciada) continue
@@ -2643,17 +2935,24 @@ class MainActivity : Activity() {
                 val s = r == "1"
                 if (q.suena != s) {
                     q.suena = s
-                    adaptador.notifyDataSetChanged()
+                    adaptador?.notifyDataSetChanged()
                 }
             }
         }
         lista.setOnItemClickListener { _, _, pos, _ ->
-            dialogo?.dismiss()
-            activar(pestanas[pos])
+            if (pos < 0 || pos >= visibles.size) return@setOnItemClickListener
+            val q = visibles[pos]
+            if (seleccion) {
+                if (!marcadas.remove(q.id)) marcadas.add(q.id)
+                refrescar()
+            } else {
+                dialogo?.dismiss()
+                activar(q)
+            }
         }
         val d = nuevoDialogo()
             .setTitle("Pestañas")
-            .setView(lista)
+            .setView(raiz)
             .setPositiveButton("Nueva") { _, _ -> nuevaPestana(null) }
             .setNeutralButton("Privada") { _, _ -> nuevaPestana(null, true) }
             .setNegativeButton("Cerrar", null)
@@ -4150,9 +4449,8 @@ class MainActivity : Activity() {
                 .setMessage(origen + " quiere usar " + etiquetas.joinToString(" y ") + ".")
                 .setPositiveButton("Permitir") { _, _ -> conceder() }
             if (!p.privada && origen.isNotEmpty()) {
-                b.setNeutralButton("Siempre en este sitio") { _, _ ->
-                    for (t in tipos) ajustes.recordarPermiso(origen, t)
-                    conceder()
+                b.setNeutralButton("Recordar…") { _, _ ->
+                    elegirDuracionPermiso(origen, tipos, conceder) { request.deny() }
                 }
             }
             b.setNegativeButton("Denegar") { _, _ -> request.deny() }
@@ -4183,9 +4481,8 @@ class MainActivity : Activity() {
                 .setMessage(sitio + " quiere conocer tu ubicación.")
                 .setPositiveButton("Permitir") { _, _ -> conceder() }
             if (!p.privada && sitio.isNotEmpty()) {
-                b.setNeutralButton("Siempre en este sitio") { _, _ ->
-                    ajustes.recordarPermiso(sitio, "ubicacion")
-                    conceder()
+                b.setNeutralButton("Recordar…") { _, _ ->
+                    elegirDuracionPermiso(sitio, listOf("ubicacion"), conceder) { callback.invoke(origin, false, false) }
                 }
             }
             b.setNegativeButton("Denegar") { _, _ -> callback.invoke(origin, false, false) }
