@@ -289,3 +289,24 @@ Pensado para el móvil: cambiar el aspecto de un elemento y guardarlo como regla
 - Probado en Chromium: ajustes acumulativos, mínimo 0, solo se registra lo cambiado, la regla guardada reproduce el aspecto sin estilos en línea,
   deshacer con y sin `style` previo. El Kotlin, sin compilar con el SDK ni probado en el móvil.
 
+
+## 1.12.3 — Centro de privacidad por sitio (ampliado)
+
+Sobre lo que ya existía en «Privacidad de este sitio…» (revocar permisos, borrar cookies y almacenamiento del sitio), sin servicios ni sondeos nuevos:
+- **Permisos temporales.** En los avisos de cámara, micrófono y ubicación, «Recordar…» ofrece **1 hora, 24 horas o siempre**. Los temporales caducan solos (se descartan al consultarlos, sin temporizadores) y se ven con su tiempo restante en la privacidad del sitio. Cerrar el aviso sin elegir deniega.
+- **Cookies del sitio una a una:** lista de nombres (el valor no se muestra) y borrado individual, sin cerrar el resto de la sesión.
+- **Almacenamiento de la página abierta:** cuenta de localStorage, sessionStorage, IndexedDB y Cache Storage, con borrado de cada uno. Solo de la página abierta: Android no deja listar el de otros sitios.
+- **Rastreadores bloqueados** de la página, por dominio (últimos 500 bloqueos registrados).
+- **🛡 Acceso desde el candado** de la barra de direcciones.
+- Límites: la caché HTTP de WebView es global (no se puede borrar por sitio) y el borrado de una cookie concreta es aproximado (dominio y ruta). Pestañas privadas: no aplica (su perfil se destruye al cerrar).
+- El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
+## 1.12.4 — Gestor de pestañas básico
+
+Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tareas periódicas:
+- **Buscar**: campo en la parte superior que filtra por título o dirección mientras escribes (varias palabras = todas deben coincidir).
+- **Selección múltiple**: «☑ Seleccionar» marca pestañas con un toque; «Todas» marca las que se ven con el filtro (buscar «youtube» + Todas + Cerrar) y «Cerrar (n)» las cierra de golpe.
+- **↩ Cerradas**: las últimas 10 pestañas normales cerradas se pueden reabrir desde la lista de pestañas o desde el menú ⋮ («Reabrir pestaña cerrada»). Solo se guardan **en memoria** (nunca en disco), no se anotan las pestañas privadas ni las emergentes bloqueadas, no se anota nada con «Guardar historial» desactivado y la lista se vacía al borrar el historial o los datos.
+- Mientras se selecciona se ocultan 🔊/✕ de cada fila para evitar cierres accidentales.
+- Pendiente de una entrega aparte (más delicada): suspender pestañas inactivas, agrupar por categorías. La memoria por pestaña no se puede medir con fiabilidad en WebView, así que no se ofrece.
+- El Kotlin, sin compilar con el SDK ni probado en el móvil.
