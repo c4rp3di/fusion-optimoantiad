@@ -45,9 +45,13 @@ Punto de anclaje ya hecho en 1.12.8: `ProcesadorPagina` / `PaginasGuardadas.proc
 - De dónde sale el nombre (se indica de cuál): magnets → `dn=` (y `xl=` para el tamaño); archivos con extensión → final de la URL decodificado; **Mega → el enlace no trae nombre** (el contenido va cifrado y no se puede consultar sin su SDK): texto del enlace, título cercano, fila o título de la página, marcado como «nombre sacado de la página»; otros → texto del enlace, `title`, `aria-label` o título de la página. Texto cercano limitado a pocas palabras.
 - Deduplicar (magnets por infohash, URL normalizada).
 
-### Fase 2 — rastreo recursivo
+### Fase 2 — rastreo recursivo — HECHO en 1.14.0 (pendiente de probar en el móvil)
+- Decidido: sin dependencias (sin Jsoup) y sin reglas de ocultación de elementos en el rastreo HTTP; profundidad editable sin tope fijo, frenada por topes de páginas/tiempo; dominios bloqueados excluidos.
 - Componente nuevo («rastreador»): cola, deduplicación de URL, profundidad 1–3, tope de páginas y de tiempo, pausa entre peticiones (concurrencia baja), cancelación; por defecto solo el mismo dominio; `robots.txt` opcional.
 - Descarga directa por HTTP + análisis del HTML (ligera; comparte las cookies del navegador). Falla en sitios con JavaScript o Cloudflare/captcha.
+
+### Mejora a considerar — reglas de ocultación en el rastreo
+- Excluir también los enlaces que están dentro de elementos que las reglas de ocultación del usuario esconderían. Exige evaluar selectores CSS sobre el HTML: en HTTP necesitaría una librería (Jsoup, ~400 KB) o un evaluador propio de selectores simples; en la fase 3 (WebView oculto) saldría gratis.
 
 ### Fase 3 — sitios con JavaScript
 - WebView oculto como alternativa (más memoria y batería), seguir dominios externos y opciones avanzadas.
