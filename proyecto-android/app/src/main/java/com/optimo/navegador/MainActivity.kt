@@ -847,7 +847,9 @@ class MainActivity : Activity() {
             { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogo() },
             { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() },
             { modo, a, b -> reglaDevTools(modo, a, b) },
-            { actual?.let { abrirModoLectura(it) } }
+            { actual?.let { abrirModoLectura(it) } },
+            { actual?.let { if (!it.privada) alternarPausaBloqueo(it) } },
+            { val q = actual; q != null && !q.privada && ajustes.bloquearAnuncios && !bloqueoPausadoEnPagina(q.url) }
         )
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
@@ -3206,9 +3208,17 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Versión de la app tal como está instalada (la de build.gradle), para no escribirla a mano en cada entrega. */
+    private fun versionInstalada(): String =
+        try {
+            packageManager.getPackageInfo(packageName, 0).versionName ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.15.0")
+            .setTitle("Optimo " + versionInstalada())
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
