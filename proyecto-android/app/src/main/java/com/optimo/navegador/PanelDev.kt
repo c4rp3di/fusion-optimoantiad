@@ -41,7 +41,7 @@ class FilaAlm(val tipo: String, val clave: String = "", val valor: String = "", 
 
 /**
  * Panel de herramientas de desarrollo, acoplado bajo la página (la página sigue visible y usable arriba).
- * Pestañas: Consola, Elementos, Red, Almacén e Info. Se alimenta del agente (assets/devtools/agente.js) y de lo
+ * Pestañas: Consola, Elementos, Red, Almacén, Info y Auditoría (Óptimo Inspector, ver VistaAuditoria). Se alimenta del agente (assets/devtools/agente.js) y de lo
  * que solo ve la app (errores y mensajes del WebView, bloqueos de Optimo, cookies HttpOnly).
  */
 class PanelDev(
@@ -58,13 +58,15 @@ class PanelDev(
     private val copiar: (String) -> Unit,
     private val alCambiarCaptura: () -> Unit,
     /** Guarda una regla permanente del sitio abierto: modo «ocultar» (a = selector), «estilo» (a = nombre, b = CSS) o «cssPropio» (a = CSS). Devuelve el mensaje para el usuario. */
-    private val reglaSitio: (String, String, String) -> String
+    private val reglaSitio: (String, String, String) -> String,
+    /** Abre el modo lectura en la pestaña activa (lo ofrece la Auditoría cuando la página pesa mucho). */
+    private val abrirLectura: () -> Unit = {}
 ) {
     private val h = Handler(Looper.getMainLooper())
     private val raiz = LinearLayout(act)
     private val cuerpo = FrameLayout(act)
     private val barraTabs = LinearLayout(act)
-    private val nombresTabs = listOf("Consola", "Elementos", "Red", "Almacén", "Info")
+    private val nombresTabs = listOf("Consola", "Elementos", "Red", "Almacén", "Info", "Auditoría")
     private val vistasTabs = ArrayList<TextView>()
     private var tab = 0
     private var grande = false
@@ -355,6 +357,8 @@ class PanelDev(
         informe = ""
         infoUrl = ""
         infoTitulo = ""
+        informeAuditoria = ""
+        vistaAud.olvidar()
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -376,6 +380,8 @@ class PanelDev(
         informe = ""
         infoUrl = ""
         infoTitulo = ""
+        informeAuditoria = ""
+        vistaAud.olvidar()
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -398,6 +404,7 @@ class PanelDev(
             1 -> construirElementos()
             2 -> construirRed()
             3 -> construirAlmacen()
+            5 -> vistaAud.construir()
             else -> construirInfo()
         }
         cuerpo.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -411,6 +418,7 @@ class PanelDev(
             1 -> if (arbol.isEmpty()) cargarRaiz() else notificarArbol()
             2 -> refrescarRed()
             3 -> cargarAlmacen()
+            5 -> vistaAud.cargar()
             else -> cargarInfo()
         }
     }
@@ -788,8 +796,13 @@ class PanelDev(
             arbol.clear()
             arbol.addAll(parseNodos(o.optJSONArray("h"), 0))
             notificarArbol()
-            val idx = arbol.indexOfFirst { it.et.startsWith("<html") }
-            if (idx >= 0) abrirNodo(arbol[idx].id)
+            if (seleccionado > 0) {
+                // Venimos de otra pestaña (p. ej. Auditoría) con un elemento elegido: se abre el camino hasta él.
+                seleccionarEnArbol(seleccionado)
+            } else {
+                val idx = arbol.indexOfFirst { it.et.startsWith("<html") }
+                if (idx >= 0) abrirNodo(arbol[idx].id)
+            }
         }
     }
 
@@ -1844,6 +1857,35 @@ class PanelDev(
     private var infoUrl = ""
     private var infoTitulo = ""
 
+    // ---------------------------------------------------------------- AUDITORÍA (Óptimo Inspector)
+
+    /** Último informe de la Auditoría en texto; se añade al «Diagnóstico» de la pestaña Info. */
+    private var informeAuditoria = ""
+
+    private val vistaAud = VistaAuditoria(
+        act, paleta,
+        GanchosAuditoria(
+            consulta = { expr, cb -> consultaObj(expr, cb) },
+            bloqueadosPorHost = { pestanaActual()?.dev?.bloqueadosPorHost() ?: emptyList() },
+            yaBloqueado = { host -> ReglasUsuario.bloqueaDominio(host) },
+            verNodo = { id -> irANodo(id) },
+            ocultarNodo = { id -> guardarOcultarSitio(id) },
+            bloquear = { host -> reglaSitio("bloquear", host, "") },
+            lectura = { ocultar(); abrirLectura() },
+            copiar = { t -> copiar(t) },
+            avisar = { t -> avisar(t) },
+            dialogo = { dialogo() },
+            alInforme = { t -> informeAuditoria = t }
+        )
+    )
+
+    /** Salta a la pestaña Elementos y selecciona el nodo [id] (abre el camino hasta él). */
+    private fun irANodo(id: Int) {
+        seleccionado = id
+        seleccionarTab(1)
+        if (arbol.isNotEmpty()) seleccionarEnArbol(id)
+    }
+
     private fun construirInfo(): View {
         val col = LinearLayout(act)
         col.orientation = LinearLayout.VERTICAL
@@ -1885,6 +1927,7 @@ class PanelDev(
         val sb = StringBuilder()
         sb.append("Diagnóstico de Óptimo DevTools\n\n")
         sb.append(informeSeguro().ifEmpty { "(abre antes la pestaña Info para cargar los datos de la página)\n" }).append("\n")
+        if (informeAuditoria.isNotEmpty()) sb.append(informeAuditoria).append("\n")
         if (p != null) {
             val d = p.dev
             val todas = ArrayList<EntradaConsola>(d.copiaConsola())
