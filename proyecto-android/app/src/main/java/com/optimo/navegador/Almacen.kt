@@ -657,6 +657,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putString("magnet_app", v).apply()
         }
 
+    /** DevTools en modo sencillo (Resumen, Errores y Red) o profesional (todas las pestañas). */
+    var devSencillo: Boolean
+        get() = sp.getBoolean("dev_sencillo", false)
+        set(v) {
+            sp.edit().putBoolean("dev_sencillo", v).apply()
+        }
+
     // ---------------------------------------------------------------- bloqueo de anuncios pausado por sitio
 
     @Volatile
