@@ -372,3 +372,18 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **Listas guardadas** (máx. 30 de hasta 2000 enlaces), cifradas con Keystore como marcadores y reglas. Menú ⋮ y Ajustes › Privacidad. No se pueden guardar desde pestañas privadas.
 - Copia de seguridad: se añaden `enlaces_propio` y `enlaces_otros` (las listas guardadas no van en la copia).
 - El Kotlin, sin compilar con el SDK ni probado en el móvil; el JS sí se probó en Chromium.
+
+## 1.14.0 — Rastreador de enlaces, fase 2: seguir enlaces (rastreo)
+
+- Menú ⋮ › **«Rastrear este sitio…»**: ventana de ajustes y botón «▶ Empezar el rastreo». Desde la página abierta sigue sus enlaces **por anchura** (primero todo lo de un salto, luego dos…) y reúne los enlaces encontrados en una sola lista, que se maneja igual que la de la fase 1 (filtrar, copiar, exportar, guardar, abrir con otra app). Cada fila indica la página donde se encontró («· en sitio.com/ruta»), y el CSV la lleva en su columna de página.
+- **Profundidad editable**: 1–50 saltos o 0 = sin límite. La profundidad no es el freno real: lo son los topes, siempre activos y editables: **máximo de páginas** (200 por defecto, hasta 2000), **tiempo máximo** (10 min, hasta 120), **pausa entre páginas** (600 ms) y 5000 enlaces. Una sola petición cada vez.
+- Solo lee el **HTML descargado** (HttpURLConnection, sin WebView ni JavaScript, sin dependencias): los sitios que construyen sus enlaces con JavaScript o piden captcha/Cloudflare darán poco o nada (eso sería la fase 3). Páginas de hasta 2 MB; las redirecciones se siguen a mano y cada salto vuelve a pasar por el bloqueo y el alcance.
+- **Mismo dominio por defecto**; «Seguir también otros sitios» lo amplía. Los enlaces a archivos no se descargan, se listan. No se siguen enlaces tipo cerrar sesión/borrar/darse de baja ni más de 40 variantes de una misma ruta (calendarios, filtros infinitos).
+- **Dominios bloqueados**: lo que bloquean el bloqueador de anuncios y sus listas (incluidos los dominios bloqueados a mano) no se visita ni aparece en los resultados.
+- **robots.txt** respetado por defecto (grupo `*`, regla más larga gana; se puede desactivar). **Cookies**: no se envían salvo que lo actives («Enviar mis cookies»), y nunca desde una pestaña privada.
+- Mientras corre: ventana con páginas leídas, enlaces, saltos y cola; «Parar y ver» (entrega lo encontrado hasta ahora) o «Descartar». Si la app pasa a segundo plano se detiene sola y el resultado queda en ⋮ › «Ver el último rastreo». No se guarda nada en disco salvo que guardes la lista.
+- Copia de seguridad: se añaden los ajustes `rastro_*`.
+- «Buscar enlaces en la página…» y «Rastrear…» comparten la ventana de tipos (casillas + filtro propio). La versión de «Acerca de» sigue escrita a mano en el código (pendiente leerla de `BuildConfig`).
+- No se aplican las reglas de ocultación de elementos (exigirían interpretar el HTML con selectores CSS; ver PENDIENTES).
+- El Kotlin, sin compilar con el SDK ni probado en el móvil.
+
