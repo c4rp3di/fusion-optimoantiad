@@ -63,3 +63,10 @@ Punto de anclaje ya hecho en 1.12.8: `ProcesadorPagina` / `PaginasGuardadas.proc
 ### Decisiones pendientes
 - Decididas: solo con la app abierta; mismo dominio por defecto y configurable; resultados primero a la vista y copiables, con opción de guardar lista.
 
+## 6. Óptimo Inspector (auditoría de páginas) — v1 y v2 HECHAS en 1.15.0 (Kotlin sin compilar)
+Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
+- **Compilar y probar en el móvil**: la pestaña, «Ver en Elementos» (salta a Elementos y abre el camino hasta el nodo), «Ocultar siempre», «Bloquear dominio» y «Modo lectura». Comprobar que `long-animation-frame` existe en el WebView del dispositivo (si no, solo hay TBT total).
+- Contrastar las cifras con Lighthouse/PageSpeed en una misma página (los umbrales son los de Google, pero la medición es real, no simulada).
+- Idea (v3): auditar automáticamente al terminar de cargar (opcional) con aviso si hay algo grave; historial por sitio para comparar antes/después de bloquear un dominio; «auditar sin bloqueo» en una carga (hoy lo bloqueado no entra en los tiempos).
+- Idea: peso de terceros sin `Timing-Allow-Origin` (hoy desconocido) midiéndolo desde `shouldInterceptRequest`, solo si compensa la petición extra.
+- Idea: hallazgos de caché (`Cache-Control`) y de fuentes (`font-display`), que hoy no se miden.
