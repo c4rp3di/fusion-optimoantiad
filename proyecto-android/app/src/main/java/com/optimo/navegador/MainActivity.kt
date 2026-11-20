@@ -269,6 +269,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         enPantalla = false
+        rastreador?.parar("app en segundo plano")
         revisarSuspension(false)
         if (ajustes.borrarAlSalir != 0 && !isChangingConfigurations) ajustes.salidaPendiente = true
     }
@@ -546,6 +547,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
+        rastreador?.parar("descartado")
         if (isFinishing) limpiarAlSalir()
         lector.cerrar()
         ServicioSegundoPlano.manejador = null
@@ -1639,6 +1641,9 @@ class MainActivity : Activity() {
         add("Marcadores") { mostrarMarcadores() }
         add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
         if (!p.inicio && p.url.startsWith("http")) add("Buscar enlaces en la página…") { buscarEnlaces(p) }
+        if (!p.inicio && p.url.startsWith("http")) add("Rastrear este sitio…") { configurarRastreo(p) }
+        val ur = ultimoRastreo
+        if (ur != null) add("Ver el último rastreo (" + ur.enlaces.size + " enlaces)") { mostrarResultadoRastreo(p, ur) }
         if (ListasEnlaces.todas().isNotEmpty()) add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
@@ -2208,24 +2213,36 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- rastreador de enlaces (fase 1: la página abierta)
 
     private var enlacesPorExportar: String? = null
+    private var enlacesDeRastreo = false
+    private var rastreador: Rastreador? = null
+    private var ultimoRastreo: ResultadoRastreo? = null
+    private var dialogoRastreo: AlertDialog? = null
 
     /** Extrae los enlaces de la página abierta con `assets/enlaces/extraer.js` y los muestra clasificados. Solo mira esta página. */
     private fun buscarEnlaces(p: Pestana) {
+        elegirTiposEnlaces("¿Qué enlaces buscar?", "Buscar", { buscarEnlaces(p) }) { ejecutarBusquedaEnlaces(p) }
+    }
+
+    /** Casillas con los tipos de enlace a buscar (se recuerdan) y botón de filtro propio. [reabrir] vuelve a mostrar esta ventana. */
+    private fun elegirTiposEnlaces(titulo: String, boton: String, reabrir: () -> Unit, alAceptar: () -> Unit) {
         val tipos = TipoEnlace.values().filter { it != TipoEnlace.PROPIO }
         val marcados = BooleanArray(tipos.size) { (ajustes.enlacesTipos shr tipos[it].ordinal) and 1 != 0 }
         nuevoDialogo()
-            .setTitle("¿Qué enlaces buscar?")
+            .setTitle(titulo)
             .setMultiChoiceItems(Array(tipos.size) { tipos[it].etiqueta }, marcados) { _, i, v -> marcados[i] = v }
-            .setPositiveButton("Buscar") { _, _ ->
+            .setPositiveButton(boton) { _, _ ->
                 var m = 0
                 for (i in tipos.indices) if (marcados[i]) m = m or (1 shl tipos[i].ordinal)
                 ajustes.enlacesTipos = m
-                ejecutarBusquedaEnlaces(p)
+                alAceptar()
             }
             .setNeutralButton("Filtro propio…") { _, _ ->
+                var m = 0
+                for (i in tipos.indices) if (marcados[i]) m = m or (1 shl tipos[i].ordinal)
+                ajustes.enlacesTipos = m
                 pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
                     ajustes.enlacesPropio = t
-                    buscarEnlaces(p)
+                    reabrir()
                 }
             }
             .setNegativeButton("Cancelar", null)
@@ -2233,6 +2250,7 @@ class MainActivity : Activity() {
     }
 
     private fun ejecutarBusquedaEnlaces(p: Pestana) {
+        enlacesDeRastreo = false
         val w = p.web
         if (w == null || p.suspendida) {
             toast("Abre la página antes de buscar enlaces")
@@ -2284,6 +2302,10 @@ class MainActivity : Activity() {
         val sb = StringBuilder(e.tipo.etiqueta)
         if (e.host.isNotEmpty() && e.tipo != TipoEnlace.MAGNET) sb.append(" · ").append(e.host)
         if (e.tamano >= 0) sb.append(" · ").append(formatoTamano(e.tamano))
+        if (e.origen.isNotEmpty()) {
+            val u = Uri.parse(e.origen)
+            sb.append(" · en ").append(((u.host ?: "") + (u.path ?: "")).trimEnd('/').take(45))
+        }
         if (!Enlaces.nombreFiable(e.origenNombre) && e.origenNombre != "dirección") sb.append(" · nombre: ").append(e.origenNombre)
         return sb.toString()
     }
@@ -2372,13 +2394,13 @@ class MainActivity : Activity() {
                 ajustes.enlacesOtros = !ajustes.enlacesOtros
                 mostrarEnlaces(p, "", ft, fu, todos, filtro, nueva)
             }))
-            items.add(Pair<String, () -> Unit>("Filtro propio: " + (ajustes.enlacesPropio.ifBlank { "ninguno" }).take(30) + "…", {
+            if (!enlacesDeRastreo) items.add(Pair<String, () -> Unit>("Filtro propio: " + (ajustes.enlacesPropio.ifBlank { "ninguno" }).take(30) + "…", {
                 pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
                     ajustes.enlacesPropio = t
                     ejecutarBusquedaEnlaces(p)
                 }
             }))
-            items.add(Pair<String, () -> Unit>("Cambiar tipos a buscar…", { buscarEnlaces(p) }))
+            if (!enlacesDeRastreo) items.add(Pair<String, () -> Unit>("Cambiar tipos a buscar…", { buscarEnlaces(p) }))
         }
         opciones("Enlaces", items)
     }
@@ -2415,6 +2437,116 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             toast("No se pudo guardar el archivo")
         }
+    }
+
+
+    // ---------------------------------------------------------------- rastreador de enlaces (fase 2: seguir enlaces)
+
+    private fun pedirNumero(titulo: String, inicial: Int, alAceptar: (Int) -> Unit) {
+        pedirTextoOpcional(titulo, inicial.toString()) { t ->
+            val n = t.toIntOrNull()
+            if (n == null) toast("Escribe un número") else alAceptar(n)
+        }
+    }
+
+    private fun configurarRastreo(p: Pestana) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun add(t: String, a: () -> Unit) {
+            items.add(Pair(t, a))
+        }
+        add("Profundidad: " + (if (ajustes.rastroProf == 0) "sin límite (solo frenan los topes)" else ajustes.rastroProf.toString() + " saltos")) {
+            pedirNumero("Profundidad en saltos desde esta página (0 = sin límite)", ajustes.rastroProf) { ajustes.rastroProf = it; configurarRastreo(p) }
+        }
+        add("Máximo de páginas: " + ajustes.rastroPaginas) {
+            pedirNumero("Máximo de páginas a leer (1–2000)", ajustes.rastroPaginas) { ajustes.rastroPaginas = it; configurarRastreo(p) }
+        }
+        add("Tiempo máximo: " + ajustes.rastroMin + " min") {
+            pedirNumero("Tiempo máximo en minutos (1–120)", ajustes.rastroMin) { ajustes.rastroMin = it; configurarRastreo(p) }
+        }
+        add("Pausa entre páginas: " + ajustes.rastroPausa + " ms") {
+            pedirNumero("Pausa entre páginas en milisegundos (0–10000)", ajustes.rastroPausa) { ajustes.rastroPausa = it; configurarRastreo(p) }
+        }
+        add("Seguir también otros sitios: " + si(ajustes.rastroOtros)) {
+            ajustes.rastroOtros = !ajustes.rastroOtros
+            configurarRastreo(p)
+        }
+        add("Enviar mis cookies (sesión iniciada): " + (if (p.privada) "no (pestaña privada)" else si(ajustes.rastroCookies))) {
+            if (!p.privada) ajustes.rastroCookies = !ajustes.rastroCookies
+            configurarRastreo(p)
+        }
+        add("Respetar robots.txt: " + si(ajustes.rastroRobots)) {
+            ajustes.rastroRobots = !ajustes.rastroRobots
+            configurarRastreo(p)
+        }
+        add("Tipos a buscar…") {
+            elegirTiposEnlaces("Tipos a buscar", "Aceptar", { configurarRastreo(p) }) { configurarRastreo(p) }
+        }
+        add("▶ Empezar el rastreo") { iniciarRastreo(p) }
+        opciones(
+            "Rastrear este sitio\nLee el HTML de las páginas (sin JavaScript) y sigue sus enlaces. Solo con la app abierta. No visita ni lista dominios bloqueados por el bloqueador.",
+            items
+        )
+    }
+
+    private fun textoProgresoRastreo(pr: ProgresoRastreo): String =
+        "Páginas leídas: " + pr.paginas + "\nEnlaces encontrados: " + pr.enlaces + "\nSaltos: " + pr.nivel + " · en cola: " + pr.enCola +
+            "\n" + pr.actual.removePrefix("https://").removePrefix("http://").take(70)
+
+    private fun iniciarRastreo(p: Pestana) {
+        if (rastreador != null) {
+            toast("Ya hay un rastreo en marcha")
+            return
+        }
+        if (!p.url.startsWith("http")) return
+        val propio = ajustes.enlacesPropio.let { if (it.isBlank()) null else FiltroPropio(it) }
+        val cfg = ConfigRastreo(
+            p.url, ajustes.rastroProf, ajustes.rastroPaginas, ajustes.rastroMin * 60000L, ajustes.rastroPausa.toLong(),
+            ajustes.rastroOtros, ajustes.rastroCookies && !p.privada, ajustes.rastroRobots,
+            WebSettings.getDefaultUserAgent(this), ajustes.bloquearAnuncios, ajustes.enlacesTipos, propio
+        )
+        val r = Rastreador(cfg, { pr -> dialogoRastreo?.setMessage(textoProgresoRastreo(pr)) }, { res -> terminarRastreo(p, res) })
+        rastreador = r
+        dialogoRastreo = nuevoDialogo()
+            .setTitle("Rastreando…")
+            .setMessage("Empezando…")
+            .setCancelable(false)
+            .setPositiveButton("Parar y ver") { _, _ -> r.parar("detenido") }
+            .setNegativeButton("Descartar") { _, _ -> r.parar("descartado") }
+            .show()
+        r.iniciar()
+    }
+
+    private fun terminarRastreo(p: Pestana, res: ResultadoRastreo) {
+        if (isDestroyed) return
+        rastreador = null
+        try {
+            dialogoRastreo?.dismiss()
+        } catch (e: Exception) {
+            // Ya cerrado.
+        }
+        dialogoRastreo = null
+        if (res.motivo == "descartado") {
+            toast("Rastreo descartado")
+            return
+        }
+        ultimoRastreo = res
+        if (!enPantalla) return
+        mostrarResultadoRastreo(actual ?: p, res)
+    }
+
+    private fun mostrarResultadoRastreo(p: Pestana, res: ResultadoRastreo) {
+        val resumen = res.paginas.toString() + " páginas leídas (" + res.motivo + ")"
+        if (res.enlaces.isEmpty()) {
+            nuevoDialogo()
+                .setTitle("Rastreo terminado")
+                .setMessage("Sin enlaces de los tipos elegidos.\n" + resumen)
+                .setPositiveButton("Aceptar", null)
+                .show()
+            return
+        }
+        toast(resumen)
+        enlacesDeRastreo = true
+        mostrarEnlaces(p, "", res.titulo.ifBlank { Omnibox.hostDe(res.inicio) }, res.inicio, res.enlaces, null, true)
     }
 
     private fun mostrarListasEnlaces() {
@@ -3075,7 +3207,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.12.9")
+            .setTitle("Optimo 1.14.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
