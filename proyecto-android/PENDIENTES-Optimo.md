@@ -70,3 +70,7 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Idea (v3): auditar automáticamente al terminar de cargar (opcional) con aviso si hay algo grave; historial por sitio para comparar antes/después de bloquear un dominio; «auditar sin bloqueo» en una carga (hoy lo bloqueado no entra en los tiempos).
 - Idea: peso de terceros sin `Timing-Allow-Origin` (hoy desconocido) midiéndolo desde `shouldInterceptRequest`, solo si compensa la petición extra.
 - Idea: hallazgos de caché (`Cache-Control`) y de fuentes (`font-display`), que hoy no se miden.
+
+## Apuntado en 1.17.0 (no hecho)
+
+- **Técnicas de bloqueo por sitio:** poder apagar solo algunas técnicas (scripts sustitutos, vídeo vacío de VAST, «de juguete», rutas, ocultar huecos, saltar anuncios) en un sitio concreto, sin pausar todo el bloqueo. Hoy se eligen en Ajustes y valen para todas las webs. Requiere pasar el sitio de la página a varios puntos del motor (`MotorAnuncios.interceptar`, los scripts de página con guarda como la de la pausa) y una pantalla «Técnicas en este sitio». Las excepciones por dominio (1.17.0) cubren el caso de dejar pasar un dominio concreto.
