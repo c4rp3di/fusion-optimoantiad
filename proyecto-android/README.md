@@ -398,3 +398,20 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **Acciones sobre los hallazgos** (la web no es tuya, así que las recomendaciones son cosas que puedes hacer): «Ver en Elementos», «Ocultar siempre» (regla del sitio, con confirmación), «Bloquear dominio» (regla de usuario en todas las páginas, con aviso si es un CDN) y «Abrir en modo lectura» cuando la página pesa mucho. Muestra además lo que Optimo ya ha bloqueado en esa página.
 - Límites: lo que Optimo bloquea no cuenta en tiempos ni en peso; de los dominios que no envían `Timing-Allow-Origin` el navegador no da tamaño (se avisa); no se mide INP (necesita interacción); una sola carga, sin simulación de red. Los observadores usan `buffered`, así que recogen también lo anterior a abrir el panel; solo los recursos pueden faltar si el panel se abre tarde en una página con más de ~250 (se avisa).
 - Hecho: la lógica va en `assets/devtools/agente.js` (`auditar()`) y `VistaAuditoria.kt` solo la pinta. El JS se probó en Chromium con Playwright (imágenes pesadas, CSS lento, script largo, salto de diseño, terceros, duplicados; con el agente al inicio y inyectado tarde). **El Kotlin no se ha compilado ni probado en el móvil.**
+
+## 1.16.0 — DevTools: modo sencillo
+
+- **Nueva pestaña «Resumen»** (`VistaResumen.kt`): dice en lenguaje llano qué le pasa a la página abierta. Muestra un veredicto (todo en orden / hay cosas que revisar / problemas importantes), cuatro cifras (errores en la página, archivos que no cargaron, bloqueadas por Óptimo, tiempo de carga) y tarjetas explicadas sin tecnicismos:
+  - errores internos de la página (con los tres más repetidos) → «Ver los errores»;
+  - archivos que no se pudieron cargar, con el motivo en palabras (no existe, acceso denegado, fallo del servidor, sin respuesta) → «Ver la lista»;
+  - peticiones bloqueadas por Óptimo y de qué sitios; si además algo falla, avisa de que puede ser por el bloqueo y ofrece **«Pausar el bloqueo en este sitio»**;
+  - «La página es lenta» (más de 5 s) con peso y terceros, y hasta tres hallazgos de la Auditoría.
+- **Dos modos**, con el botón «Modo: sencillo ⇄ / profesional ⇄»:
+  - *Sencillo*: pestañas Resumen, Errores (la consola) y Red; el panel se abre en el Resumen.
+  - *Profesional* (por defecto, como hasta ahora): todas las pestañas, con el Resumen al final.
+  - Desde el Resumen, los botones que llevan a pestañas que el modo sencillo no tiene (p. ej. la auditoría completa) pasan antes al profesional.
+- No mide nada por su cuenta: reúne lo que ya captura el panel (consola, red, bloqueos) y las métricas de la Auditoría. Como el resto del panel, solo cuenta lo ocurrido desde que se abrió, salvo con «captura desde el inicio»; el Resumen lo dice y ofrece activarla.
+- «Copiar informe» usa el mismo diagnóstico de la pestaña Info (sin cookies, cabeceras, cuerpos ni parámetros de las URL).
+- **«Acerca de» lee la versión del sistema** (`PackageManager`, la de `build.gradle`) en vez de tenerla escrita a mano.
+- Ajuste nuevo: `devSencillo` (se recuerda el modo elegido).
+- Kotlin sin compilar aquí (revisado a mano: llaves, paréntesis, tipos y nulos); sin cambios de JavaScript.
