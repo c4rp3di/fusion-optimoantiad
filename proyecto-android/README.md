@@ -415,3 +415,15 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **«Acerca de» lee la versión del sistema** (`PackageManager`, la de `build.gradle`) en vez de tenerla escrita a mano.
 - Ajuste nuevo: `devSencillo` (se recuerda el modo elegido).
 - Kotlin sin compilar aquí (revisado a mano: llaves, paréntesis, tipos y nulos); sin cambios de JavaScript.
+
+## 1.17.0 — Permitir dominios bloqueados (por sitio o en todos)
+
+- **Excepciones de bloqueo:** un dominio permitido pasa tal cual en la red: ni se bloquea ni se sustituye por un script/vídeo vacío, y gana a las listas, a los bloqueos propios y a las técnicas de red. Incluye sus subdominios. Se aplica **por sitio** (solo en las páginas de ese sitio y sus subdominios) o **en todos los sitios**.
+- **Dónde se activa** (en cada caso pregunta «En este sitio» / «En todos los sitios» / «Cancelar», y avisa de que puede volver a traer anuncios o rastreadores):
+  - **Resumen** › tarjeta «Óptimo bloqueó N peticiones» › **«Revisar bloqueos»**: lista de dominios bloqueados en la página, toca uno.
+  - **Red** › toca una petición bloqueada › botón **«Permitir»**.
+  - **Auditoría** › «Lo que Optimo ya bloqueó en esta página»: toca un dominio.
+- **Dónde se gestionan:** en «Reglas de sitios y anuncios» (Ajustes) y en «Reglas de este sitio» (menú ⋮ › Personalizar este sitio), donde aparecen como «Permitir dominio en sitio» y se pueden marcar y borrar como el resto. Entran también en la copia de seguridad.
+- Hay que **recargar la página** para ver el efecto. Las pestañas privadas no guardan excepciones (se escribirían en disco con el nombre del sitio).
+- **Límite:** solo actúa sobre peticiones de red. Ocultar huecos, saltar anuncios y el resto de técnicas dentro de la página siguen activos; para apagar técnicas concretas en un sitio, ver `PENDIENTES-Optimo.md`.
+- Kotlin sin compilar aquí (revisado a mano: llaves, paréntesis, tipos y nulos); sin cambios de JavaScript.
