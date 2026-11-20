@@ -889,6 +889,340 @@
   function limpiarConsola() { cons.length = 0; return 'ok'; }
   function limpiarRed() { red.length = 0; return 'ok'; }
 
+  // ------------------------------------------------------------ auditoría (Óptimo Inspector)
+  // Observadores propios y siempre activos (no dependen de la pausa del panel). Con buffered:true recogen también lo
+  // ocurrido antes de inyectar el agente; la excepción son los recursos (el búfer del navegador guarda unos 250).
+  var AU_T0 = Math.round(performance.now());
+  var auRecs = [], auTareas = [], auFrames = [], auSaltos = [], auLcp = null, auRt0 = 0;
+  var AU_SOP = {};
+  try { auRt0 = performance.getEntriesByType('resource').length; } catch (e) { }
+  try {
+    var sup = PerformanceObserver.supportedEntryTypes || [];
+    AU_SOP = { loaf: sup.indexOf('long-animation-frame') >= 0, tareas: sup.indexOf('longtask') >= 0, saltos: sup.indexOf('layout-shift') >= 0, lcp: sup.indexOf('largest-contentful-paint') >= 0 };
+  } catch (e) { }
+
+  function auRec(x) {
+    try {
+      var u = x.name;
+      if (/^(data|blob):/.test(u) || auRecs.length >= 1500) return;
+      var hn = '', og = '';
+      try { var uu = new URL(u); hn = uu.hostname; og = uu.origin; } catch (e) { }
+      var it = x.initiatorType || '';
+      auRecs.push({
+        u: u, hn: hn, og: og, t: (it === 'fetch' || it === 'xmlhttprequest') ? 'fetch' : tipoRt(it, u),
+        tam: x.transferSize || 0, enc: x.encodedBodySize || 0, dec: x.decodedBodySize || 0,
+        ini: Math.round(x.startTime), fin: Math.round(x.responseEnd), ms: Math.round(x.duration),
+        p: x.nextHopProtocol || '', rb: x.renderBlockingStatus || '', st: x.responseStatus || 0,
+        red: Math.max(0, Math.round((x.redirectEnd || 0) - (x.redirectStart || 0)))
+      });
+    } catch (e) { }
+  }
+  try { new PerformanceObserver(function (l) { l.getEntries().forEach(auRec); }).observe({ type: 'resource', buffered: true }); } catch (e) { }
+  try {
+    new PerformanceObserver(function (l) {
+      l.getEntries().forEach(function (x) { if (auTareas.length < 400) auTareas.push({ t: Math.round(x.startTime), d: Math.round(x.duration) }); });
+    }).observe({ type: 'longtask', buffered: true });
+  } catch (e) { }
+  try {
+    new PerformanceObserver(function (l) {
+      l.getEntries().forEach(function (x) {
+        if (auFrames.length >= 200) return;
+        var sc = [];
+        (x.scripts || []).forEach(function (s) { sc.push({ u: s.sourceURL || '', f: s.sourceFunctionName || '', i: s.invoker || '', d: Math.round(s.duration) }); });
+        auFrames.push({ t: Math.round(x.startTime), d: Math.round(x.duration), b: Math.round(x.blockingDuration || 0), s: sc });
+      });
+    }).observe({ type: 'long-animation-frame', buffered: true });
+  } catch (e) { }
+  function auRect(r) { return r ? { y: Math.round(r.y), h: Math.round(r.height), w: Math.round(r.width) } : null; }
+  try {
+    new PerformanceObserver(function (l) {
+      l.getEntries().forEach(function (x) {
+        if (auSaltos.length >= 200) return;
+        var f = [];
+        (x.sources || []).slice(0, 3).forEach(function (s) {
+          var n = s.node, id = 0, d = '', tag = '', sinDim = false;
+          if (n && n.nodeType === 1) {
+            try {
+              id = idDe(n); d = recortar(nodoStr(n), 80); tag = n.localName;
+              sinDim = tag === 'img' && !(n.getAttribute('width') && n.getAttribute('height'));
+            } catch (e) { }
+          }
+          f.push({ id: id, d: d, tag: tag, sd: sinDim, p: auRect(s.previousRect), c: auRect(s.currentRect) });
+        });
+        auSaltos.push({ t: Math.round(x.startTime), v: x.value, ent: !!x.hadRecentInput, s: f });
+      });
+    }).observe({ type: 'layout-shift', buffered: true });
+  } catch (e) { }
+  try {
+    new PerformanceObserver(function (l) {
+      var es = l.getEntries(), x = es[es.length - 1];
+      if (!x) return;
+      var n = x.element, o = { t: Math.round(x.startTime), u: x.url || '', id: 0, d: '', tag: '', lazy: false };
+      if (n && n.nodeType === 1) {
+        try { o.id = idDe(n); o.d = recortar(nodoStr(n), 80); o.tag = n.localName; o.lazy = n.getAttribute('loading') === 'lazy'; } catch (e) { }
+      }
+      auLcp = o;
+    }).observe({ type: 'largest-contentful-paint', buffered: true });
+  } catch (e) { }
+
+  var AU_SUF2 = /^(co|com|org|net|gov|edu|ac)\.[a-z]{2}$/;
+  function sitioDe(h) {
+    if (!h) return '';
+    if (/^[\d.]+$/.test(h) || h.indexOf(':') >= 0) return h;
+    var p = h.split('.');
+    if (p.length <= 2) return h;
+    return AU_SUF2.test(p.slice(-2).join('.')) ? p.slice(-3).join('.') : p.slice(-2).join('.');
+  }
+  var AU_CDN = /(^|\.)(googleapis|gstatic|cloudflare|jsdelivr|unpkg|bootstrapcdn|jquery|fontawesome|cloudfront|akamaihd|fastly|azureedge|cdn77|stackpath|bunnycdn)\.(com|net|org|io)$/;
+  function nom(u) {
+    try {
+      var x = new URL(u), s = x.pathname.split('/').filter(Boolean).pop();
+      return recortar(s ? decodeURIComponent(s) : x.hostname, 40);
+    } catch (e) { return recortar(String(u), 40); }
+  }
+  function fB(b) { return b < 1024 ? b + ' B' : (b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB'); }
+  function fT(ms) { return ms < 1000 ? Math.round(ms) + ' ms' : (ms / 1000).toFixed(2) + ' s'; }
+  function sem(v, bien, mal) { return v <= bien ? 0 : (v <= mal ? 1 : 2); }
+  var AU_BIN = /\.(png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp[34]|m4a|webm|ogg|wasm|zip|gz|br|pdf|bin)$/i;
+  function pesoDe(r) { return r.tam || r.enc || 0; }
+
+  // Devuelve un JSON con métricas, desglose y hallazgos ordenados por impacto (sev: 2 mal, 1 mejorable, 0 aviso).
+  function auditar() {
+    var R = auRecs, hall = [], i, k;
+    var host = location.hostname, sitioP = sitioDe(host);
+    var nav = null, fcp = 0;
+    try { nav = performance.getEntriesByType('navigation')[0]; } catch (e) { }
+    try { performance.getEntriesByType('paint').forEach(function (p) { if (p.name === 'first-contentful-paint') fcp = Math.round(p.startTime); }); } catch (e) { }
+    var ttfb = nav ? Math.round(nav.responseStart) : 0;
+    var lcp = auLcp ? auLcp.t : lcpMs;
+
+    // CLS por ventanas de sesión (como lo mide Chrome): saltos separados por menos de 1 s y ventanas de hasta 5 s.
+    var cls = 0, win = 0, wIni = 0, ult = 0, nSaltos = 0;
+    auSaltos.forEach(function (s) {
+      if (s.ent) return;
+      nSaltos++;
+      if (win && (s.t - ult > 1000 || s.t - wIni > 5000)) win = 0;
+      if (!win) wIni = s.t;
+      win += s.v; ult = s.t;
+      if (win > cls) cls = win;
+    });
+    cls = Math.round(cls * 1000) / 1000;
+
+    // Tiempo total de bloqueo (TBT): lo que pasa de 50 ms en cada tarea larga tras el primer contenido.
+    var tbt = 0, tareasN = 0, tareaMax = 0;
+    if (AU_SOP.tareas) {
+      auTareas.forEach(function (t) { if (t.t >= fcp) { tbt += Math.max(0, t.d - 50); tareasN++; if (t.d > tareaMax) tareaMax = t.d; } });
+    } else if (AU_SOP.loaf) {
+      auFrames.forEach(function (f) { if (f.t >= fcp) { tbt += f.b; tareasN++; if (f.d > tareaMax) tareaMax = f.d; } });
+    }
+
+    // Recursos: peso por tipo, dominios, terceros.
+    var porTipo = {}, byUrl = {}, origenes = {}, T = {}, peso = 0, opacos = 0;
+    R.forEach(function (r) {
+      var w = pesoDe(r), o = porTipo[r.t] || (porTipo[r.t] = { t: r.t, n: 0, tam: 0 });
+      o.n++; o.tam += w; peso += w;
+      if (!byUrl[r.u]) byUrl[r.u] = r;
+      if (r.og) origenes[r.og] = 1;
+      var s = sitioDe(r.hn);
+      r.ter = !!s && s !== sitioP;
+      if (r.ter && r.tam === 0 && r.enc === 0 && r.dec === 0 && r.fin > 0) { opacos++; r.opaco = true; }
+      if (r.ter) {
+        var q = T[s] || (T[s] = { s: s, n: 0, tam: 0, ms: 0, js: 0, op: 0, cdn: AU_CDN.test(s) ? 1 : 0 });
+        q.n++; q.tam += w; if (r.ms > q.ms) q.ms = r.ms; if (r.t === 'js') q.js++; if (r.opaco) q.op++;
+      }
+    });
+    var docTam = nav ? (nav.transferSize || nav.encodedBodySize || 0) : 0;
+    if (docTam) { var od = porTipo.doc || (porTipo.doc = { t: 'doc', n: 0, tam: 0 }); od.tam += docTam; od.n++; peso += docTam; }
+    var terceros = Object.keys(T).map(function (s) { return T[s]; }).sort(function (a, b) { return (b.n - a.n) || (b.tam - a.tam); });
+    var nodos = document.getElementsByTagName('*').length;
+
+    function add(sev, cat, id, titulo, det, extra) {
+      var x = { sev: sev, cat: cat, id: id, t: titulo, d: det };
+      if (extra) for (var kk in extra) x[kk] = extra[kk];
+      hall.push(x);
+    }
+
+    // ---- LCP: en qué fase se pierde el tiempo
+    var lcpDet = null;
+    if (lcp) {
+      lcpDet = { ttfb: ttfb, retardo: 0, carga: 0, render: 0, texto: 0 };
+      var rl = null;
+      if (auLcp && auLcp.u) { for (i = 0; i < R.length; i++) { if (R[i].u === auLcp.u) { rl = R[i]; break; } } }
+      if (rl) {
+        lcpDet.retardo = Math.max(0, rl.ini - ttfb); lcpDet.carga = Math.max(0, rl.fin - rl.ini); lcpDet.render = Math.max(0, lcp - rl.fin);
+        lcpDet.tam = pesoDe(rl);
+      } else { lcpDet.texto = 1; lcpDet.render = Math.max(0, lcp - ttfb); }
+    }
+    var sLcp = lcp ? sem(lcp, 2500, 4000) : 0;
+    if (sLcp > 0) {
+      var fase = 'ttfb', mayor = lcpDet.ttfb;
+      if (lcpDet.retardo > mayor) { fase = 'retardo'; mayor = lcpDet.retardo; }
+      if (lcpDet.carga > mayor) { fase = 'carga'; mayor = lcpDet.carga; }
+      if (lcpDet.render > mayor) { fase = 'render'; mayor = lcpDet.render; }
+      var txt = {
+        ttfb: 'La mayor parte (' + fT(mayor) + ') se va esperando la primera respuesta del servidor.',
+        retardo: 'El navegador tardó ' + fT(mayor) + ' en empezar a pedir el elemento principal: lo descubre tarde o espera a otros recursos.',
+        carga: 'El elemento principal tardó ' + fT(mayor) + ' en descargarse' + (lcpDet.tam ? ' (' + fB(lcpDet.tam) + ')' : '') + '.',
+        render: lcpDet.texto ? 'Hasta pintar el texto principal pasan ' + fT(mayor) + ': suele ser CSS, fuentes o scripts que bloquean.' : 'Tras llegar, tardó ' + fT(mayor) + ' en pintarse (CSS o scripts bloqueando).'
+      }[fase];
+      add(sLcp === 2 ? 2 : 1, 'velocidad', 'lcp', 'Contenido principal lento: ' + fT(lcp), txt + (auLcp && auLcp.lazy ? ' Además la imagen tiene loading="lazy", lo que la retrasa.' : ''), { w: lcp, nodo: auLcp ? auLcp.id : 0 });
+    }
+    if (fcp && sem(fcp, 1800, 3000) > 0) {
+      var nb = R.filter(function (r) { return r.rb === 'blocking'; }).length;
+      add(sem(fcp, 1800, 3000), 'velocidad', 'fcp', 'Tarda en aparecer algo: ' + fT(fcp), 'Primer contenido visible. Respuesta del servidor: ' + fT(ttfb) + (nb ? '; ' + nb + ' recursos bloquean el pintado.' : '.'), { w: fcp });
+    }
+    if (ttfb && sem(ttfb, 800, 1800) > 0) {
+      var rd = nav && nav.redirectCount ? ' La página redirigió ' + nav.redirectCount + ' vez/veces antes de cargar.' : '';
+      add(sem(ttfb, 800, 1800), 'velocidad', 'ttfb', 'El servidor responde despacio: ' + fT(ttfb), 'Es tiempo de red y servidor, no de tu navegador.' + rd, { w: ttfb });
+    }
+
+    // ---- saltos de diseño
+    if (cls > 0.1) {
+      add(cls > 0.25 ? 2 : 1, 'diseño', 'cls', 'La página se mueve al cargar: CLS ' + cls, nSaltos + ' saltos. Bajo 0.1 es bueno.', { w: Math.round(cls * 1000) });
+    }
+    var porNodo = {};
+    auSaltos.forEach(function (s) {
+      if (s.ent || !s.s.length) return;
+      var f = s.s[0];
+      for (var z = 0; z < s.s.length; z++) { if (s.s[z].tag && s.s[z].tag !== 'body' && s.s[z].tag !== 'html') { f = s.s[z]; break; } }
+      var key = f.id ? 'n' + f.id : 'x' + f.d;
+      var o = porNodo[key] || (porNodo[key] = { f: f, v: 0, n: 0 });
+      o.v += s.v; o.n++; o.f = f;
+    });
+    Object.keys(porNodo).map(function (kk) { return porNodo[kk]; }).sort(function (a, b) { return b.v - a.v; }).slice(0, 4).forEach(function (o) {
+      if (o.v < 0.02) return;
+      var f = o.f, causa;
+      var toda = f.tag === 'body' || f.tag === 'html';
+      if (toda) causa = 'Toda la página se desplazó: apareció contenido arriba o la página creció' + (f.p && f.c ? ' (' + Math.abs(f.c.h - f.p.h) + ' px de altura, ' + Math.abs(f.c.y - f.p.y) + ' px de desplazamiento).' : '.');
+      else if (f.sd) causa = 'Es una imagen sin width/height: el navegador no reserva su espacio hasta que llega.';
+      else if (f.tag === 'iframe') causa = 'Contenido incrustado (anuncio, vídeo…) que ocupa sitio al aparecer.';
+      else if (f.p && f.c && (f.p.h !== f.c.h || f.p.w !== f.c.w)) causa = 'Cambió de tamaño (' + f.p.w + '×' + f.p.h + ' → ' + f.c.w + '×' + f.c.h + ' px).';
+      else if (f.p && f.c) causa = 'Lo empujó contenido que apareció antes (se movió ' + Math.abs(f.c.y - f.p.y) + ' px).';
+      else causa = 'El elemento se desplazó.';
+      add(o.v >= 0.1 ? 2 : (o.v >= 0.04 ? 1 : 0), 'diseño', 'salto', (toda ? 'Se movió toda la página' : 'Se movió: ' + (f.d || 'un elemento que ya no existe')) + ' (+' + o.v.toFixed(3) + ')', causa + (o.n > 1 ? ' ' + o.n + ' veces.' : ''), { w: Math.round(o.v * 1000), nodo: toda ? 0 : f.id });
+    });
+
+    // ---- scripts que consumen tiempo
+    if (sem(tbt, 200, 600) > 0) {
+      add(sem(tbt, 200, 600), 'scripts', 'tbt', 'Scripts bloquean la página: ' + fT(tbt), tareasN + ' tareas largas (la peor ' + fT(tareaMax) + '). Mientras duran, la página no responde a toques.', { w: tbt });
+    }
+    var porScript = {};
+    auFrames.forEach(function (f) {
+      f.s.forEach(function (s) {
+        var u = (!s.u || s.u.split('#')[0] === location.href.split('#')[0]) ? '(en línea)' : s.u, o = porScript[u] || (porScript[u] = { u: u, d: 0, n: 0, inv: s.i });
+        o.d += s.d; o.n++;
+      });
+    });
+    Object.keys(porScript).map(function (kk) { return porScript[kk]; }).sort(function (a, b) { return b.d - a.d; }).slice(0, 5).forEach(function (o) {
+      if (o.d < 100) return;
+      var hn = '', ter = false;
+      try { hn = new URL(o.u).hostname; ter = sitioDe(hn) !== sitioP; } catch (e) { }
+      add(o.d >= 300 ? 2 : 1, 'scripts', 'script', 'Script lento: ' + (o.u === '(en línea)' ? 'script en línea' : nom(o.u)) + ' (' + fT(o.d) + ' de CPU)',
+        o.n + (o.n === 1 ? ' ejecución larga' : ' ejecuciones largas') + (hn ? ' · ' + hn + (ter ? ' (tercero)' : '') : '') + (o.inv && !/^https?:/.test(o.inv) ? ' · ' + recortar(o.inv, 40) : ''),
+        { w: o.d, host: ter ? sitioDe(hn) : '', u: o.u });
+    });
+    var jsR = R.filter(function (r) { return r.t === 'js'; }), jsPeso = 0;
+    jsR.forEach(function (r) { jsPeso += pesoDe(r); });
+    if (jsPeso >= 500 * 1024) {
+      var top = jsR.slice().sort(function (a, b) { return pesoDe(b) - pesoDe(a); }).slice(0, 3).map(function (r) { return nom(r.u) + ' ' + fB(pesoDe(r)); }).join(', ');
+      add(jsPeso >= 1536 * 1024 ? 2 : 1, 'scripts', 'jspeso', 'Mucho JavaScript: ' + fB(jsPeso) + ' en ' + jsR.length + ' archivos', 'Los mayores: ' + top + '.', { w: jsPeso });
+    }
+
+    // ---- imágenes
+    var imgs = [], im;
+    try { imgs = Array.prototype.slice.call(document.images, 0, 400); } catch (e) { }
+    var dpr = window.devicePixelRatio || 1;
+    function imgDe(u) { for (var q = 0; q < imgs.length; q++) { if (imgs[q].currentSrc === u || imgs[q].src === u) return imgs[q]; } return null; }
+    R.filter(function (r) { return r.t === 'img' && pesoDe(r) >= 200 * 1024; }).sort(function (a, b) { return pesoDe(b) - pesoDe(a); }).slice(0, 5).forEach(function (r) {
+      var ext = '';
+      try { ext = (new URL(r.u).pathname.split('.').pop() || '').toLowerCase(); } catch (e) { }
+      var viejo = /^(jpe?g|png|gif|bmp)$/.test(ext);
+      var el = imgDe(r.u);
+      add(pesoDe(r) >= 1024 * 1024 ? 2 : 1, 'imágenes', 'imgpesada', 'Imagen pesada: ' + nom(r.u) + ' (' + fB(pesoDe(r)) + ')',
+        r.hn + (viejo ? ' · formato .' + ext + ': en WebP o AVIF pesaría bastante menos' : ''), { w: pesoDe(r), nodo: el ? idDe(el) : 0, u: r.u, host: r.ter ? sitioDe(r.hn) : '' });
+    });
+    var grandes = [];
+    for (k = 0; k < imgs.length; k++) {
+      im = imgs[k];
+      if (!im.complete || !im.naturalWidth || !im.clientWidth || !im.clientHeight) continue;
+      var util = im.clientWidth * dpr, ratio = im.naturalWidth / util;
+      var rr = byUrl[im.currentSrc], tam = rr ? pesoDe(rr) : 0;
+      if (ratio >= 2 && im.naturalWidth >= 500 && (tam >= 60 * 1024 || (!tam && im.naturalWidth * im.naturalHeight > 1500000))) grandes.push({ im: im, ratio: ratio, tam: tam, util: Math.round(util) });
+    }
+    grandes.sort(function (a, b) { return (b.tam || 0) - (a.tam || 0); }).slice(0, 4).forEach(function (g) {
+      add(1, 'imágenes', 'imggrande', 'Imagen más grande de lo necesario: ' + nom(g.im.currentSrc || g.im.src),
+        'Mide ' + g.im.naturalWidth + '×' + g.im.naturalHeight + ' y se muestra a unos ' + g.util + ' px de ancho útil' + (g.tam ? ' · ' + fB(g.tam) : '') + '.', { w: g.tam || 1, nodo: idDe(g.im) });
+    });
+    if (auLcp && auLcp.lazy) add(2, 'imágenes', 'lcplazy', 'La imagen principal se carga en diferido', 'Tiene loading="lazy" pero es lo primero que se ve: retrasa el contenido principal.', { w: 5000, nodo: auLcp.id });
+    var lejos = [], lejosTam = 0;
+    for (k = 0; k < imgs.length; k++) {
+      im = imgs[k];
+      if (im.loading === 'lazy' || !im.complete) continue;
+      var rc = im.getBoundingClientRect(), rs = byUrl[im.currentSrc], ts = rs ? pesoDe(rs) : 0;
+      if (ts >= 100 * 1024 && rc.top + (window.pageYOffset || 0) > innerHeight * 2) { lejos.push(im); lejosTam += ts; }
+    }
+    if (lejos.length) add(lejosTam >= 300 * 1024 ? 1 : 0, 'imágenes', 'lejos', lejos.length + ' imágenes lejos de la pantalla se cargan ya (' + fB(lejosTam) + ')', 'Podrían cargarse al llegar a ellas (loading="lazy") y ahorrar datos al abrir.', { w: lejosTam, nodo: idDe(lejos[0]) });
+
+    // ---- bloqueo de pintado, conexiones y recursos innecesarios
+    var bloq = R.filter(function (r) { return r.rb === 'blocking'; });
+    if (bloq.length) {
+      var finB = 0;
+      bloq.forEach(function (r) { if (r.fin > finB) finB = r.fin; });
+      if (finB > 1000) {
+        var nomB = bloq.slice().sort(function (a, b) { return b.fin - a.fin; }).slice(0, 3).map(function (r) { return nom(r.u) + (r.ter ? ' (' + sitioDe(r.hn) + ')' : ''); }).join(', ');
+        add(finB > 2500 ? 2 : 1, 'velocidad', 'bloqueantes', bloq.length + ' recursos bloquean el pintado hasta ' + fT(finB), 'Hasta que llegan, la pantalla se queda en blanco: ' + nomB + '.', { w: finB });
+      }
+    }
+    if (terceros.length >= 15) add(terceros.length >= 30 ? 2 : 1, 'conexiones', 'dominios', 'Muchos dominios distintos: ' + terceros.length + ' terceros', 'Cada dominio nuevo cuesta DNS + conexión + TLS antes de descargar nada.', { w: terceros.length * 100 });
+    terceros.slice(0, 6).forEach(function (q) {
+      if (q.n < 10 && q.tam < 300 * 1024 && q.js < 3) return;
+      add(q.n >= 25 || q.tam >= 1024 * 1024 ? 2 : 1, 'conexiones', 'tercero', 'Tercero: ' + q.s + ' (' + q.n + ' peticiones' + (q.tam ? ', ' + fB(q.tam) : '') + ')',
+        (q.js ? q.js + ' scripts · ' : '') + (q.op ? 'peso desconocido en ' + q.op + ' (el dominio no lo permite) · ' : '') + 'la más lenta tardó ' + fT(q.ms) + '.', { w: q.tam + q.n * 2000, host: q.s, cdn: q.cdn });
+    });
+    var h1 = {};
+    R.forEach(function (r) { if (r.p === 'http/1.1') { h1[r.og] = (h1[r.og] || 0) + 1; } });
+    Object.keys(h1).forEach(function (og) {
+      if (h1[og] >= 8) add(1, 'conexiones', 'http1', h1[og] + ' peticiones por HTTP/1.1 a ' + og.replace(/^https?:\/\//, ''), 'Sin HTTP/2 las peticiones se hacen en tandas de 6: va más lento con muchos archivos.', { w: h1[og] * 300 });
+    });
+    var sinC = R.filter(function (r) { return (r.t === 'js' || r.t === 'css' || r.t === 'doc' || r.t === 'fetch') && r.dec >= 10240 && r.enc > 0 && r.enc >= r.dec * 0.95 && !AU_BIN.test(r.u.split('?')[0]); });
+    if (sinC.length) {
+      var sumC = 0;
+      sinC.forEach(function (r) { sumC += r.dec; });
+      add(sumC >= 100 * 1024 ? 1 : 0, 'recursos', 'sincomp', sinC.length + ' archivos de texto sin comprimir (' + fB(sumC) + ')',
+        sinC.slice().sort(function (a, b) { return b.dec - a.dec; }).slice(0, 3).map(function (r) { return nom(r.u) + ' ' + fB(r.dec); }).join(', ') + '. Con gzip o brotli pesarían bastante menos.', { w: sumC });
+    }
+    var cuenta = {};
+    R.forEach(function (r) { var c = cuenta[r.u] || (cuenta[r.u] = { r: r, n: 0, tam: 0 }); c.n++; c.tam += pesoDe(r); });
+    Object.keys(cuenta).map(function (kk) { return cuenta[kk]; }).filter(function (c) { return c.n >= 2; }).sort(function (a, b) { return b.tam - a.tam; }).slice(0, 4).forEach(function (c) {
+      var desp = c.tam - c.tam / c.n;
+      add(c.r.t !== 'fetch' && desp >= 50 * 1024 ? 1 : 0, 'recursos', 'duplicado', 'Descargado ' + c.n + ' veces: ' + nom(c.r.u), (desp ? 'Se repiten ' + fB(desp) + ' · ' : '') + (c.r.hn || ''), { w: desp || c.n, host: c.r.ter ? sitioDe(c.r.hn) : '' });
+    });
+    var redS = 0, redN = 0;
+    R.forEach(function (r) { if (r.red > 0) { redS += r.red; redN++; } });
+    if (redN && redS >= 300) add(1, 'recursos', 'redir', redN + ' recursos pasan por redirecciones (' + fT(redS) + ')', 'Cada redirección es una ida y vuelta extra al servidor.', { w: redS });
+    if (nodos >= 1500) add(nodos >= 3000 ? 2 : 1, 'diseño', 'dom', 'Página muy grande: ' + nodos + ' elementos', 'Más elementos = más memoria y cada cambio de diseño tarda más.', { w: nodos });
+
+    hall.sort(function (a, b) { return (b.sev - a.sev) || ((b.w || 0) - (a.w || 0)); });
+    var mas = function (a, n) { return a.slice(0, n).map(function (r) { return { u: r.u, t: r.t, tam: pesoDe(r), ms: r.ms, hn: r.hn, ter: r.ter ? 1 : 0 }; }); };
+    return JSON.stringify({
+      v: 1, url: location.href, host: host, ahora: Math.round(performance.now()), t0: AU_T0,
+      parcial: (AU_T0 > 300 && auRt0 >= 250) ? 1 : 0,
+      soporte: { loaf: AU_SOP.loaf ? 1 : 0, tareas: AU_SOP.tareas ? 1 : 0, saltos: AU_SOP.saltos ? 1 : 0, lcp: AU_SOP.lcp ? 1 : 0 },
+      m: {
+        lcp: lcp, fcp: fcp, ttfb: ttfb, cls: cls, tbt: tbt, dcl: nav ? Math.round(nav.domContentLoadedEventEnd) : 0, carga: nav ? Math.round(nav.loadEventEnd) : 0,
+        nodos: nodos, peticiones: R.length + 1, peso: peso, opacos: opacos, dominios: Object.keys(origenes).length, terceros: terceros.length,
+        sem: { lcp: lcp ? sem(lcp, 2500, 4000) : -1, fcp: fcp ? sem(fcp, 1800, 3000) : -1, ttfb: ttfb ? sem(ttfb, 800, 1800) : -1, cls: sem(cls, 0.1, 0.25), tbt: sem(tbt, 200, 600) }
+      },
+      lcpDet: lcpDet,
+      tipos: Object.keys(porTipo).map(function (t) { return porTipo[t]; }).sort(function (a, b) { return b.tam - a.tam; }),
+      terceros: terceros.slice(0, 12),
+      pesados: mas(R.slice().sort(function (a, b) { return pesoDe(b) - pesoDe(a); }), 8),
+      lentos: mas(R.filter(function (r) { return r.ms >= 800; }).sort(function (a, b) { return b.ms - a.ms; }), 6),
+      tareas: { n: tareasN, max: tareaMax },
+      h: hall.slice(0, 40)
+    });
+  }
+
   var api = {
     consola: consola, red: redLista, detalleRed: redDetalle, limpiarConsola: limpiarConsola, limpiarRed: limpiarRed,
     hijos: hijos, camino: camino, info: info, estilos: estilos,
@@ -897,7 +1231,7 @@
     guardable: guardable, olvidar: olvidar, deshacerEstilos: deshacerEstilos, ajustarPx: ajustarPx,
     resaltar: resaltar, quitarResalte: quitarResalte, elegir: elegir, elegido: elegido,
     ev: ev, almacen: almacen, almSet: almSet, almDel: almDel, almVer: almVer,
-    fuentes: fuentes, rend: rend, traer: traer, bd: bd, leer: leer
+    fuentes: fuentes, rend: rend, traer: traer, bd: bd, leer: leer, auditar: auditar
   };
   try {
     Object.defineProperty(window, '__optimoDev', { value: api, enumerable: false, configurable: false, writable: false });
