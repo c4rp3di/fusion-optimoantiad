@@ -38,7 +38,9 @@ class GanchosAuditoria(
     val avisar: (String) -> Unit,
     val dialogo: () -> AlertDialog.Builder,
     /** Entrega el informe en texto cada vez que se audita (para incluirlo en el diagnóstico). */
-    val alInforme: (String) -> Unit
+    val alInforme: (String) -> Unit,
+    /** Pregunta si se permite un dominio que Optimo ha bloqueado en esta página. */
+    val permitir: (String) -> Unit = {}
 )
 
 /**
@@ -468,11 +470,13 @@ class VistaAuditoria(
         }
         var total = 0
         for (p in lista) total += p.second
-        c.addView(texto(total.toString() + " peticiones evitadas en " + lista.size + " dominios", 12f, paleta.texto))
+        c.addView(texto(total.toString() + " peticiones evitadas en " + lista.size + " dominios (toca uno para permitirlo)", 12f, paleta.texto))
         val tope = minOf(lista.size, 8)
         for (i in 0 until tope) {
             val p = lista[i]
             val fila = texto(p.first + "  ×" + p.second, 11f, paleta.tenue, false, true)
+            fila.isClickable = true
+            fila.setOnClickListener { g.permitir(p.first) }
             fila.maxLines = 1
             fila.ellipsize = TextUtils.TruncateAt.END
             fila.setPadding(dp(10), dp(2), 0, 0)
