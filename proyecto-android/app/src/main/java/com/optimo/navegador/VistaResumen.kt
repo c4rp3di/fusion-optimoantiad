@@ -36,6 +36,8 @@ class GanchosResumen(
     /** Salta a otra pestaña de DevTools (0 Consola, 2 Red, 5 Auditoría…). */
     val irA: (Int) -> Unit,
     val pausarBloqueo: () -> Unit,
+    /** Abre la lista de dominios bloqueados en la página para permitir alguno. */
+    val revisarBloqueos: () -> Unit,
     /** ¿Está activo el bloqueo de anuncios en esta página? */
     val bloqueoActivo: () -> Boolean,
     val capturaDesdeInicio: () -> Boolean,
@@ -252,6 +254,7 @@ class VistaResumen(
             for (b in d.hostsBloqueados.take(4)) det.append("• ").append(b.first).append(" (").append(b.second).append(")\n")
             if (d.hostsBloqueados.size > 4) det.append("… y " + (d.hostsBloqueados.size - 4) + " sitios más\n")
             val acciones = ArrayList<TextView>()
+            acciones.add(chip("Revisar bloqueos") { g.revisarBloqueos() })
             val algoFalla = totalErrores > 0 || d.fallos.isNotEmpty()
             if (algoFalla && g.bloqueoActivo()) {
                 det.append("Si la página no funciona bien, puede ser por este bloqueo.")
