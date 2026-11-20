@@ -114,10 +114,12 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
     // ---------------------------------------------------------------- red
 
     /** Respuesta inventada o bloqueo para una petición de subrecurso; null si se deja pasar. */
-    fun interceptar(request: WebResourceRequest): WebResourceResponse? {
+    fun interceptar(request: WebResourceRequest, paginaHost: String = ""): WebResourceResponse? {
         if (request.isForMainFrame) return null
         val uri = request.url
         val host = (uri.host ?: return null).lowercase()
+        // Excepción del usuario (por sitio o para todos): pasa tal cual, sin bloquear ni sustituir.
+        if (ReglasUsuario.permitido(paginaHost, host)) return null
         val ruta = (uri.encodedPath ?: "").lowercase()
         val consulta = uri.encodedQuery
         val url = host + ruta + (if (consulta != null) "?" + consulta.lowercase() else "")
