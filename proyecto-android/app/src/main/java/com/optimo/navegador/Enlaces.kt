@@ -37,8 +37,12 @@ class EnlaceEncontrado(
     val origenNombre: String,
     val tamano: Long,
     val host: String,
-    val externo: Boolean
-)
+    val externo: Boolean,
+    /** Página donde se encontró el enlace (solo en los rastreos; vacío si es la página abierta). */
+    val origen: String = ""
+) {
+    fun conOrigen(o: String): EnlaceEncontrado = EnlaceEncontrado(url, tipo, nombre, origenNombre, tamano, host, externo, o)
+}
 
 class ResultadoExtraccion(val titulo: String, val url: String, val crudos: List<EnlaceCrudo>)
 
@@ -178,7 +182,7 @@ object Enlaces {
     /** ¿El nombre es de fiar como nombre del contenido (viene del propio enlace) o es una pista de la página? */
     fun nombreFiable(origen: String): Boolean = origen == "magnet" || origen == "archivo del enlace" || origen == "texto del enlace"
 
-    private fun pesoOrigen(origen: String): Int = when (origen) {
+    fun pesoOrigen(origen: String): Int = when (origen) {
         "magnet", "archivo del enlace" -> 3
         "texto del enlace", "título del enlace" -> 2
         "texto cercano", "encabezado cercano" -> 1
@@ -244,7 +248,7 @@ object Enlaces {
         return EnlaceEncontrado(url, tipo, nombreOrigen.first, nombreOrigen.second, -1L, host, externo)
     }
 
-    private fun clave(e: EnlaceEncontrado): String {
+    fun clave(e: EnlaceEncontrado): String {
         if (e.tipo == TipoEnlace.MAGNET) {
             val h = datosMagnet(e.url).hash
             return "m:" + (if (h.isNotEmpty()) h else e.url)
@@ -299,7 +303,7 @@ object Enlaces {
         for (e in lista) {
             sb.append(campoCsv(e.tipo.etiqueta)).append(',').append(campoCsv(e.nombre)).append(',').append(campoCsv(e.origenNombre)).append(',')
                 .append(if (e.tamano >= 0) e.tamano.toString() else "").append(',').append(campoCsv(e.url)).append(',')
-                .append(campoCsv(pagina)).append("\r\n")
+                .append(campoCsv(e.origen.ifEmpty { pagina })).append("\r\n")
         }
         return sb.toString()
     }
@@ -364,7 +368,7 @@ object ListasEnlaces {
                     } catch (e: Exception) {
                         continue
                     }
-                    its.add(EnlaceEncontrado(x.optString("u"), tipo, x.optString("n"), x.optString("o"), x.optLong("s", -1L), x.optString("h"), x.optBoolean("e")))
+                    its.add(EnlaceEncontrado(x.optString("u"), tipo, x.optString("n"), x.optString("o"), x.optLong("s", -1L), x.optString("h"), x.optBoolean("e"), x.optString("p")))
                 }
                 listas.add(ListaEnlaces(o.optLong("id"), o.optString("n"), o.optString("f"), o.optLong("d"), its))
             }
@@ -381,7 +385,7 @@ object ListasEnlaces {
                 for (e in l.items) {
                     ia.put(
                         JSONObject().put("u", e.url).put("t", e.tipo.name).put("n", e.nombre).put("o", e.origenNombre)
-                            .put("s", e.tamano).put("h", e.host).put("e", e.externo)
+                            .put("s", e.tamano).put("h", e.host).put("e", e.externo).put("p", e.origen)
                     )
                 }
                 a.put(JSONObject().put("id", l.id).put("n", l.nombre).put("f", l.fuente).put("d", l.fecha).put("i", ia))
