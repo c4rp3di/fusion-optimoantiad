@@ -849,7 +849,8 @@ class MainActivity : Activity() {
             { modo, a, b -> reglaDevTools(modo, a, b) },
             { actual?.let { abrirModoLectura(it) } },
             { actual?.let { if (!it.privada) alternarPausaBloqueo(it) } },
-            { val q = actual; q != null && !q.privada && ajustes.bloquearAnuncios && !bloqueoPausadoEnPagina(q.url) }
+            { val q = actual; q != null && !q.privada && ajustes.bloquearAnuncios && !bloqueoPausadoEnPagina(q.url) },
+            { dominio, todos -> permitirDominioDevTools(dominio, todos) }
         )
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
@@ -4008,7 +4009,8 @@ class MainActivity : Activity() {
         val ocultar = ReglasUsuario.listaOcultar().filter { sitio == null || it.host == sitio }
         val estilos = ReglasUsuario.listaCss().filter { sitio == null || it.host == sitio }
         val dominios = if (sitio == null) ReglasUsuario.listaDominios() else emptyList()
-        if (ocultar.isEmpty() && estilos.isEmpty() && dominios.isEmpty()) {
+        val permisos = ReglasUsuario.listaPermisos().filter { sitio == null || it.sitio == sitio }
+        if (ocultar.isEmpty() && estilos.isEmpty() && dominios.isEmpty() && permisos.isEmpty()) {
             toast("Aún no has añadido reglas")
             return
         }
@@ -4016,6 +4018,7 @@ class MainActivity : Activity() {
         for (r in ocultar) etiquetas.add("Ocultar en " + r.host + ": " + r.sel)
         for (r in estilos) etiquetas.add("Estilo en " + r.host + ": " + r.nombre)
         for (dd in dominios) etiquetas.add("Bloquear dominio: $dd")
+        for (r in permisos) etiquetas.add("Permitir " + r.dominio + (if (r.sitio == ReglasUsuario.TODOS) " en todos los sitios" else " en " + r.sitio))
         val marcadas = BooleanArray(etiquetas.size)
         nuevoDialogo()
             .setTitle(if (sitio == null) "Reglas añadidas (marca para borrar)" else "Reglas de $sitio (marca para borrar)")
@@ -4025,6 +4028,7 @@ class MainActivity : Activity() {
                 for (i in ocultar.indices) if (marcadas[i]) { ReglasUsuario.quitarOcultar(ocultar[i]); borradas++ }
                 for (j in estilos.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarCss(estilos[j]); borradas++ }
                 for (k in dominios.indices) if (marcadas[ocultar.size + estilos.size + k]) { ReglasUsuario.quitarDominio(dominios[k]); borradas++ }
+                for (m in permisos.indices) if (marcadas[ocultar.size + estilos.size + dominios.size + m]) { ReglasUsuario.quitarPermiso(permisos[m]); borradas++ }
                 if (borradas > 0) {
                     reinstalarAnuncios()
                     toast("$borradas regla(s) borradas. Recarga las páginas abiertas")
@@ -4294,6 +4298,23 @@ class MainActivity : Activity() {
             mostrarAjustesLectura()
         }
         opciones("Lectura y voz", items)
+    }
+
+    // ---------------------------------------------------------------- excepciones de bloqueo (permitir dominios)
+
+    private fun hostDePagina(url: String): String {
+        if (url.isEmpty()) return ""
+        return (try { Uri.parse(url).host } catch (e: Exception) { null } ?: "").lowercase()
+    }
+
+    /** Permite [dominio] en el sitio de la pestaña activa (o en todos los sitios si [todos]). */
+    private fun permitirDominioDevTools(dominio: String, todos: Boolean): String {
+        val p = actual ?: return "No hay pestaña activa"
+        if (p.privada) return "En pestañas privadas no se guardan excepciones"
+        val sitio = if (todos) ReglasUsuario.TODOS else ReglasUsuario.clave(hostDePagina(p.url))
+        if (sitio.isEmpty()) return "Solo se guardan excepciones en páginas http/https"
+        if (!ReglasUsuario.agregarPermiso(sitio, dominio)) return "Esa excepción ya estaba guardada (o el dominio no es válido)"
+        return if (todos) "Permitido $dominio en todos los sitios. Recarga la página" else "Permitido $dominio en $sitio. Recarga la página"
     }
 
     // ---------------------------------------------------------------- reglas permanentes desde las herramientas de desarrollo
@@ -5048,7 +5069,7 @@ class MainActivity : Activity() {
                 }
             }
             if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame && !bloqueoPausadoEnPagina(p.url)) {
-                val respuesta = anuncios.interceptar(request)
+                val respuesta = anuncios.interceptar(request, hostDePagina(p.url))
                 if (respuesta != null) {
                     p.bloqueados.incrementAndGet()
                     p.dev.bloqueo(request.url.toString(), request.method ?: "GET")
