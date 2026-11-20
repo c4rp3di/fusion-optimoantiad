@@ -846,7 +846,8 @@ class MainActivity : Activity() {
             this, paleta, ajustes, agenteDev, contenedor,
             { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogo() },
             { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() },
-            { modo, a, b -> reglaDevTools(modo, a, b) }
+            { modo, a, b -> reglaDevTools(modo, a, b) },
+            { actual?.let { abrirModoLectura(it) } }
         )
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
@@ -3207,7 +3208,7 @@ class MainActivity : Activity() {
 
     private fun acercaDe() {
         nuevoDialogo()
-            .setTitle("Optimo 1.14.0")
+            .setTitle("Optimo 1.15.0")
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
@@ -4292,6 +4293,10 @@ class MainActivity : Activity() {
         val p = actual ?: return "No hay pestaña activa"
         val w = p.web ?: return "No hay página cargada"
         if (p.privada) return "En pestañas privadas no se guardan reglas"
+        if (modo == "bloquear") {
+            // Desde la Auditoría: bloquea un dominio de terceros en todas las páginas (AdBlock lo consulta en cada petición).
+            return if (ReglasUsuario.agregarDominio(a)) "Bloqueado: $a. Recarga la página para ver el efecto" else "No se pudo bloquear $a (ya estaba bloqueado o no es válido)"
+        }
         val host = (try { Uri.parse(w.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
         val sitio = ReglasUsuario.clave(host)
         if (sitio.isEmpty()) return "Solo se guardan reglas en páginas http/https"
