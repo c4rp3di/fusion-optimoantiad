@@ -60,14 +60,21 @@ class PanelDev(
     /** Guarda una regla permanente del sitio abierto: modo «ocultar» (a = selector), «estilo» (a = nombre, b = CSS) o «cssPropio» (a = CSS). Devuelve el mensaje para el usuario. */
     private val reglaSitio: (String, String, String) -> String,
     /** Abre el modo lectura en la pestaña activa (lo ofrece la Auditoría cuando la página pesa mucho). */
-    private val abrirLectura: () -> Unit = {}
+    private val abrirLectura: () -> Unit = {},
+    /** Pausa o reanuda el bloqueo de anuncios en el sitio abierto (lo ofrece el Resumen cuando algo falla y hay bloqueos). */
+    private val pausarBloqueoAqui: () -> Unit = {},
+    private val bloqueoActivoAqui: () -> Boolean = { true }
 ) {
     private val h = Handler(Looper.getMainLooper())
     private val raiz = LinearLayout(act)
     private val cuerpo = FrameLayout(act)
     private val barraTabs = LinearLayout(act)
-    private val nombresTabs = listOf("Consola", "Elementos", "Red", "Almacén", "Info", "Auditoría")
+    private val nombresTabs = listOf("Consola", "Elementos", "Red", "Almacén", "Info", "Auditoría", "Resumen")
     private val vistasTabs = ArrayList<TextView>()
+    /** Índice de pestaña (en [nombresTabs]) de cada botón de la barra, en el orden en que se muestran. */
+    private val tabsIdx = ArrayList<Int>()
+    private val TAB_RESUMEN = 6
+    private var abierto = false
     private var tab = 0
     private var grande = false
     private val pila = ArrayList<View>()
@@ -246,12 +253,7 @@ class PanelDev(
         cab.orientation = LinearLayout.HORIZONTAL
         cab.gravity = Gravity.CENTER_VERTICAL
         barraTabs.orientation = LinearLayout.HORIZONTAL
-        for (i in nombresTabs.indices) {
-            val t = boton(nombresTabs[i], 13f) { seleccionarTab(i) }
-            t.setPadding(dp(12), dp(8), dp(12), dp(8))
-            vistasTabs.add(t)
-            barraTabs.addView(t, lp(WRAP, dp(38)))
-        }
+        reconstruirTabs()
         val hs = HorizontalScrollView(act)
         hs.isHorizontalScrollBarEnabled = false
         hs.addView(barraTabs, FrameLayout.LayoutParams(WRAP, dp(38)))
@@ -267,10 +269,28 @@ class PanelDev(
         raiz.addView(cuerpo, lp(MATCH, 0, 1f))
     }
 
+    /** Modo sencillo: Resumen, Errores (la consola) y Red. Modo profesional: todas, con el Resumen al final. */
+    private fun reconstruirTabs() {
+        barraTabs.removeAllViews()
+        vistasTabs.clear()
+        tabsIdx.clear()
+        val sencillo = modoSencillo()
+        val orden = if (sencillo) listOf(TAB_RESUMEN, 0, 2) else listOf(0, 1, 2, 3, 4, 5, TAB_RESUMEN)
+        for (i in orden) {
+            val nombre = if (sencillo && i == 0) "Errores" else nombresTabs[i]
+            val t = boton(nombre, 13f) { seleccionarTab(i) }
+            t.setPadding(dp(12), dp(8), dp(12), dp(8))
+            vistasTabs.add(t)
+            tabsIdx.add(i)
+            barraTabs.addView(t, lp(WRAP, dp(38)))
+        }
+        estiloTabs()
+    }
+
     private fun estiloTabs() {
         for (i in vistasTabs.indices) {
             val t = vistasTabs[i]
-            val sel = i == tab
+            val sel = tabsIdx[i] == tab
             t.setTextColor(if (sel) paleta.acento else paleta.tenue)
             t.setTypeface(Typeface.DEFAULT, if (sel) Typeface.BOLD else Typeface.NORMAL)
         }
@@ -309,6 +329,13 @@ class PanelDev(
         visible = true
         raiz.visibility = View.VISIBLE
         ajustarAlto()
+        // En modo sencillo el panel se abre en el Resumen; si venías de una pestaña que ese modo no tiene, también.
+        if (!abierto) {
+            abierto = true
+            if (modoSencillo()) tab = TAB_RESUMEN
+        } else if (modoSencillo() && tab != TAB_RESUMEN && tab != 0 && tab != 2) {
+            tab = TAB_RESUMEN
+        }
         seleccionarTab(tab)
         listoAgente(web)
         h.removeCallbacks(sondeo)
@@ -359,6 +386,7 @@ class PanelDev(
         infoTitulo = ""
         informeAuditoria = ""
         vistaAud.olvidar()
+        vistaRes.olvidar()
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -382,6 +410,7 @@ class PanelDev(
         infoTitulo = ""
         informeAuditoria = ""
         vistaAud.olvidar()
+        vistaRes.olvidar()
         if (!visible) return
         cerrarPila()
         arbol.clear()
@@ -405,6 +434,7 @@ class PanelDev(
             2 -> construirRed()
             3 -> construirAlmacen()
             5 -> vistaAud.construir()
+            TAB_RESUMEN -> vistaRes.construir()
             else -> construirInfo()
         }
         cuerpo.addView(v, FrameLayout.LayoutParams(MATCH, MATCH))
@@ -419,6 +449,7 @@ class PanelDev(
             2 -> refrescarRed()
             3 -> cargarAlmacen()
             5 -> vistaAud.cargar()
+            TAB_RESUMEN -> vistaRes.cargar()
             else -> cargarInfo()
         }
     }
@@ -429,8 +460,9 @@ class PanelDev(
             val web = webActual()
             val p = pestanaActual()
             if (web != null && p != null && pila.isEmpty()) {
-                if (tab == 0) sondearConsola(web, p.dev)
-                if (tab == 2) sondearRed(web, p.dev)
+                if (tab == 0 || tab == TAB_RESUMEN) sondearConsola(web, p.dev)
+                if (tab == 2 || tab == TAB_RESUMEN) sondearRed(web, p.dev)
+                if (tab == TAB_RESUMEN) vistaRes.refrescar()
             }
             h.postDelayed(this, 900)
         }
@@ -1879,6 +1911,69 @@ class PanelDev(
         )
     )
 
+    // ---------------------------------------------------------------- RESUMEN (modo sencillo)
+
+    private fun modoSencillo(): Boolean = ajustes.devSencillo
+
+    /** Salta a una pestaña desde el Resumen; si el modo sencillo no la tiene, pasa antes al profesional. */
+    private fun irATab(i: Int) {
+        if (modoSencillo() && i != TAB_RESUMEN && i != 0 && i != 2) {
+            ajustes.devSencillo = false
+            reconstruirTabs()
+        }
+        seleccionarTab(i)
+    }
+
+    private fun cambiarModo() {
+        ajustes.devSencillo = !ajustes.devSencillo
+        avisar(if (ajustes.devSencillo) "Modo sencillo" else "Modo profesional")
+        reconstruirTabs()
+        seleccionarTab(TAB_RESUMEN)
+    }
+
+    /** Lo que ha visto el panel de la página abierta, agrupado para la vista sencilla. */
+    private fun datosResumen(): DatosResumen? {
+        val p = pestanaActual() ?: return null
+        val d = p.dev
+        val todas = ArrayList<EntradaConsola>(d.copiaConsola())
+        todas.addAll(d.agenteConsola)
+        val errores = LinkedHashMap<String, Int>()
+        for (e in todas) {
+            if (e.nivel != "error") continue
+            val k = DevFormato.cortar(e.texto.replace('\n', ' ').trim(), 200)
+            errores[k] = (errores[k] ?: 0) + 1
+        }
+        val red = filasRed(d)
+        val fallos = ArrayList<FalloRed>()
+        var bloqueadas = 0
+        for (e in red) {
+            if (e.bloqueado) bloqueadas++
+            else if (e.estado >= 400 || e.err != null) fallos.add(FalloRed(e.url, e.estado, e.err))
+        }
+        return DatosResumen(
+            DevFormato.hostUrl(p.url), errores.entries.map { Pair(it.key, it.value) }, fallos,
+            red.size, bloqueadas, d.bloqueadosPorHost()
+        )
+    }
+
+    private val vistaRes = VistaResumen(
+        act, paleta,
+        GanchosResumen(
+            datos = { datosResumen() },
+            consulta = { expr, cb -> consultaObj(expr, cb) },
+            irA = { i -> irATab(i) },
+            pausarBloqueo = { pausarBloqueoAqui() },
+            bloqueoActivo = { bloqueoActivoAqui() },
+            capturaDesdeInicio = { ajustes.devCaptura },
+            activarCaptura = { if (!ajustes.devCaptura) alternarCaptura() },
+            esSencillo = { modoSencillo() },
+            cambiarModo = { cambiarModo() },
+            copiar = { t -> copiar(t) },
+            avisar = { t -> avisar(t) },
+            diagnostico = { diagnosticoCompleto() }
+        )
+    )
+
     /** Salta a la pestaña Elementos y selecciona el nodo [id] (abre el camino hasta él). */
     private fun irANodo(id: Int) {
         seleccionado = id
@@ -1957,7 +2052,7 @@ class PanelDev(
         ajustes.devCaptura = !ajustes.devCaptura
         alCambiarCaptura()
         avisar(if (ajustes.devCaptura) "Activada: recarga la página para aplicarla" else "Desactivada")
-        seleccionarTab(4)
+        seleccionarTab(if (tab == TAB_RESUMEN) TAB_RESUMEN else 4)
     }
 
     private fun cargarInfo() {
