@@ -174,6 +174,49 @@ class Ajustes(contexto: Context) {
             sp.edit().putString("enlaces_propio", v.take(300)).apply()
         }
 
+    /** Rastreo: saltos desde la página de partida (0 = sin límite; frenan solo los topes). */
+    var rastroProf: Int
+        get() = sp.getInt("rastro_prof", 2).coerceIn(0, 50)
+        set(v) {
+            sp.edit().putInt("rastro_prof", v.coerceIn(0, 50)).apply()
+        }
+
+    var rastroPaginas: Int
+        get() = sp.getInt("rastro_paginas", 200).coerceIn(1, 2000)
+        set(v) {
+            sp.edit().putInt("rastro_paginas", v.coerceIn(1, 2000)).apply()
+        }
+
+    var rastroMin: Int
+        get() = sp.getInt("rastro_min", 10).coerceIn(1, 120)
+        set(v) {
+            sp.edit().putInt("rastro_min", v.coerceIn(1, 120)).apply()
+        }
+
+    var rastroPausa: Int
+        get() = sp.getInt("rastro_pausa", 600).coerceIn(0, 10000)
+        set(v) {
+            sp.edit().putInt("rastro_pausa", v.coerceIn(0, 10000)).apply()
+        }
+
+    var rastroOtros: Boolean
+        get() = sp.getBoolean("rastro_otros", false)
+        set(v) {
+            sp.edit().putBoolean("rastro_otros", v).apply()
+        }
+
+    var rastroCookies: Boolean
+        get() = sp.getBoolean("rastro_cookies", false)
+        set(v) {
+            sp.edit().putBoolean("rastro_cookies", v).apply()
+        }
+
+    var rastroRobots: Boolean
+        get() = sp.getBoolean("rastro_robots", true)
+        set(v) {
+            sp.edit().putBoolean("rastro_robots", v).apply()
+        }
+
     /** Rastreador de enlaces: tipos que se buscan, un bit por [TipoEnlace.ordinal]. Por defecto todos menos imágenes. */
     var enlacesTipos: Int
         get() = sp.getInt("enlaces_tipos", 511)
@@ -265,7 +308,8 @@ class Ajustes(contexto: Context) {
      */
     private val tiposCopia: Map<String, String> = mapOf(
         "anuncios" to "b", "cookies3" to "b", "dev_captura" to "b", "guardar_historial" to "b", "guardar_sesion" to "b",
-        "enlaces_otros" to "b", "enlaces_tipos" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
+        "enlaces_otros" to "b", "enlaces_tipos" to "i", "rastro_otros" to "b", "rastro_cookies" to "b", "rastro_robots" to "b",
+        "rastro_prof" to "i", "rastro_paginas" to "i", "rastro_min" to "i", "rastro_pausa" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
         "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
