@@ -11,11 +11,15 @@ class ReglaOcultar(val host: String, val sel: String)
 /** Regla de estilo: en el sitio [host] (y subdominios) se aplica la hoja CSS [css]. [nombre] es la etiqueta que ve el usuario. */
 class ReglaCss(val host: String, val nombre: String, val css: String)
 
+/** Excepción de bloqueo: en las páginas de [sitio] («*» = todas) se deja pasar [dominio] (y sus subdominios). */
+class ReglaPermiso(val sitio: String, val dominio: String)
+
 /**
  * Reglas que añade el usuario (al mantener pulsado un anuncio o desde «Personalizar este sitio»). Se guardan en un JSON pequeño.
  *  - Ocultar elemento: selector CSS por sitio.
  *  - Estilo: CSS por sitio (apariencia de un elemento elegido o CSS propio del sitio).
  *  - Bloquear dominio: vale para todas las webs y gana a las excepciones de las listas.
+ *  - Permitir dominio: excepción por sitio (o para todos) que gana a todo lo demás en la red: ni se bloquea ni se sustituye.
  * Las lecturas (desde hilos de red) usan instantáneas inmutables; las escrituras van en el hilo principal.
  */
 object ReglasUsuario {
@@ -29,6 +33,9 @@ object ReglasUsuario {
     @Volatile
     private var dominios: Set<String> = emptySet()
 
+    @Volatile
+    private var permisos: List<ReglaPermiso> = emptyList()
+
     private var archivo: File? = null
 
     fun iniciar(c: Context) {
@@ -36,7 +43,7 @@ object ReglasUsuario {
         cargar()
     }
 
-    val total: Int get() = ocultar.size + estilos.size + dominios.size
+    val total: Int get() = ocultar.size + estilos.size + dominios.size + permisos.size
 
     fun listaOcultar(): List<ReglaOcultar> = ocultar
 
@@ -45,7 +52,41 @@ object ReglasUsuario {
     fun listaCss(): List<ReglaCss> = estilos
 
     /** Reglas (ocultar + estilo) guardadas exactamente para el sitio [host] (ya normalizado con [clave]). */
-    fun totalDe(host: String): Int = ocultar.count { it.host == host } + estilos.count { it.host == host }
+    fun totalDe(host: String): Int = ocultar.count { it.host == host } + estilos.count { it.host == host } + permisos.count { it.sitio == host }
+
+    /** «Sitio» de las excepciones que valen para todas las páginas. */
+    const val TODOS = "*"
+
+    fun listaPermisos(): List<ReglaPermiso> = permisos
+
+    /** Permite [dominio] en las páginas de [sitio] (o en todas con [TODOS]). Devuelve false si no es válido o ya estaba. */
+    fun agregarPermiso(sitio: String, dominio: String): Boolean {
+        val s = if (sitio == TODOS) TODOS else clave(sitio)
+        val d = UtilDominio.normalizar(dominio.removePrefix("www.")) ?: return false
+        if (s.isEmpty()) return false
+        if (permisos.any { it.sitio == s && it.dominio == d }) return false
+        permisos = permisos + ReglaPermiso(s, d)
+        guardar()
+        return true
+    }
+
+    fun quitarPermiso(r: ReglaPermiso) {
+        permisos = permisos.filter { it !== r }
+        guardar()
+    }
+
+    /** ¿Está permitido cargar [host] estando en la página [paginaHost]? Se llama por cada petición, desde hilos de red. */
+    fun permitido(paginaHost: String, host: String): Boolean {
+        val ps = permisos
+        if (ps.isEmpty()) return false
+        val pg = paginaHost.lowercase()
+        val h = host.lowercase()
+        for (r in ps) {
+            if (h != r.dominio && !h.endsWith("." + r.dominio)) continue
+            if (r.sitio == TODOS || pg == r.sitio || pg.endsWith("." + r.sitio)) return true
+        }
+        return false
+    }
 
     /** Nombre de la hoja CSS propia de un sitio (la que se edita a mano desde «Personalizar este sitio»). */
     const val NOMBRE_CSS_PROPIO = "CSS propio"
@@ -162,9 +203,17 @@ object ReglasUsuario {
             }
             val d = HashSet<String>()
             j.optJSONArray("dominios")?.let { for (i in 0 until it.length()) d.add(it.getString(i)) }
+            val pm = ArrayList<ReglaPermiso>()
+            j.optJSONArray("permisos")?.let {
+                for (i in 0 until it.length()) {
+                    val x = it.getJSONObject(i)
+                    pm.add(ReglaPermiso(x.getString("sitio"), x.getString("dominio")))
+                }
+            }
             ocultar = o
             estilos = e
             dominios = d
+            permisos = pm
         } catch (e: Exception) {
             // Archivo dañado: se empieza sin reglas.
         }
@@ -182,6 +231,9 @@ object ReglasUsuario {
         val d = JSONArray()
         for (x in dominios.sorted()) d.put(x)
         j.put("dominios", d)
+        val pm = JSONArray()
+        for (r in permisos) pm.put(JSONObject().put("sitio", r.sitio).put("dominio", r.dominio))
+        j.put("permisos", pm)
         return j
     }
 
@@ -209,6 +261,13 @@ object ReglasUsuario {
                 if (agregarDominio(d.optString(i))) n++
             }
         }
+        val pm = j.optJSONArray("permisos")
+        if (pm != null) {
+            for (i in 0 until minOf(pm.length(), 300)) {
+                val x = pm.optJSONObject(i) ?: continue
+                if (agregarPermiso(x.optString("sitio"), x.optString("dominio"))) n++
+            }
+        }
         return n
     }
 
@@ -225,6 +284,9 @@ object ReglasUsuario {
             val d = JSONArray()
             for (x in dominios.sorted()) d.put(x)
             j.put("dominios", d)
+            val pm = JSONArray()
+            for (r in permisos) pm.put(JSONObject().put("sitio", r.sitio).put("dominio", r.dominio))
+            j.put("permisos", pm)
             AlmacenSeguro.escribirTexto(f, j.toString())
         } catch (e: Exception) {
             // Sin espacio o sin permiso: se pierde solo esta escritura.
