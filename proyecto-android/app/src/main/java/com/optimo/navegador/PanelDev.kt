@@ -63,7 +63,9 @@ class PanelDev(
     private val abrirLectura: () -> Unit = {},
     /** Pausa o reanuda el bloqueo de anuncios en el sitio abierto (lo ofrece el Resumen cuando algo falla y hay bloqueos). */
     private val pausarBloqueoAqui: () -> Unit = {},
-    private val bloqueoActivoAqui: () -> Boolean = { true }
+    private val bloqueoActivoAqui: () -> Boolean = { true },
+    /** Permite un dominio bloqueado: en el sitio abierto o en todos (segundo parámetro). Devuelve el mensaje para el usuario. */
+    private val permitirDominio: (String, Boolean) -> String = { _, _ -> "" }
 ) {
     private val h = Handler(Looper.getMainLooper())
     private val raiz = LinearLayout(act)
@@ -1662,6 +1664,7 @@ class PanelDev(
         if (err != null) base.append("Error: ").append(err).append("\n")
         val acciones = ArrayList<Pair<String, () -> Unit>>()
         acciones.add("URL" to { copiar(e.url); avisar("URL copiada") })
+        if (e.bloqueado) acciones.add("Permitir" to { preguntarPermitir(DevFormato.hostUrl(e.url)) })
 
         if (e.sintetica) {
             base.append("\nSolo se conoce lo que ve la app: el agente no vio esta petición (p. ej. de un iframe o bloqueada antes de salir).\n")
@@ -1907,9 +1910,40 @@ class PanelDev(
             copiar = { t -> copiar(t) },
             avisar = { t -> avisar(t) },
             dialogo = { dialogo() },
-            alInforme = { t -> informeAuditoria = t }
+            alInforme = { t -> informeAuditoria = t },
+            permitir = { host -> preguntarPermitir(host) }
         )
     )
+
+    // ---------------------------------------------------------------- permitir dominios bloqueados
+
+    /** Pregunta cómo permitir [host]: solo en el sitio abierto o en todos. */
+    private fun preguntarPermitir(host: String) {
+        if (host.isEmpty()) return
+        dialogo().setTitle("Permitir " + host)
+            .setMessage(
+                "Se dejará pasar sin bloquear ni sustituir (también sus subdominios). Puede traer anuncios o rastreadores de vuelta. " +
+                    "Recarga la página para ver el efecto. Lo encuentras luego en «Reglas de este sitio»."
+            )
+            .setPositiveButton("En este sitio") { _, _ -> avisar(permitirDominio(host, false)) }
+            .setNeutralButton("En todos los sitios") { _, _ -> avisar(permitirDominio(host, true)) }
+            .setNegativeButton("Cancelar", null)
+            .show()
+    }
+
+    /** Lista los dominios que Optimo ha bloqueado en la página abierta para elegir cuál permitir. */
+    private fun revisarBloqueos() {
+        val lista = pestanaActual()?.dev?.bloqueadosPorHost() ?: emptyList()
+        if (lista.isEmpty()) {
+            avisar("No hay dominios bloqueados en esta página")
+            return
+        }
+        val nombres = Array(lista.size) { i -> lista[i].first + "  ×" + lista[i].second }
+        dialogo().setTitle("Bloqueados en esta página: toca uno para permitirlo")
+            .setItems(nombres) { _, i -> preguntarPermitir(lista[i].first) }
+            .setNegativeButton("Cerrar", null)
+            .show()
+    }
 
     // ---------------------------------------------------------------- RESUMEN (modo sencillo)
 
@@ -1963,6 +1997,7 @@ class PanelDev(
             consulta = { expr, cb -> consultaObj(expr, cb) },
             irA = { i -> irATab(i) },
             pausarBloqueo = { pausarBloqueoAqui() },
+            revisarBloqueos = { revisarBloqueos() },
             bloqueoActivo = { bloqueoActivoAqui() },
             capturaDesdeInicio = { ajustes.devCaptura },
             activarCaptura = { if (!ajustes.devCaptura) alternarCaptura() },
