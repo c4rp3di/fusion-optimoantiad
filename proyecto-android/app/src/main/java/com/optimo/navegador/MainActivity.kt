@@ -1027,6 +1027,13 @@ class MainActivity : Activity() {
         if (!p.privada && !p.inicio && p.url.startsWith("http")) {
             items.add(Pair("🛡 Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) })
         }
+        if (!p.privada && !p.inicio && !p.sinConexion && p.url.startsWith("http")) {
+            if (ReglasUsuario.bloqueaDominio(Omnibox.hostDe(p.url).lowercase())) {
+                items.add(Pair("✅ Desbloquear este sitio…") { desbloquearSitio(p) })
+            } else {
+                items.add(Pair("🚫 Bloquear este sitio…") { bloquearSitio(p) })
+            }
+        }
         if (!p.inicio && p.url.isNotEmpty()) {
             items.add(Pair("Copiar dirección") { copiar(p.url) })
             items.add(Pair("Compartir página") { compartir(p.url) })
@@ -2161,6 +2168,7 @@ class MainActivity : Activity() {
         fun add(t: String, a: () -> Unit) {
             items.add(Pair(t, a))
         }
+        add("Mis dominios bloqueados (" + ReglasUsuario.listaDominios().size + ")…") { mostrarDominiosPropios() }
         add("Elegir listas…") { elegirListas() }
         add("Añadir lista por URL (https)…") { anadirLista() }
         add("Actualizar ahora") { actualizarListas(false) }
@@ -2891,6 +2899,147 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancelar") { _, _ -> volver() }
             .setOnCancelListener { volver() }
+            .show()
+    }
+
+    // ---------------------------------------------------------------- bloquear un sitio a mano (candado) y «Mis dominios bloqueados»
+
+    /** Dos etiquetas del tipo co.uk, com.ar…: sufijos públicos que no se ofrecen como «dominio padre» a bloquear. */
+    private fun pareceSufijoPublico(d: String): Boolean {
+        val i = d.indexOf('.')
+        if (i <= 0 || d.indexOf('.', i + 1) >= 0) return false
+        val a = d.substring(0, i)
+        val b = d.substring(i + 1)
+        val comunes = setOf("co", "com", "org", "net", "gov", "edu", "ac", "or", "ne", "go")
+        return b.length == 2 && comunes.contains(a)
+    }
+
+    /** Lo que se puede bloquear para [host]: él mismo (sin «www.») y sus dominios padre, hasta dos etiquetas y sin sufijos públicos. */
+    private fun candidatosBloqueo(host: String): List<String> {
+        val res = ArrayList<String>()
+        var h = host.lowercase().trim('.')
+        if (h.startsWith("www.")) h = h.substring(4)
+        if (UtilDominio.normalizar(h) == null) return res
+        var d = h
+        res.add(d)
+        while (d.contains('.')) {
+            d = d.substring(d.indexOf('.') + 1)
+            if (d.contains('.') && !pareceSufijoPublico(d)) res.add(d)
+        }
+        return res
+    }
+
+    /** Candado › «Bloquear este sitio…»: elige qué bloquear (el sitio o un dominio padre) y sale de la página. */
+    private fun bloquearSitio(p: Pestana) {
+        val candidatos = candidatosBloqueo(Omnibox.hostDe(p.url))
+        if (candidatos.isEmpty()) {
+            toast("No se puede bloquear esta dirección")
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (d in candidatos) {
+            val etiqueta = if (d == candidatos[0]) "Este sitio: " + d else "Todo " + d + " (incluye otros subdominios)"
+            items.add(Pair<String, () -> Unit>(etiqueta, { aplicarBloqueoSitio(p, d) }))
+        }
+        items.add(Pair<String, () -> Unit>("Cancelar", { }))
+        opciones("Bloquear y salir de esta página", items)
+    }
+
+    private fun aplicarBloqueoSitio(p: Pestana, d: String) {
+        if (!ReglasUsuario.agregarDominio(d)) {
+            toast("No se pudo bloquear " + d + " (ya estaba bloqueado o no es válido)")
+            return
+        }
+        val aviso = if (ajustes.bloquearAnuncios) "" else " El bloqueo de anuncios está desactivado: actívalo para que surta efecto."
+        toast("Bloqueado: " + d + ". Se revierte en Listas de bloqueo › Mis dominios bloqueados." + aviso)
+        // La página principal nunca se bloquea: si era una página de anuncios, se sale de ella.
+        val w = p.web
+        if (p.esEmergente) {
+            cerrarEmergente(p)
+        } else if (w != null && w.canGoBack()) {
+            w.goBack()
+        } else if (pestanas.size > 1) {
+            cerrarPestana(p)
+        } else {
+            mostrarInicio(p)
+        }
+    }
+
+    /** Candado › «Desbloquear este sitio…»: quita de tus dominios los que cubren la página abierta. */
+    private fun desbloquearSitio(p: Pestana) {
+        val host = Omnibox.hostDe(p.url).lowercase()
+        val coinciden = ReglasUsuario.listaDominios().filter { d -> host == d || host.endsWith("." + d) }
+        if (coinciden.isEmpty()) {
+            toast("Este sitio no está en tus dominios bloqueados")
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (d in coinciden) {
+            items.add(Pair<String, () -> Unit>("Desbloquear " + d, {
+                ReglasUsuario.quitarDominio(d)
+                toast("Desbloqueado: " + d + ". Recarga la página para ver el efecto")
+            }))
+        }
+        opciones("Desbloquear este sitio", items)
+    }
+
+    /** Listas de bloqueo › «Mis dominios bloqueados»: los que has bloqueado tú, para desbloquearlos o añadir más. */
+    private fun mostrarDominiosPropios() {
+        val lista = ReglasUsuario.listaDominios()
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (d in lista) {
+            items.add(Pair<String, () -> Unit>("🚫 " + d, { confirmarDesbloqueo(d) }))
+        }
+        items.add(Pair<String, () -> Unit>("➕ Añadir dominio…", { anadirDominioPropio() }))
+        if (lista.isNotEmpty()) items.add(Pair<String, () -> Unit>("Desbloquear todos…", { confirmarDesbloquearTodos() }))
+        val pie = if (lista.isEmpty()) "\nAún no has bloqueado ninguno" else "\nToca uno para desbloquearlo"
+        opciones("Mis dominios bloqueados (" + lista.size + ")" + pie, items)
+    }
+
+    private fun confirmarDesbloqueo(d: String) {
+        nuevoDialogo()
+            .setTitle("Desbloquear " + d)
+            .setMessage("Volverá a poder cargarse, salvo que lo bloquee una de las listas activas.")
+            .setPositiveButton("Desbloquear") { _, _ ->
+                ReglasUsuario.quitarDominio(d)
+                toast("Desbloqueado: " + d)
+                mostrarDominiosPropios()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
+            .setOnCancelListener { mostrarDominiosPropios() }
+            .show()
+    }
+
+    private fun anadirDominioPropio() {
+        val campo = android.widget.EditText(this)
+        campo.hint = "ejemplo.com"
+        campo.setSingleLine(true)
+        nuevoDialogo()
+            .setTitle("Bloquear un dominio")
+            .setView(campo)
+            .setPositiveButton("Bloquear") { _, _ ->
+                val n = UtilDominio.normalizar(campo.text.toString())?.removePrefix("www.")
+                if (n != null && ReglasUsuario.agregarDominio(n)) toast("Bloqueado: " + n)
+                else toast("Dominio no válido o ya estaba bloqueado")
+                mostrarDominiosPropios()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
+            .setOnCancelListener { mostrarDominiosPropios() }
+            .show()
+    }
+
+    private fun confirmarDesbloquearTodos() {
+        val n = ReglasUsuario.listaDominios().size
+        nuevoDialogo()
+            .setTitle("Desbloquear todos")
+            .setMessage("Se quitarán tus " + n + " dominios bloqueados. Las reglas de ocultar elementos y de estilo no cambian.")
+            .setPositiveButton("Desbloquear") { _, _ ->
+                for (d in ReglasUsuario.listaDominios()) ReglasUsuario.quitarDominio(d)
+                toast("Dominios desbloqueados")
+                mostrarDominiosPropios()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
+            .setOnCancelListener { mostrarDominiosPropios() }
             .show()
     }
 
