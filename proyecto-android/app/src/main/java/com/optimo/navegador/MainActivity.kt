@@ -171,9 +171,6 @@ class MainActivity : Activity() {
     /** Hosts a los que el usuario confirmó entrar por http (solo hasta cerrar la app). */
     private val httpPermitido = HashSet<String>()
 
-    /** Equipos de la red local con certificado no válido a los que el usuario confirmó continuar. */
-    private val sslPermitido = HashSet<String>()
-
     /** El WebView del sistema admite perfiles separados (necesario para aislar las pestañas privadas). */
     private val perfilesOk: Boolean by lazy {
         try { WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE) } catch (e: Throwable) { false }
@@ -227,8 +224,10 @@ class MainActivity : Activity() {
         PaginasGuardadas.iniciar(this)
         ListasEnlaces.iniciar(this)
         ListasManager.iniciar(this, ajustes)
+        ExcepcionesSsl.iniciar(this)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
+        aplicarRetencionHistorial()
         if (ajustes.salidaPendiente) limpiarAlSalir()
         uaEscritorio = calcularUaEscritorio()
         construirUi()
@@ -264,6 +263,8 @@ class MainActivity : Activity() {
         super.onStart()
         enPantalla = true
         if (ajustes.salidaPendiente) ajustes.salidaPendiente = false
+        aplicarRetencionHistorial()
+        if (ExcepcionesSsl.limpiarCaducadas()) olvidarSslWebView()
     }
 
     override fun onStop() {
@@ -548,7 +549,11 @@ class MainActivity : Activity() {
 
     override fun onDestroy() {
         rastreador?.parar("descartado")
-        if (isFinishing) limpiarAlSalir()
+        if (isFinishing) {
+            limpiarAlSalir()
+            ExcepcionesSsl.olvidarSesion()
+            olvidarSslWebView()
+        }
         lector.cerrar()
         ServicioSegundoPlano.manejador = null
         quitarEscuchaAudio()
@@ -944,8 +949,14 @@ class MainActivity : Activity() {
             candado.text = "📄"
             candado.setTextColor(paleta.tenue)
         } else if (p.url.startsWith("https://")) {
-            candado.text = "🔒"
-            candado.setTextColor(paleta.seguro)
+            if (ExcepcionesSsl.hayParaSitio(ExcepcionesSsl.clave(p.url), p.privada)) {
+                // Cifrada, pero con un certificado no válido que el usuario autorizó: no es un candado verde.
+                candado.text = "⚠"
+                candado.setTextColor(paleta.advertencia)
+            } else {
+                candado.text = "🔒"
+                candado.setTextColor(paleta.seguro)
+            }
         } else if (p.url.startsWith("http://")) {
             candado.text = "⚠"
             candado.setTextColor(paleta.advertencia)
@@ -1000,6 +1011,8 @@ class MainActivity : Activity() {
             p.sinConexion -> "Página guardada (sin conexión)"
             p.privada -> "Pestaña privada"
             p.inicio -> "Página de inicio de Optimo"
+            p.url.startsWith("https://") && ExcepcionesSsl.hayParaSitio(ExcepcionesSsl.clave(p.url), p.privada) ->
+                "Conexión cifrada, pero con un certificado no válido que autorizaste"
             p.url.startsWith("https://") -> "Conexión segura (HTTPS)"
             p.url.startsWith("http://") -> "Conexión sin cifrar (HTTP)"
             else -> "Sin conexión"
@@ -1008,6 +1021,9 @@ class MainActivity : Activity() {
         items.add(Pair(if (p.silenciada) "🔊 Activar el sonido de esta pestaña" else "🔇 Silenciar esta pestaña") {
             alternarSilencio(p)
         })
+        if (!p.sinConexion && !p.inicio && p.url.startsWith("https://")) {
+            items.add(Pair("🔒 Certificado de la conexión…") { mostrarCertificado(p) })
+        }
         if (!p.privada && !p.inicio && p.url.startsWith("http")) {
             items.add(Pair("🛡 Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) })
         }
@@ -1016,6 +1032,56 @@ class MainActivity : Activity() {
             items.add(Pair("Compartir página") { compartir(p.url) })
         }
         opciones(estado + (if (!p.inicio && p.url.isNotEmpty()) "\n" + Omnibox.hostDe(p.url) else ""), items)
+    }
+
+    private fun nombreDn(d: android.net.http.SslCertificate.DName?): String {
+        if (d == null) return "—"
+        val cn = d.cName ?: ""
+        val o = d.oName ?: ""
+        return when {
+            cn.isNotEmpty() && o.isNotEmpty() && cn != o -> cn + " (" + o + ")"
+            cn.isNotEmpty() -> cn
+            o.isNotEmpty() -> o
+            else -> "—"
+        }
+    }
+
+    private fun fechaCert(d: java.util.Date?): String =
+        if (d == null) "—" else java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault()).format(d)
+
+    /** Certificado de la conexión de la página abierta (lo que expone el WebView) y, si existe, la autorización que diste. */
+    private fun mostrarCertificado(p: Pestana) {
+        val sitio = ExcepcionesSsl.clave(p.url)
+        val c: android.net.http.SslCertificate? = try {
+            p.web?.certificate
+        } catch (e: Exception) {
+            null
+        }
+        val sb = StringBuilder()
+        sb.append(Omnibox.hostDe(p.url)).append("\n\n")
+        var huella: String? = null
+        if (c == null) {
+            sb.append("Optimo no ha recibido el certificado de esta página (puede venir de la caché o de una página guardada).")
+        } else {
+            huella = Certificados.huella(c)
+            sb.append("Emitido para: ").append(nombreDn(c.issuedTo)).append("\n")
+            sb.append("Emitido por: ").append(nombreDn(c.issuedBy)).append("\n")
+            sb.append("Válido desde: ").append(fechaCert(c.validNotBeforeDate)).append("\n")
+            sb.append("Válido hasta: ").append(fechaCert(c.validNotAfterDate)).append("\n")
+            sb.append("\nHuella SHA-256:\n").append(huella ?: "no disponible")
+        }
+        val h = huella
+        val exc = if (h == null) null else ExcepcionesSsl.todas().firstOrNull { e -> e.sitio == sitio && e.huella == h }
+        if (exc != null) {
+            sb.append("\n\n⚠ Autorizaste este certificado a pesar de: ").append(Certificados.etiqueta(exc.motivos))
+                .append(" (").append(Certificados.vigencia(exc)).append(").")
+        } else if (p.privada && ExcepcionesSsl.hayParaSitio(sitio, true)) {
+            sb.append("\n\n⚠ Autorizaste continuar con un certificado no válido en esta sesión privada.")
+        }
+        sb.append("\n\nEl cifrado solo protege la conexión: no garantiza que el sitio sea de confianza.")
+        val b = nuevoDialogo().setTitle("Certificado").setMessage(sb.toString()).setPositiveButton("Cerrar", null)
+        if (h != null) b.setNeutralButton("Copiar huella") { _, _ -> copiar(h) }
+        b.show()
     }
 
     private fun actualizarProgreso() {
@@ -1217,6 +1283,7 @@ class MainActivity : Activity() {
 
     /** Borra cookies, almacenamiento y caché de las pestañas privadas (el perfil entero). No hace nada si sigue en uso. */
     private fun borrarPerfilPrivado() {
+        ExcepcionesSsl.olvidarPrivadas()
         if (!perfilesOk) return
         try {
             ProfileStore.getInstance().deleteProfile(PERFIL_PRIVADO)
@@ -2720,6 +2787,184 @@ class MainActivity : Activity() {
         mostrarPrivacidad()
     }
 
+    // ---------------------------------------------------------------- retención y borrado del historial por rango
+
+    private val etiquetasRetencion = arrayOf("Siempre (sin límite)", "7 días", "30 días", "90 días")
+    private val diasRetencion = intArrayOf(0, 7, 30, 90)
+
+    private fun etiquetaRetencion(d: Int): String {
+        val i = diasRetencion.indexOf(d)
+        return if (i >= 0) etiquetasRetencion[i] else d.toString() + " días"
+    }
+
+    /** Borra del historial lo anterior al plazo elegido en «Conservar historial». Se llama al abrir y al volver a Optimo. */
+    private fun aplicarRetencionHistorial() {
+        val d = ajustes.retencionHistorial
+        if (d <= 0) return
+        historial.quitarAnterioresA(System.currentTimeMillis() - d * 86400000L)
+    }
+
+    private fun elegirRetencionHistorial() {
+        val actual = maxOf(diasRetencion.indexOf(ajustes.retencionHistorial), 0)
+        nuevoDialogo()
+            .setTitle("Conservar historial")
+            .setSingleChoiceItems(etiquetasRetencion, actual) { d, i ->
+                d.dismiss()
+                cambiarRetencion(diasRetencion[i])
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
+            .setOnCancelListener { mostrarPrivacidad() }
+            .show()
+    }
+
+    private fun cambiarRetencion(dias: Int) {
+        if (dias <= 0) {
+            ajustes.retencionHistorial = 0
+            mostrarPrivacidad()
+            return
+        }
+        val n = historial.contarAnterioresA(System.currentTimeMillis() - dias * 86400000L)
+        if (n == 0) {
+            ajustes.retencionHistorial = dias
+            mostrarPrivacidad()
+            return
+        }
+        nuevoDialogo()
+            .setTitle("Conservar " + etiquetaRetencion(dias))
+            .setMessage("Se borrarán ahora " + n + " páginas más antiguas, y a partir de ahora se irán borrando las que superen ese plazo. Los marcadores se conservan.")
+            .setPositiveButton("Aplicar") { _, _ ->
+                ajustes.retencionHistorial = dias
+                aplicarRetencionHistorial()
+                toast("Historial limpiado")
+                mostrarPrivacidad()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
+            .setOnCancelListener { mostrarPrivacidad() }
+            .show()
+    }
+
+    private val etiquetasRango = arrayOf("Última hora", "Hoy", "Últimos 7 días", "Últimos 30 días", "Todo")
+
+    /** Instante (ms) desde el que se borra para cada opción de [etiquetasRango]; 0 = todo. */
+    private fun inicioRango(i: Int): Long {
+        val ahora = System.currentTimeMillis()
+        return when (i) {
+            0 -> ahora - 3600000L
+            1 -> {
+                val c = java.util.Calendar.getInstance()
+                c.set(java.util.Calendar.HOUR_OF_DAY, 0)
+                c.set(java.util.Calendar.MINUTE, 0)
+                c.set(java.util.Calendar.SECOND, 0)
+                c.set(java.util.Calendar.MILLISECOND, 0)
+                c.timeInMillis
+            }
+            2 -> ahora - 7 * 86400000L
+            3 -> ahora - 30 * 86400000L
+            else -> 0L
+        }
+    }
+
+    /** Borrar del historial lo visitado en la última hora, hoy, 7 o 30 días, o todo. [volver] se ejecuta al terminar o cancelar. */
+    private fun elegirRangoBorrado(volver: () -> Unit) {
+        nuevoDialogo()
+            .setTitle("Borrar historial")
+            .setItems(etiquetasRango) { _, i ->
+                val desde = inicioRango(i)
+                val n = historial.contarDesde(desde)
+                if (n == 0) {
+                    toast("No hay páginas en ese rango")
+                    volver()
+                } else {
+                    nuevoDialogo()
+                        .setTitle(etiquetasRango[i])
+                        .setMessage("Se borrarán " + n + " páginas del historial. Los marcadores se conservan.")
+                        .setPositiveButton("Borrar") { _, _ ->
+                            historial.quitarDesde(desde)
+                            cerradas.clear()
+                            toast("Historial borrado")
+                            volver()
+                        }
+                        .setNegativeButton("Cancelar") { _, _ -> volver() }
+                        .setOnCancelListener { volver() }
+                        .show()
+                }
+            }
+            .setNegativeButton("Cancelar") { _, _ -> volver() }
+            .setOnCancelListener { volver() }
+            .show()
+    }
+
+    // ---------------------------------------------------------------- excepciones de certificado
+
+    /** El WebView recuerda en memoria los certificados con los que se continuó; al revocar o vencer hay que hacérselo olvidar. */
+    private fun olvidarSslWebView() {
+        for (q in pestanas) {
+            try {
+                q.web?.clearSslPreferences()
+            } catch (e: Exception) {
+                // Sin WebView o ya destruido.
+            }
+        }
+    }
+
+    private fun mostrarExcepcionesSsl() {
+        val lista = ExcepcionesSsl.todas()
+        if (lista.isEmpty()) {
+            toast("No hay excepciones de certificado")
+            mostrarPrivacidad()
+            return
+        }
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (e in lista) {
+            val texto = e.sitio.substringBeforeLast(':') + " — " + Certificados.etiqueta(e.motivos) + "\n" +
+                Certificados.vigencia(e) + " · " + Certificados.huellaCorta(e.huella)
+            items.add(Pair<String, () -> Unit>(texto, { detalleExcepcionSsl(e) }))
+        }
+        items.add(Pair<String, () -> Unit>("Revocar todas…", { confirmarRevocarTodasSsl() }))
+        opciones("Excepciones de certificado", items)
+    }
+
+    private fun detalleExcepcionSsl(e: ExcepcionSsl) {
+        val fmt = java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.getDefault())
+        val msg = e.sitio.substringBeforeLast(':') + "\n\n" +
+            "Autorizado a pesar de: " + Certificados.etiqueta(e.motivos) + "\n" +
+            "Concedida: " + fmt.format(java.util.Date(e.concedida)) + "\n" +
+            "Vigencia: " + Certificados.vigencia(e) + "\n\n" +
+            "Huella SHA-256:\n" + e.huella + "\n\n" +
+            "Solo vale para este certificado exacto. Si el equipo presenta otro, Optimo volverá a preguntar."
+        nuevoDialogo()
+            .setTitle("Excepción de certificado")
+            .setMessage(msg)
+            .setPositiveButton("Revocar") { _, _ ->
+                ExcepcionesSsl.quitar(e)
+                olvidarSslWebView()
+                toast("Excepción revocada. Recarga la página")
+                mostrarExcepcionesSsl()
+            }
+            .setNeutralButton("Copiar huella") { _, _ ->
+                copiar(e.huella)
+                mostrarExcepcionesSsl()
+            }
+            .setNegativeButton("Cerrar") { _, _ -> mostrarExcepcionesSsl() }
+            .setOnCancelListener { mostrarExcepcionesSsl() }
+            .show()
+    }
+
+    private fun confirmarRevocarTodasSsl() {
+        nuevoDialogo()
+            .setTitle("Revocar todas")
+            .setMessage("Se olvidarán todas las excepciones de certificado. Los equipos con certificado no válido volverán a preguntar.")
+            .setPositiveButton("Revocar") { _, _ ->
+                ExcepcionesSsl.quitarTodas()
+                olvidarSslWebView()
+                toast("Excepciones revocadas. Recarga las páginas")
+                mostrarPrivacidad()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarExcepcionesSsl() }
+            .setOnCancelListener { mostrarExcepcionesSsl() }
+            .show()
+    }
+
     /**
      * Limpieza de «Al salir, borrar…». Se llama al cerrar la app (onDestroy con la actividad terminando) y, si el proceso murió
      * antes de poder hacerlo (quitarla de recientes, Android que la cierra), al abrirla de nuevo. La marca [Ajustes.salidaPendiente]
@@ -2859,6 +3104,8 @@ class MainActivity : Activity() {
     private fun borrarDatos() {
         historial.vaciar()
         cerradas.clear()
+        ExcepcionesSsl.quitarTodas()
+        olvidarSslWebView()
         CookieManager.getInstance().removeAllCookies(null)
         CookieManager.getInstance().flush()
         WebStorage.getInstance().deleteAllData()
@@ -2945,6 +3192,8 @@ class MainActivity : Activity() {
                 mostrarPrivacidad()
             }
         }
+        add("Conservar historial: " + etiquetaRetencion(ajustes.retencionHistorial)) { elegirRetencionHistorial() }
+        add("Borrar historial por rango…") { elegirRangoBorrado { mostrarPrivacidad() } }
         add("Guardar pestañas abiertas al cerrar: " + si(ajustes.guardarSesion)) {
             ajustes.guardarSesion = !ajustes.guardarSesion
             if (!ajustes.guardarSesion) borrarSesionGuardada()
@@ -2976,6 +3225,7 @@ class MainActivity : Activity() {
             }
         }
         add("Permisos concedidos a sitios (" + ajustes.totalPermisos() + ")…") { mostrarPermisosSitios() }
+        add("Excepciones de certificado (" + ExcepcionesSsl.todas().size + ")…") { mostrarExcepcionesSsl() }
         add("Sitios con el bloqueo de anuncios pausado (" + ajustes.sitiosPausados().size + ")…") { mostrarSitiosPausados() }
         add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
         add("Borrar todo: historial, caché, cookies y permisos") {
@@ -3319,10 +3569,7 @@ class MainActivity : Activity() {
         }
         val b = nuevoDialogo().setTitle(titulo).setView(vista).setNegativeButton("Cerrar", null)
         if (conBorrarTodo) {
-            b.setNeutralButton("Borrar todo") { _, _ ->
-                lista.vaciar()
-                toast("Historial borrado")
-            }
+            b.setNeutralButton("Borrar…") { _, _ -> elegirRangoBorrado { } }
         }
         val d = b.create()
         dialogo = d
@@ -5164,13 +5411,8 @@ class MainActivity : Activity() {
             val urlError = error?.url ?: ""
             val host = Omnibox.hostDe(urlError).lowercase()
             val esPrincipal = host.isNotEmpty() && host == Omnibox.hostDe(p.url).lowercase()
-            val motivo = when (error?.primaryError) {
-                SslError.SSL_EXPIRED -> "El certificado ha caducado."
-                SslError.SSL_UNTRUSTED -> "El certificado no es de una entidad de confianza."
-                SslError.SSL_IDMISMATCH -> "El certificado no corresponde a este sitio."
-                SslError.SSL_NOTYETVALID -> "El certificado aún no es válido."
-                else -> "El certificado no es válido."
-            }
+            val motivos = if (error != null) Certificados.motivos(error) else Certificados.OTRO
+            val motivo = Certificados.frase(motivos)
             // Un fallo de certificado jamás debe acabar degradado a http.
             if (esPrincipal) p.mejoradoDesde = null
 
@@ -5191,8 +5433,11 @@ class MainActivity : Activity() {
                 return
             }
 
-            // Red local (router, NAS...): certificados autofirmados habituales; solo la página principal y tras confirmar.
-            if (sslPermitido.contains(host)) {
+            // Red local (router, NAS...): solo la página principal y tras confirmar. La autorización queda atada al sitio, a la huella
+            // SHA-256 del certificado exacto y a los motivos del fallo: otro certificado, o un fallo nuevo, vuelven a preguntar.
+            val sitio = ExcepcionesSsl.clave(urlError)
+            val huella = Certificados.huella(error?.certificate)
+            if (huella != null && ExcepcionesSsl.permite(sitio, huella, motivos, p.privada)) {
                 handler.proceed()
                 return
             }
@@ -5200,16 +5445,49 @@ class MainActivity : Activity() {
                 handler.cancel()
                 return
             }
-            nuevoDialogo()
+            if (huella == null) {
+                // Sin huella no se puede atar la autorización a un certificado concreto: no se ofrece continuar.
+                handler.cancel()
+                if (view != null) {
+                    view.post {
+                        view.loadDataWithBaseURL(
+                            urlError,
+                            Paginas.error(paleta.colores, urlError, motivo + " No se ha podido identificar el certificado, así que no se puede autorizar."),
+                            "text/html",
+                            "utf-8",
+                            urlError
+                        )
+                    }
+                }
+                return
+            }
+            val cambiado = ExcepcionesSsl.hayOtraHuella(sitio, huella, p.privada)
+            val ahora = System.currentTimeMillis()
+            val duracion = Certificados.duracionRecordar(motivos)
+            val sb = StringBuilder()
+            if (cambiado) {
+                sb.append("⚠ El certificado de este equipo es distinto del que autorizaste antes. Puede ser otro dispositivo haciéndose pasar por él.\n\n")
+            }
+            sb.append(sitio.substringBeforeLast(':')).append("\n\n")
+            sb.append(Certificados.explicacion(motivos)).append("\n\n")
+            sb.append("Huella SHA-256:\n").append(huella).append("\n\n")
+            sb.append("Es un equipo de tu red local. Continúa solo si reconoces esta huella.")
+            val dialogo = nuevoDialogo()
                 .setTitle("Certificado no válido")
-                .setMessage(host + "\n\n" + motivo + "\n\nEs un equipo de tu red local. Continúa solo si lo reconoces.")
+                .setMessage(sb.toString())
                 .setPositiveButton("Volver") { _, _ -> handler.cancel() }
-                .setNegativeButton("Continuar (equipo local)") { _, _ ->
-                    sslPermitido.add(host)
+                .setNegativeButton("Solo esta sesión") { _, _ ->
+                    ExcepcionesSsl.anadir(ExcepcionSsl(sitio, huella, motivos, ahora, 0L, p.privada))
                     handler.proceed()
                 }
                 .setOnCancelListener { handler.cancel() }
-                .show()
+            if (!p.privada) {
+                dialogo.setNeutralButton("Recordar " + Certificados.etiquetaDuracion(duracion)) { _, _ ->
+                    ExcepcionesSsl.anadir(ExcepcionSsl(sitio, huella, motivos, ahora, ahora + duracion, false))
+                    handler.proceed()
+                }
+            }
+            dialogo.show()
         }
 
         override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
