@@ -74,3 +74,12 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 ## Apuntado en 1.17.0 (no hecho)
 
 - **Técnicas de bloqueo por sitio:** poder apagar solo algunas técnicas (scripts sustitutos, vídeo vacío de VAST, «de juguete», rutas, ocultar huecos, saltar anuncios) en un sitio concreto, sin pausar todo el bloqueo. Hoy se eligen en Ajustes y valen para todas las webs. Requiere pasar el sitio de la página a varios puntos del motor (`MotorAnuncios.interceptar`, los scripts de página con guarda como la de la pausa) y una pantalla «Técnicas en este sitio». Las excepciones por dominio (1.17.0) cubren el caso de dejar pasar un dominio concreto.
+
+## Apuntado en 1.18.0 (por comprobar en el móvil)
+
+- **Compilar y probar:** certificados (`Certificados.kt`) y retención/borrado por rango del historial.
+- **Probar con un router o NAS de la red local con certificado autofirmado:** aviso con huella, «Solo esta sesión», «Recordar», candado ⚠, panel del certificado, revocar desde Ajustes y comprobar que **vuelve a preguntar** (depende de `clearSslPreferences()`).
+- **Comprobar en un móvil con Android 8-9** que la huella se obtiene (usa la clave interna `x509-certificate` del `Bundle` de `SslCertificate.saveState`). Si falla, ahí no se podrá autorizar ningún certificado.
+- **Comprobar** que `WebView.getCertificate()` devuelve datos en tu WebView y no está marcado como obsoleto en las versiones recientes de Android.
+- **Idea:** mostrar la cadena completa de certificados (hoy solo el del servidor) y la huella de la clave pública (SPKI), que sobrevive a renovaciones del certificado en un mismo equipo.
+- **Idea (no hecho a propósito):** excepciones para sitios de Internet. Hoy siguen bloqueados sin opción de saltarlos.
