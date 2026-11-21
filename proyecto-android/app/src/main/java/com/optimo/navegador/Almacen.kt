@@ -55,6 +55,53 @@ class ListaPersistente(private val archivo: File, private val maximo: Int) {
         guardarAhora()
     }
 
+    /** Entradas con fecha anterior a [limite] (ms). Las que no tienen fecha (tiempo <= 0) no cuentan: se conservan. */
+    fun contarAnterioresA(limite: Long): Int {
+        var n = 0
+        for (e in datos) {
+            if (e.tiempo > 0L && e.tiempo < limite) n++
+        }
+        return n
+    }
+
+    /** Quita las entradas anteriores a [limite] (retención del historial). Devuelve cuántas quitó. */
+    fun quitarAnterioresA(limite: Long): Int {
+        var n = 0
+        val it = datos.iterator()
+        while (it.hasNext()) {
+            val e = it.next()
+            if (e.tiempo > 0L && e.tiempo < limite) {
+                it.remove()
+                n++
+            }
+        }
+        if (n > 0) guardarAhora()
+        return n
+    }
+
+    /** Entradas visitadas desde [desde] (ms) hasta ahora; con 0 son todas. */
+    fun contarDesde(desde: Long): Int {
+        var n = 0
+        for (e in datos) {
+            if (e.tiempo >= desde) n++
+        }
+        return n
+    }
+
+    /** Quita las entradas visitadas desde [desde] (ms) hasta ahora (borrar por rango); con 0 quita todas. Devuelve cuántas quitó. */
+    fun quitarDesde(desde: Long): Int {
+        var n = 0
+        val it = datos.iterator()
+        while (it.hasNext()) {
+            if (it.next().tiempo >= desde) {
+                it.remove()
+                n++
+            }
+        }
+        if (n > 0) guardarAhora()
+        return n
+    }
+
     fun guardarPronto() {
         if (!pendiente) {
             pendiente = true
@@ -311,7 +358,7 @@ class Ajustes(contexto: Context) {
         "enlaces_otros" to "b", "enlaces_tipos" to "i", "rastro_otros" to "b", "rastro_cookies" to "b", "rastro_robots" to "b",
         "rastro_prof" to "i", "rastro_paginas" to "i", "rastro_min" to "i", "rastro_pausa" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
-        "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
+        "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "historial_dias" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
         "inicio_c_acento" to "s", "inicio_c_fondo" to "s", "inicio_c_sup" to "s", "inicio_c_texto" to "s", "inicio_propios" to "s",
         "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
@@ -748,6 +795,13 @@ class Ajustes(contexto: Context) {
         }
 
     // ---------------------------------------------------------------- privacidad y datos guardados
+
+    /** Días que se conserva el historial (0 = sin límite). Lo anterior se borra al abrir y al volver a Optimo. */
+    var retencionHistorial: Int
+        get() = sp.getInt("historial_dias", 0).coerceIn(0, 3650)
+        set(v) {
+            sp.edit().putInt("historial_dias", v).apply()
+        }
 
     /** Guardar el historial de las pestañas normales (las privadas nunca lo guardan). */
     var guardarHistorial: Boolean
