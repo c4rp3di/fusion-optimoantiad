@@ -427,3 +427,19 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - Hay que **recargar la página** para ver el efecto. Las pestañas privadas no guardan excepciones (se escribirían en disco con el nombre del sitio).
 - **Límite:** solo actúa sobre peticiones de red. Ocultar huecos, saltar anuncios y el resto de técnicas dentro de la página siguen activos; para apagar técnicas concretas en un sitio, ver `PENDIENTES-Optimo.md`.
 - Kotlin sin compilar aquí (revisado a mano: llaves, paréntesis, tipos y nulos); sin cambios de JavaScript.
+
+## 1.18.0 — Certificados atados a su huella y retención del historial
+
+**Certificados (`Certificados.kt`, `MainActivity.kt`)**
+- **Excepciones atadas al certificado.** Seguir con un certificado no válido (solo equipos de la red local; en Internet sigue bloqueado sin opción de saltarlo) crea una autorización que guarda el **sitio (host:puerto), la huella SHA-256 del certificado exacto y los motivos del fallo**. Otro certificado en el mismo equipo, o un motivo nuevo, vuelven a preguntar. Si el equipo presenta un certificado distinto del que autorizaste, el aviso lo dice expresamente (puede ser otro dispositivo en la red).
+- **Duración limitada.** «Solo esta sesión» (solo en memoria) o «Recordar 30 días» (24 horas si el certificado está caducado o aún no vale). En pestañas privadas solo existe «esta sesión», y se olvida al cerrar la última privada.
+- **Motivos diferenciados:** autofirmado, entidad no reconocida, nombre incorrecto, caducado, aún no válido. El WebView suele avisar solo de «fecha no válida»; caducado o aún no válido se decide mirando las fechas del certificado.
+- **Revocar:** Ajustes › Privacidad y datos › «Excepciones de certificado (N)…»: detalle con huella completa, «Revocar», «Copiar huella» y «Revocar todas». «Borrar todo» también las revoca. No entran en la copia de seguridad. Al revocar, vencer o cerrar Optimo se llama a `WebView.clearSslPreferences()`: el WebView recuerda en memoria los certificados con los que se continuó y, si no, seguiría dejando pasar.
+- **Candado honesto:** una página cifrada con certificado no válido autorizado muestra ⚠ en vez de 🔒.
+- **Panel del certificado:** candado › «Certificado de la conexión…»: emitido para/por, validez, huella SHA-256 (copiable) y la autorización vigente si la hay. Si el WebView no da certificado (caché, página guardada) lo dice, no inventa datos.
+- Sin huella (API 26-28 usa una clave interna del `Bundle`; si falla) no se ofrece continuar: no se puede atar la autorización a un certificado.
+
+**Historial (`Almacen.kt`, `MainActivity.kt`)**
+- **Conservar historial:** Ajustes › Privacidad y datos: siempre, 7, 30 o 90 días. Lo anterior se borra al abrir Optimo y al volver a ella; al elegir un plazo avisa de cuántas páginas se borrarán. Las entradas sin fecha se conservan. Entra en la copia de seguridad (`historial_dias`).
+- **Borrar por rango:** última hora, hoy, últimos 7 o 30 días, o todo (con recuento y confirmación). Disponible en Privacidad y datos y en el botón «Borrar…» de la lista de historial (sustituye a «Borrar todo»). El historial guarda una sola entrada por dirección (la última visita), así que el rango se aplica a la última visita.
+- Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntesis, tipos y nulos). Sin cambios de JavaScript.
