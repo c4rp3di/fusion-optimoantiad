@@ -443,3 +443,10 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **Conservar historial:** Ajustes › Privacidad y datos: siempre, 7, 30 o 90 días. Lo anterior se borra al abrir Optimo y al volver a ella; al elegir un plazo avisa de cuántas páginas se borrarán. Las entradas sin fecha se conservan. Entra en la copia de seguridad (`historial_dias`).
 - **Borrar por rango:** última hora, hoy, últimos 7 o 30 días, o todo (con recuento y confirmación). Disponible en Privacidad y datos y en el botón «Borrar…» de la lista de historial (sustituye a «Borrar todo»). El historial guarda una sola entrada por dirección (la última visita), así que el rango se aplica a la última visita.
 - Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntesis, tipos y nulos). Sin cambios de JavaScript.
+
+## 1.19.0 — Bloquear un sitio desde el candado y «Mis dominios bloqueados»
+
+- **Candado › «🚫 Bloquear este sitio…»** (y «✅ Desbloquear este sitio…» si ya está bloqueado). Ofrece bloquear el propio sitio o un dominio padre (hasta dos etiquetas; no se ofrecen sufijos del tipo `co.uk`). Se añade a los dominios que bloqueas a mano (los mismos de «mantener pulsado un anuncio» y de la Auditoría) y gana a las listas. Después se sale de la página (cierra la emergente, vuelve atrás, cierra la pestaña o va al inicio). No disponible en pestañas privadas (no se guardan reglas).
+- **Listas de bloqueo › «Mis dominios bloqueados (N)…»**: lista de tus dominios; tocar uno lo desbloquea (con confirmación), «Añadir dominio…» a mano (acepta una URL) y «Desbloquear todos…». Usa los mismos datos que «Reglas de sitios y anuncios», sin duplicarlos; también entran en la copia de seguridad.
+- **Alcance, sin cambios:** el bloqueo actúa sobre recursos que cargan otras páginas y sobre emergentes y redirecciones automáticas; la página principal no se bloquea al abrirla a propósito. Necesita «Bloquear anuncios» activado (y «Bloquear redirecciones» para las automáticas).
+- Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
