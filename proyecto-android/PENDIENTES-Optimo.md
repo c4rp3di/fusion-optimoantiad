@@ -83,3 +83,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - **Comprobar** que `WebView.getCertificate()` devuelve datos en tu WebView y no está marcado como obsoleto en las versiones recientes de Android.
 - **Idea:** mostrar la cadena completa de certificados (hoy solo el del servidor) y la huella de la clave pública (SPKI), que sobrevive a renovaciones del certificado en un mismo equipo.
 - **Idea (no hecho a propósito):** excepciones para sitios de Internet. Hoy siguen bloqueados sin opción de saltarlos.
+
+## Apuntado en 1.19.0
+
+- **Probar:** bloquear desde el candado una emergente de anuncios, una página normal con historial y la única pestaña abierta; desbloquear desde el candado y desde «Mis dominios bloqueados».
+- **Idea (no hecho a propósito):** página «Sitio bloqueado por ti · Desbloquear» al abrir a propósito un dominio bloqueado.
