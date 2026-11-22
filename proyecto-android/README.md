@@ -462,3 +462,10 @@ En ⋮ › **Personalizar este sitio…** (ya tenía versión de escritorio, mod
 **Ajustes › Ajustes por sitio (N)…:** lista de los sitios con algo personalizado; al tocar uno se ve qué tiene (escritorio, modo oscuro, emergentes, cookies, imágenes, suspensión, pausa del bloqueo) y se puede restablecer, o restablecer todos. No toca permisos, reglas ni CSS. Las claves nuevas entran en la copia de seguridad.
 
 Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntesis, tipos y nulos). Sin cambios de JavaScript.
+
+## 1.21.0 — Qué se muestra al abrir Optimo
+
+- **Ajustes › «Al abrir Optimo»:** «Última pestaña» (continúa donde lo dejaste, con las demás pestañas abiertas; es lo que hacía hasta ahora) o «Pantalla de inicio» (se abre una pestaña de inicio nueva y las pestañas guardadas quedan abiertas detrás).
+- Elegir «Última pestaña» activa «Guardar pestañas abiertas al cerrar» si estaba apagado (sin guardarlas no hay nada que continuar). Con el guardado apagado, Optimo siempre abre la pantalla de inicio, como antes.
+- No añade la pestaña de inicio si Optimo se abre con un enlace desde otra app, ni cuando Android restaura la app por sí solo. Si la pestaña activa guardada ya era la de inicio, no se duplica.
+- Entra en la copia de seguridad (`arranque`). Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
