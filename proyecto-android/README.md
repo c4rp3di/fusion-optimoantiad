@@ -469,3 +469,12 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntes
 - Elegir «Última pestaña» activa «Guardar pestañas abiertas al cerrar» si estaba apagado (sin guardarlas no hay nada que continuar). Con el guardado apagado, Optimo siempre abre la pantalla de inicio, como antes.
 - No añade la pestaña de inicio si Optimo se abre con un enlace desde otra app, ni cuando Android restaura la app por sí solo. Si la pestaña activa guardada ya era la de inicio, no se duplica.
 - Entra en la copia de seguridad (`arranque`). Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
+
+## 1.22.0 — Abrir .html del dispositivo con Optimo
+
+- **Optimo aparece en «Abrir con»** para archivos `.html` y `.xhtml` (gestor de archivos, descargas, adjuntos…): filtro `VIEW` con `content` y `file` y tipos `text/html` y `application/xhtml+xml`.
+- El archivo se copia a la caché (máximo 20 MB, se borra lo de más de 12 horas) y se abre en el **visor sin red** que ya usan las páginas guardadas: sin internet (ni imágenes ni formularios), sin almacenamiento, sin historial ni sesión; los enlaces tocados se abren en una pestaña normal y los enlaces a otros archivos locales se ignoran.
+- **JavaScript:** si el archivo contiene `<script`, pregunta al abrirlo («Con JavaScript» / «Sin JavaScript» / «Cancelar»). Con JavaScript sigue sin red ni almacenamiento. Optimo no expone ningún puente de la app a las páginas.
+- **Limitación:** las imágenes, estilos y otros archivos de la misma carpeta no se cargan, porque Android solo da acceso al archivo elegido. Un `.html` suelto se ve bien; una página guardada con su carpeta de recursos, no.
+- El candado muestra 📄 y el panel «Archivo de este dispositivo (sin conexión)».
+- Si el gestor de archivos envía otro tipo (por ejemplo `application/octet-stream`), Android no ofrecerá Optimo para ese archivo. Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
