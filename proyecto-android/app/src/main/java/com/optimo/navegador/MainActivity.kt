@@ -229,6 +229,7 @@ class MainActivity : Activity() {
         ListasManager.iniciar(this, ajustes)
         ExcepcionesSsl.iniciar(this)
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
+        limpiarLocalesHuerfanos()
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
         aplicarRetencionHistorial()
         if (ajustes.salidaPendiente) limpiarAlSalir()
@@ -970,7 +971,8 @@ class MainActivity : Activity() {
         val w = p.web
         btnAtras.alpha = if (w != null && w.canGoBack()) 1f else 0.35f
         btnAdelante.alpha = if (w != null && w.canGoForward()) 1f else 0.35f
-        val guardado = p.url.isNotEmpty() && marcadores.contiene(p.url)
+        val urlM = urlMarcador(p, false)
+        val guardado = urlM.isNotEmpty() && marcadores.contiene(urlM)
         btnMarcador.text = if (guardado) "★" else "☆"
         btnMarcador.setTextColor(if (guardado) paleta.acento else paleta.texto)
         btnPestanas.text = pestanas.size.toString()
@@ -1336,8 +1338,13 @@ class MainActivity : Activity() {
         return p
     }
 
-    private fun nuevaPestana(url: String?, privada: Boolean = false): Pestana? =
-        crearPestana(privada, url, false)
+    private fun nuevaPestana(url: String?, privada: Boolean = false): Pestana? {
+        if (url != null && esMarcadorLocal(url)) {
+            abrirMarcadorLocal(url)
+            return null
+        }
+        return crearPestana(privada, url, false)
+    }
 
     private fun activar(p: Pestana) {
         val anterior = actual
@@ -1633,6 +1640,10 @@ class MainActivity : Activity() {
     }
 
     private fun cargarEnActual(url: String) {
+        if (esMarcadorLocal(url)) {
+            abrirMarcadorLocal(url)
+            return
+        }
         val p = actual
         if (p == null) {
             nuevaPestana(url)
@@ -1662,13 +1673,18 @@ class MainActivity : Activity() {
             toast("No hay nada que guardar")
             return
         }
-        if (marcadores.contiene(p.url)) {
-            marcadores.quitar(p.url)
+        val urlM = urlMarcador(p, false)
+        if (urlM.isNotEmpty() && marcadores.contiene(urlM)) {
+            quitarMarcadorUrl(urlM)
             toast("Marcador eliminado")
-        } else if (marcadores.agregar(tituloDe(p), p.url, 0L)) {
-            toast("Marcador guardado (mantén pulsada ☆ para elegir carpeta)")
         } else {
-            toast("Has alcanzado el máximo de marcadores")
+            val nueva = urlMarcador(p, true)
+            if (nueva.isEmpty()) return
+            if (marcadores.agregar(tituloDe(p), nueva, 0L)) {
+                toast("Marcador guardado (mantén pulsada ☆ para elegir carpeta)")
+            } else {
+                toast("Has alcanzado el máximo de marcadores")
+            }
         }
         actualizarUi()
     }
@@ -3962,7 +3978,8 @@ class MainActivity : Activity() {
             toast("No hay nada que guardar")
             return
         }
-        val existente = marcadores.buscar(p.url)
+        val urlM = urlMarcador(p, false)
+        val existente = if (urlM.isEmpty()) null else marcadores.buscar(urlM)
         if (existente != null) {
             editarMarcador("Editar marcador", existente.titulo, existente.url, existente.carpeta) { t, u, c ->
                 val ok = marcadores.actualizar(existente, t, u, c)
@@ -3971,7 +3988,9 @@ class MainActivity : Activity() {
                 ok
             }
         } else {
-            editarMarcador("Guardar marcador", tituloDe(p), p.url, 0L) { t, u, c ->
+            val nueva = urlMarcador(p, true)
+            if (nueva.isEmpty()) return
+            editarMarcador("Guardar marcador", tituloDe(p), nueva, 0L) { t, u, c ->
                 val ok = marcadores.agregar(t, u, c)
                 if (ok) {
                     toast("Marcador guardado")
@@ -4032,7 +4051,7 @@ class MainActivity : Activity() {
                         t2.text = if (n == 1) "1 elemento" else "$n elementos"
                     } else if (m != null) {
                         t1.text = if (m.titulo.isNotEmpty()) m.titulo else m.url
-                        t2.text = m.url
+                        t2.text = if (esMarcadorLocal(m.url)) "Archivo del dispositivo (sin conexión)" else m.url
                     }
                 }
                 t1.maxLines = 1
@@ -4103,7 +4122,7 @@ class MainActivity : Activity() {
                     Unit
                 }))
                 items.add(Pair("Eliminar", {
-                    marcadores.quitar(m.url)
+                    quitarMarcadorUrl(m.url)
                     refrescar()
                     Unit
                 }))
@@ -5520,7 +5539,7 @@ class MainActivity : Activity() {
     }
 
     /** Abre la copia en una pestaña visor: sin red, sin almacenamiento y sin historial; los enlaces se abren en una pestaña normal. */
-    private fun abrirLocal(archivo: File, nombre: String, conJs: Boolean) {
+    private fun abrirLocal(archivo: File, nombre: String, conJs: Boolean, urlMarcador: String = "") {
         val q = crearPestana(false, null, true, false)
         if (q == null) {
             archivo.delete()
@@ -5529,10 +5548,118 @@ class MainActivity : Activity() {
         q.sinConexion = true
         q.archivoLocal = true
         q.permitirJs = conJs
-        q.url = "file:///" + nombre
+        q.archivoRuta = archivo.absolutePath
+        q.urlLocal = urlMarcador
+        q.url = "file:///" + nombre.replace('/', '_')
         q.titulo = nombre
         activar(q)
         q.web?.loadUrl("file://" + archivo.absolutePath)
+    }
+
+    // ---------------------------------------------------------------- marcadores de archivos .html del dispositivo
+
+    private val PREFIJO_LOCAL = "optimo://local/"
+    private val ID_LOCAL = Regex("[0-9a-f]{8,32}\\.html")
+    private val MAX_LOCALES_TOTAL = 200L * 1024 * 1024
+
+    private fun esMarcadorLocal(url: String): Boolean = url.startsWith(PREFIJO_LOCAL)
+
+    private fun dirLocales(): File = File(filesDir, "locales")
+
+    /**
+     * Dirección del marcador de la pestaña. En un archivo local es optimo://local/<id>.html (con #js si se permitió su JavaScript).
+     * [crear]: hace la copia permanente del archivo si todavía no existe (el archivo de la caché se borra a las 12 horas).
+     */
+    private fun urlMarcador(p: Pestana, crear: Boolean): String {
+        if (!p.archivoLocal) return p.url
+        if (p.urlLocal.isNotEmpty()) return p.urlLocal
+        return if (crear) (guardarLocalPermanente(p) ?: "") else ""
+    }
+
+    private fun guardarLocalPermanente(p: Pestana): String? {
+        val origen = File(p.archivoRuta)
+        if (!origen.exists()) {
+            toast("El archivo ya no está disponible: ábrelo de nuevo desde el gestor de archivos")
+            return null
+        }
+        val dir = dirLocales()
+        dir.mkdirs()
+        var total = 0L
+        dir.listFiles()?.forEach { f -> total += f.length() }
+        if (total + origen.length() > MAX_LOCALES_TOTAL) {
+            toast("Ya hay 200 MB de archivos guardados en marcadores: borra alguno")
+            return null
+        }
+        val id = java.lang.Long.toHexString(System.currentTimeMillis()) + java.lang.Integer.toHexString(java.util.Random().nextInt(0xFFFF) + 0x1000)
+        val destino = File(dir, id + ".html")
+        return try {
+            origen.copyTo(destino, false)
+            val url = PREFIJO_LOCAL + id + ".html" + (if (p.permitirJs) "#js" else "")
+            p.urlLocal = url
+            url
+        } catch (e: Exception) {
+            destino.delete()
+            toast("No se pudo guardar el archivo")
+            null
+        }
+    }
+
+    /** Quita el marcador y, si era de un archivo local, borra su copia permanente. */
+    private fun quitarMarcadorUrl(url: String) {
+        marcadores.quitar(url)
+        if (esMarcadorLocal(url)) {
+            val nombre = Uri.parse(url).lastPathSegment ?: ""
+            if (ID_LOCAL.matches(nombre)) File(dirLocales(), nombre).delete()
+            for (q in pestanas) {
+                if (q.urlLocal == url) q.urlLocal = ""
+            }
+        }
+    }
+
+    /** Abre un marcador de archivo local: copia la permanente a la caché y la muestra en el visor sin red. */
+    private fun abrirMarcadorLocal(url: String) {
+        val u = Uri.parse(url)
+        val nombre = u.lastPathSegment ?: ""
+        if (!ID_LOCAL.matches(nombre)) {
+            toast("Marcador no válido")
+            return
+        }
+        val permanente = File(dirLocales(), nombre)
+        if (!permanente.exists()) {
+            toast("El archivo de este marcador ya no está en este dispositivo")
+            return
+        }
+        val titulo = marcadores.buscar(url)?.titulo ?: nombre
+        val conJs = u.fragment == "js"
+        Thread {
+            var copia: File? = null
+            try {
+                val dir = File(cacheDir, "local")
+                dir.mkdirs()
+                val destino = File(dir, System.currentTimeMillis().toString() + ".html")
+                permanente.copyTo(destino, true)
+                copia = destino
+            } catch (e: Exception) {
+                copia = null
+            }
+            val c = copia
+            runOnUiThread {
+                if (c == null) toast("No se pudo abrir el archivo") else abrirLocal(c, titulo.ifBlank { nombre }, conJs, url)
+            }
+        }.start()
+    }
+
+    /** Al arrancar: borra las copias permanentes sin marcador (de más de un día, por si se estaba guardando alguna). */
+    private fun limpiarLocalesHuerfanos() {
+        val archivos = dirLocales().listFiles() ?: return
+        val usados = HashSet<String>()
+        for (e in marcadores.todos()) {
+            if (esMarcadorLocal(e.url)) usados.add(Uri.parse(e.url).lastPathSegment ?: "")
+        }
+        val limite = System.currentTimeMillis() - 24 * 3600000L
+        for (f in archivos) {
+            if (!usados.contains(f.name) && f.lastModified() < limite) f.delete()
+        }
     }
 
     private fun abrirDesdeFuera(texto: String) {
@@ -5724,6 +5851,7 @@ class MainActivity : Activity() {
             }
             if (esquema == "optimo") {
                 if (uri.toString() == Paginas.URL_PERSONALIZAR) mostrarAjustesInicio()
+                else if (uri.host == "local" && request.hasGesture()) abrirMarcadorLocal(uri.toString())
                 return true
             }
             if (esquema == "about" || esquema == "blob" || esquema == "data" || esquema == "javascript") return false
