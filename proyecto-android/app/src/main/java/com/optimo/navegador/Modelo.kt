@@ -113,6 +113,15 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Solo en el visor de un archivo local: el usuario permitió su JavaScript (sigue sin red ni almacenamiento). */
     var permitirJs: Boolean = false
 
+    /**
+     * «Aplicación web» (ver [AppLocal]): un .html del dispositivo abierto con origen https propio, con almacenamiento y red. No es un visor sin
+     * conexión (sinConexion es false): se comporta como una web normal salvo que no se guarda en historial ni en la sesión y no se suspende.
+     */
+    var appWeb: Boolean = false
+    var appEspacio: String = ""
+    var appHost: String = ""
+    var appNombre: String = ""
+
     /** Visor de un archivo local: ruta del archivo (en la caché) que muestra, y dirección de su marcador si ya está guardado. */
     var archivoRuta: String = ""
     var urlLocal: String = ""
