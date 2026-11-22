@@ -94,6 +94,9 @@ class MainActivity : Activity() {
         private val NOMBRES_AUDIO_PESTANAS = listOf("preguntar", "seguir sonando", "pausar")
         private val NOMBRES_AHORRO = listOf("desactivado", "siempre", "solo con datos móviles")
         private val NOMBRES_OSCURO_SITIO = listOf("según ajustes", "siempre", "nunca")
+        private val NOMBRES_EMERGENTES_SITIO = listOf("según ajustes", "recomendado", "estricto", "permitir todas")
+        private val NOMBRES_COOKIES_SITIO = listOf("según ajustes", "permitir", "bloquear")
+        private val NOMBRES_IMAGENES_SITIO = listOf("según ajustes", "cargar siempre", "sin imágenes")
 
         /** Cuenta lo guardado por la página; IndexedDB y Cache Storage rellenan su cifra al resolverse. Formato: ls,ss,idb,cache (-1 = no disponible). */
         private const val JS_ALMACEN_CONTAR =
@@ -1217,9 +1220,10 @@ class MainActivity : Activity() {
     @Suppress("DEPRECATION")
     private fun aplicarAjustesWeb(w: WebView) {
         val u = w.url
-        aplicarOscuro(w, oscuroPara(if (u == null) "" else Omnibox.hostDe(u).lowercase()))
-        w.settings.blockNetworkImage = imagenesBloqueadas(w)
-        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTerceros)
+        val hostWeb = if (u == null) "" else Omnibox.hostDe(u).lowercase()
+        aplicarOscuro(w, oscuroPara(hostWeb))
+        w.settings.blockNetworkImage = imagenesBloqueadas(w, hostWeb)
+        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTercerosEn(hostWeb))
     }
 
     private fun aplicarOscuro(w: WebView, oscuro: Boolean) {
@@ -1249,7 +1253,19 @@ class MainActivity : Activity() {
     }
 
     /** El ahorro de datos no se aplica al visor de páginas guardadas (sus recursos vienen del archivo, no de la red). */
-    private fun imagenesBloqueadas(w: WebView): Boolean = ahorroActivo() && !w.settings.blockNetworkLoads
+    private fun imagenesBloqueadas(w: WebView, host: String): Boolean {
+        if (w.settings.blockNetworkLoads) return false
+        return when (ajustes.imagenesEn(host)) {
+            1 -> false
+            2 -> true
+            else -> ahorroActivo()
+        }
+    }
+
+    private fun hostDeWeb(w: WebView): String {
+        val u = w.url ?: return ""
+        return Omnibox.hostDe(u).lowercase()
+    }
 
     /**
      * Antes de cargar una página (escrita, enlace o redirección de la web): versión de escritorio, modo oscuro y ahorro de datos
@@ -1264,7 +1280,8 @@ class MainActivity : Activity() {
             w.settings.loadWithOverviewMode = true
         }
         aplicarOscuro(w, oscuroPara(h))
-        w.settings.blockNetworkImage = imagenesBloqueadas(w)
+        w.settings.blockNetworkImage = imagenesBloqueadas(w, h)
+        gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTercerosEn(h))
     }
 
     /** Gestor de cookies del perfil al que pertenece el WebView (el privado tiene el suyo). */
@@ -1371,7 +1388,8 @@ class MainActivity : Activity() {
      */
     private fun elegibleSuspension(p: Pestana): Boolean =
         p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.sinConexion && !p.lectura && !p.suena &&
-            !p.eligiendo && !p.oculta && p.web != null && p.progreso >= 100 && p.url.startsWith("http")
+            !p.eligiendo && !p.oculta && p.web != null && p.progreso >= 100 && p.url.startsWith("http") &&
+            !ajustes.noSuspenderEn(Omnibox.hostDe(p.url))
 
     /**
      * Se llama solo con eventos (cambio de pestaña, app oculta, poca memoria del sistema), nunca con un temporizador.
@@ -1751,14 +1769,12 @@ class MainActivity : Activity() {
         }
         if (!p.inicio && p.url.startsWith("http")) {
             if (!p.privada) add("Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) }
-            val ok = ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))
+            val hostEm = Omnibox.hostDe(p.url)
+            val ok = ajustes.emergentesEfectivo(hostEm) == 2
             add("Emergentes y redirecciones en este sitio: " + (if (ok) "permitidas" else "bloqueadas")) {
-                if (ajustes.emergentes == 2) {
-                    toast("Están permitidas en todos los sitios (Ajustes › Ventanas emergentes)")
-                } else {
-                    ajustes.permitirEmergentes(Omnibox.hostDe(p.url), !ok)
-                    toast(if (ok) "Bloqueadas en este sitio" else "Permitidas en este sitio")
-                }
+                // Atajo: permitir todas o volver al modo normal. Los otros modos se eligen en «Personalizar este sitio».
+                ajustes.fijarEmergentesEn(hostEm, if (!ok) 2 else if (ajustes.emergentes == 2) 0 else -1)
+                toast(if (ok) "Bloqueadas en este sitio" else "Permitidas en este sitio")
             }
         }
         add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
@@ -1791,6 +1807,7 @@ class MainActivity : Activity() {
         add("Listas de bloqueo…") { mostrarListas() }
         add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
         add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
+        add("Ajustes por sitio (" + ajustes.sitiosConAjustes().size + ")…") { mostrarAjustesPorSitio() }
         add("Herramientas de desarrollo: captura desde el inicio: " + si(ajustes.devCaptura)) {
             ajustes.devCaptura = !ajustes.devCaptura
             reinstalarDev()
@@ -1813,7 +1830,7 @@ class MainActivity : Activity() {
             ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
             for (q in pestanas) {
                 val w = q.web
-                if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w)
+                if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w, hostDeWeb(w))
             }
             toast("Se aplica a las páginas que cargues desde ahora")
             mostrarAjustes()
@@ -1899,12 +1916,15 @@ class MainActivity : Activity() {
      * tocado nada en 5 s, a otro sitio. Los redirects HTTP normales (acortadores, inicio de sesión) y los sitios con permiso pasan.
      */
     private fun bloquearNavegacionAutomatica(p: Pestana, uri: Uri, request: WebResourceRequest): Boolean {
-        if (!ajustes.bloquearRedirecciones || request.isRedirect) return false
+        if (request.isRedirect) return false
         if (p.inicio || p.url.isEmpty()) return false
         val host = (uri.host ?: "").lowercase()
         if (host.isEmpty()) return false
-        if (ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))) return false
         val actualHost = Omnibox.hostDe(p.url).lowercase()
+        // El modo del sitio (si lo tiene) manda: «permitir todas» deja pasar; recomendado y estricto bloquean aunque el ajuste general no.
+        val modoSitio = ajustes.emergentesEn(actualHost)
+        if (modoSitio == 2) return false
+        if (modoSitio < 0 && (!ajustes.bloquearRedirecciones || ajustes.emergentes == 2)) return false
         val aAnuncio = ajustes.bloquearAnuncios && !mismoSitio(host, actualHost) && AdBlock.bloquea(host)
         val sinTocar = !request.hasGesture() && !mismoSitio(host, actualHost) &&
             android.os.SystemClock.uptimeMillis() - p.toqueMs > 5000L
@@ -2899,6 +2919,76 @@ class MainActivity : Activity() {
             }
             .setNegativeButton("Cancelar") { _, _ -> volver() }
             .setOnCancelListener { volver() }
+            .show()
+    }
+
+    // ---------------------------------------------------------------- ajustes por sitio: emergentes y resumen
+
+    private fun elegirEmergentesSitio(p: Pestana, sitio: String) {
+        val actualModo = ajustes.emergentesEn(sitio)
+        val nombresGeneral = listOf("recomendado", "estricto", "permitir todas")
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        fun modo(n: Int, texto: String) {
+            items.add(Pair((if (actualModo == n) "● " else "") + texto) {
+                ajustes.fijarEmergentesEn(sitio, n)
+                toast("Emergentes en " + sitio + ": " + NOMBRES_EMERGENTES_SITIO[n + 1])
+                mostrarPersonalizarSitio(p)
+            })
+        }
+        modo(-1, "Según ajustes (ahora: " + nombresGeneral[ajustes.emergentes] + ")")
+        modo(0, "Recomendado: cierra las pestañas que van a dominios de las listas y limita a una por toque")
+        modo(1, "Estricto: solo se abren si tocas un enlace y la pestaña va a ese mismo sitio")
+        modo(2, "Permitir todas en este sitio (también las redirecciones)")
+        opciones("Ventanas emergentes en " + sitio, items)
+    }
+
+    /** Ajustes › «Ajustes por sitio»: los sitios con algo personalizado, para ver qué tienen y restablecerlos. */
+    private fun mostrarAjustesPorSitio() {
+        val sitios = ajustes.sitiosConAjustes()
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (h in sitios) {
+            val n = ajustes.resumenSitio(h).size
+            items.add(Pair<String, () -> Unit>(h + " — " + n + (if (n == 1) " ajuste" else " ajustes"), { detalleAjustesSitio(h) }))
+        }
+        if (sitios.isNotEmpty()) items.add(Pair<String, () -> Unit>("Restablecer todos…", { confirmarRestablecerSitios() }))
+        items.add(Pair<String, () -> Unit>("Listo", { mostrarAjustes() }))
+        val titulo = if (sitios.isEmpty()) {
+            "Ningún sitio tiene ajustes propios\n(se crean en ⋮ › Personalizar este sitio)"
+        } else {
+            "Ajustes por sitio\nToca uno para ver o restablecerlo"
+        }
+        opciones(titulo, items)
+    }
+
+    private fun detalleAjustesSitio(h: String) {
+        val lineas = ajustes.resumenSitio(h)
+        nuevoDialogo()
+            .setTitle(h)
+            .setMessage(lineas.joinToString("\n") { l -> "• " + l } + "\n\nLos permisos, las reglas de ocultar elementos y el CSS no se tocan.")
+            .setPositiveButton("Restablecer") { _, _ ->
+                ajustes.restablecerSitio(h)
+                reinstalarAnuncios()
+                toast("Ajustes de " + h + " restablecidos. Recarga sus páginas")
+                mostrarAjustesPorSitio()
+            }
+            .setNegativeButton("Cerrar") { _, _ -> mostrarAjustesPorSitio() }
+            .setOnCancelListener { mostrarAjustesPorSitio() }
+            .show()
+    }
+
+    private fun confirmarRestablecerSitios() {
+        val n = ajustes.sitiosConAjustes().size
+        nuevoDialogo()
+            .setTitle("Restablecer todos")
+            .setMessage("Se quitarán los ajustes propios de " + n + " sitios (escritorio, modo oscuro, emergentes, cookies de terceros, imágenes, suspensión y pausa del bloqueo). Los permisos, las reglas y el CSS no se tocan.")
+            .setPositiveButton("Restablecer") { _, _ ->
+                for (h in ajustes.sitiosConAjustes()) ajustes.restablecerSitio(h)
+                reinstalarAnuncios()
+                toast("Ajustes por sitio restablecidos. Recarga las páginas")
+                mostrarAjustesPorSitio()
+            }
+            .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesPorSitio() }
+            .setOnCancelListener { mostrarAjustesPorSitio() }
             .show()
     }
 
@@ -4461,6 +4551,33 @@ class MainActivity : Activity() {
             }
             mostrarPersonalizarSitio(p)
         }
+        add("Ventanas emergentes en este sitio: " + NOMBRES_EMERGENTES_SITIO[ajustes.emergentesEn(sitio) + 1]) {
+            elegirEmergentesSitio(p, sitio)
+        }
+        add("Cookies de terceros en este sitio: " + NOMBRES_COOKIES_SITIO[ajustes.cookiesTercerosModoEn(sitio)]) {
+            ajustes.fijarCookiesTercerosEn(sitio, (ajustes.cookiesTercerosModoEn(sitio) + 1) % 3)
+            val w = p.web
+            if (w != null) {
+                prepararNavegacion(p, w, sitio)
+                w.reload()
+            }
+            mostrarPersonalizarSitio(p)
+        }
+        add("Imágenes en este sitio: " + NOMBRES_IMAGENES_SITIO[ajustes.imagenesEn(sitio)]) {
+            ajustes.fijarImagenesEn(sitio, (ajustes.imagenesEn(sitio) + 1) % 3)
+            val w = p.web
+            if (w != null) {
+                prepararNavegacion(p, w, sitio)
+                w.reload()
+            }
+            mostrarPersonalizarSitio(p)
+        }
+        if (ajustes.suspenderMin > 0 || ajustes.noSuspenderEn(sitio)) {
+            add("No suspender este sitio por inactividad: " + si(ajustes.noSuspenderEn(sitio))) {
+                ajustes.fijarNoSuspenderEn(sitio, !ajustes.noSuspenderEn(sitio))
+                mostrarPersonalizarSitio(p)
+            }
+        }
         if (ajustes.bloquearAnuncios || bloqueoPausadoEnPagina(p.url)) {
             add("Bloqueo de anuncios en este sitio: " + (if (bloqueoPausadoEnPagina(p.url)) "pausado" else "activo")) { alternarPausaBloqueo(p) }
         }
@@ -5702,7 +5819,8 @@ class MainActivity : Activity() {
                 p.emergentesBloqueados.incrementAndGet()
                 return false
             }
-            val libre = ajustes.emergentes == 2 || ajustes.emergentesPermitidosEn(Omnibox.hostDe(p.url))
+            val modoEm = ajustes.emergentesEfectivo(Omnibox.hostDe(p.url))
+            val libre = modoEm == 2
             var enlace: String? = null
             if (!libre) {
                 val ahora = android.os.SystemClock.uptimeMillis()
@@ -5712,7 +5830,7 @@ class MainActivity : Activity() {
                     toast("Pestaña emergente bloqueada")
                     return false
                 }
-                if (ajustes.emergentes == 1) {
+                if (modoEm == 1) {
                     // Estricto: tiene que ser un enlace que has tocado de verdad.
                     val r = view?.hitTestResult
                     val tipo = r?.type
