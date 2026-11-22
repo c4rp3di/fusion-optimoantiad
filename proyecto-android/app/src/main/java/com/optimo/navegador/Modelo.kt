@@ -107,6 +107,12 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Visor de una página guardada: sin red, sin JavaScript y con acceso de lectura a su archivo (ver [PaginasGuardadas]). */
     var sinConexion: Boolean = false
 
+    /** Visor de un .html del dispositivo (abierto desde otra app), no de una página guardada. */
+    var archivoLocal: Boolean = false
+
+    /** Solo en el visor de un archivo local: el usuario permitió su JavaScript (sigue sin red ni almacenamiento). */
+    var permitirJs: Boolean = false
+
     /** Pestaña suspendida: su WebView se destruyó para liberar memoria y se rehace, con su historial y scroll, al volver a ella. */
     var suspendida: Boolean = false
     var estadoSuspendida: android.os.Bundle? = null
