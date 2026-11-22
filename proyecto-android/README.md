@@ -490,3 +490,10 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntes
 ## 1.23.1 — Los marcadores de archivos locales también salen en la pantalla de inicio
 
 - La pantalla de inicio solo pintaba accesos con dirección `http://` o `https://`, y descartaba los marcadores de archivo local (`optimo://local/…`). Ahora los incluye; al tocarlos se abren en el visor sin red. Sin otros cambios. Kotlin sin compilar ni probar en dispositivo.
+
+## 1.23.2 — Endurecimiento tras auditoría
+
+- **Datos locales (`AlmacenSeguro.kt`):** si un archivo cifrado existe pero no se puede descifrar (p. ej. el Keystore falla al arrancar), se guarda una copia `.corrupto` y no se le escribe encima en esa ejecución (antes, el siguiente guardado lo sobrescribía vacío). Se reintenta al reabrir; si se descifra, la copia se borra. Si el fallo se repite en el siguiente arranque (clave perdida de verdad) se permite volver a guardar.
+- **Enlaces `intent:` (`abrirExternoSistema`):** se quitan las banderas de concesión de permisos de URI y se rechazan los que apunten a datos `file:`/`content:`. Los enlaces normales a apps no cambian; abrir `.html` locales tampoco (va por `procesarIntent`).
+- **Visor sin red:** `allowFileAccessFromFileURLs` y `allowUniversalAccessFromFileURLs` a `false` de forma explícita (ya eran el valor por defecto).
+- Kotlin sin compilar ni probar en dispositivo (revisado a mano).
