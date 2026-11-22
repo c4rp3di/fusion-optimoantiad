@@ -943,13 +943,13 @@ class MainActivity : Activity() {
         val p = actual ?: return
         aplicarPantallaSegura(p.privada)
         if (!omnibox.hasFocus()) {
-            omnibox.setText(if (p.inicio) "" else p.url)
+            omnibox.setText(if (p.inicio) "" else if (p.appWeb) "file:///" + p.appNombre else p.url)
         }
         omnibox.background = fondoRedondeado(if (p.privada) paleta.campoPrivado else paleta.campo, 20.dp())
         if (p.privada) {
             candado.text = "🕶"
             candado.setTextColor(paleta.texto)
-        } else if (p.sinConexion) {
+        } else if (p.sinConexion || p.appWeb) {
             candado.text = "📄"
             candado.setTextColor(paleta.tenue)
         } else if (p.url.startsWith("https://")) {
@@ -1013,6 +1013,7 @@ class MainActivity : Activity() {
     private fun mostrarInfoSitio() {
         val p = actual ?: return
         val estado = when {
+            p.appWeb -> "Archivo de este dispositivo abierto como aplicación web (almacenamiento y red)"
             p.archivoLocal -> "Archivo de este dispositivo (sin conexión)"
             p.sinConexion -> "Página guardada (sin conexión)"
             p.privada -> "Pestaña privada"
@@ -1027,13 +1028,13 @@ class MainActivity : Activity() {
         items.add(Pair(if (p.silenciada) "🔊 Activar el sonido de esta pestaña" else "🔇 Silenciar esta pestaña") {
             alternarSilencio(p)
         })
-        if (!p.sinConexion && !p.inicio && p.url.startsWith("https://")) {
+        if (!p.sinConexion && !p.appWeb && !p.inicio && p.url.startsWith("https://")) {
             items.add(Pair("🔒 Certificado de la conexión…") { mostrarCertificado(p) })
         }
-        if (!p.privada && !p.inicio && p.url.startsWith("http")) {
+        if (!p.privada && !p.inicio && !p.appWeb && p.url.startsWith("http")) {
             items.add(Pair("🛡 Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) })
         }
-        if (!p.privada && !p.inicio && !p.sinConexion && p.url.startsWith("http")) {
+        if (!p.privada && !p.inicio && !p.sinConexion && !p.appWeb && p.url.startsWith("http")) {
             if (ReglasUsuario.bloqueaDominio(Omnibox.hostDe(p.url).lowercase())) {
                 items.add(Pair("✅ Desbloquear este sitio…") { desbloquearSitio(p) })
             } else {
@@ -1205,6 +1206,11 @@ class MainActivity : Activity() {
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
+            if (url.startsWith("blob:")) {
+                // Las descargas blob: solo se admiten en una aplicación web local (puente restringido a su origen).
+                if (p.appWeb) descargarBlob(w, url, disposicion, mime) else toast("Este tipo de descarga no es compatible")
+                return@setDownloadListener
+            }
             if (ReproductorExterno.esMedio(url, mime)) {
                 // Vídeo, audio o torrent: según Ajustes › «Enlaces multimedia y magnets», se descarga, se pregunta o va a otra app.
                 gestionarMedio(url, mime, p, ua, URLUtil.guessFileName(url, disposicion, mime), "Descargar") {
@@ -1220,7 +1226,7 @@ class MainActivity : Activity() {
         w.setOnTouchListener { v, ev -> alTocar(v as WebView, p, ev) }
         w.setOnLongClickListener { v -> menuContextual(v as WebView, p) }
         aplicarAjustesWeb(w)
-        anuncios.instalar(w)
+        if (p.appWeb) instalarPuenteApp(w) else anuncios.instalar(w)
         agenteDev.instalar(w)
         silenciador.instalar(w, p.silenciada)
         p.web = w
@@ -1402,7 +1408,7 @@ class MainActivity : Activity() {
      * ya terminó de cargar y es una web normal.
      */
     private fun elegibleSuspension(p: Pestana): Boolean =
-        p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.sinConexion && !p.lectura && !p.suena &&
+        p !== actual && p !== sonando && p !== pestanaVoz && !p.privada && !p.inicio && !p.sinConexion && !p.appWeb && !p.lectura && !p.suena &&
             !p.eligiendo && !p.oculta && p.web != null && p.progreso >= 100 && p.url.startsWith("http") &&
             !ajustes.noSuspenderEn(Omnibox.hostDe(p.url))
 
@@ -1469,6 +1475,7 @@ class MainActivity : Activity() {
         val idx = pestanas.indexOf(p)
         if (idx < 0) return
         recordarCerrada(p)
+        if (p.appWeb && p.archivoRuta.isNotEmpty()) AppLocal.liberar(p.url, File(p.archivoRuta))
         pestanas.removeAt(idx)
         if (p === sonando) {
             sonando = null
@@ -1623,6 +1630,11 @@ class MainActivity : Activity() {
 
     private fun fijarUrl(p: Pestana, url: String?) {
         if (url == null || p.sinConexion) return
+        if (p.appWeb && url.startsWith("http") && !AppLocal.esHostApp(Omnibox.hostDe(url).lowercase())) {
+            // La pestaña salió de la aplicación web hacia otra web: vuelve a ser una pestaña normal.
+            p.appWeb = false
+            p.archivoLocal = false
+        }
         if (url.startsWith("optimo://") || ((url.startsWith("data:") || url == "about:blank") && p.inicio)) {
             p.inicio = true
             p.url = ""
@@ -1783,7 +1795,7 @@ class MainActivity : Activity() {
                         }
                     }
                 }
-                if (!p.privada && !p.sinConexion) add("Guardar página para leer sin conexión") { guardarSinConexion(p) }
+                if (!p.privada && !p.sinConexion && !p.appWeb) add("Guardar página para leer sin conexión") { guardarSinConexion(p) }
                 add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
                 // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
@@ -2718,7 +2730,7 @@ class MainActivity : Activity() {
     /** Guarda la página abierta (MHTML con sus recursos + instantánea del DOM) para leerla sin conexión. Nunca en pestañas privadas. */
     private fun guardarSinConexion(p: Pestana) {
         val w = p.web ?: return
-        if (p.privada || p.sinConexion || !p.url.startsWith("http")) return
+        if (p.privada || p.sinConexion || p.appWeb || !p.url.startsWith("http")) return
         if (p.progreso in 0..99) {
             toast("Espera a que termine de cargar la página")
             return
@@ -3507,7 +3519,7 @@ class MainActivity : Activity() {
             }
         }
         add("Borrar cookies y datos de sitios") {
-            confirmarAccionPrivacidad("Borrar cookies y datos de sitios", "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local.", "Borrar") {
+            confirmarAccionPrivacidad("Borrar cookies y datos de sitios", "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local, incluidos los datos de las aplicaciones web locales (por ejemplo, los proyectos de un editor abierto como archivo).", "Borrar") {
                 CookieManager.getInstance().removeAllCookies(null)
                 CookieManager.getInstance().flush()
                 WebStorage.getInstance().deleteAllData()
@@ -4057,7 +4069,7 @@ class MainActivity : Activity() {
                         t2.text = if (n == 1) "1 elemento" else "$n elementos"
                     } else if (m != null) {
                         t1.text = if (m.titulo.isNotEmpty()) m.titulo else m.url
-                        t2.text = if (esMarcadorLocal(m.url)) "Archivo del dispositivo (sin conexión)" else m.url
+                        t2.text = if (esMarcadorLocal(m.url)) (if (m.url.contains("#app=")) "Archivo del dispositivo (aplicación web)" else "Archivo del dispositivo (sin conexión)") else m.url
                     }
                 }
                 t1.maxLines = 1
@@ -4182,7 +4194,7 @@ class MainActivity : Activity() {
     private val cerradas = ArrayList<Pair<String, String>>()
 
     private fun recordarCerrada(p: Pestana) {
-        if (p.privada || p.esEmergente || !ajustes.guardarHistorial) return
+        if (p.privada || p.esEmergente || p.appWeb || !ajustes.guardarHistorial) return
         val url = if (p.url.startsWith("http")) p.url else (p.pendiente ?: "")
         if (!url.startsWith("http")) return
         cerradas.removeAll { it.first == url }
@@ -5504,7 +5516,7 @@ class MainActivity : Activity() {
                 dir.mkdirs()
                 val limite = System.currentTimeMillis() - 12 * 3600000L
                 dir.listFiles()?.forEach { f ->
-                    if (f.lastModified() < limite) f.delete()
+                    if (f.lastModified() < limite && !AppLocal.enUso(f)) f.delete()
                 }
                 val destino = File(dir, System.currentTimeMillis().toString() + ".html")
                 val entrada = contentResolver.openInputStream(uri)
@@ -5546,14 +5558,173 @@ class MainActivity : Activity() {
             abrirLocal(archivo, nombre, false)
             return
         }
+        val opciones = arrayOf(
+            "Aplicación web: con almacenamiento y red, como en otro navegador",
+            "Con JavaScript, sin red ni almacenamiento",
+            "Sin JavaScript"
+        )
         nuevoDialogo()
-            .setTitle(nombre)
-            .setMessage("Este archivo contiene JavaScript. Optimo lo abre sin conexión a internet, y con JavaScript el archivo puede ejecutar su código dentro de la página. Muchos archivos lo necesitan para verse bien.")
-            .setPositiveButton("Con JavaScript") { _, _ -> abrirLocal(archivo, nombre, true) }
-            .setNegativeButton("Sin JavaScript") { _, _ -> abrirLocal(archivo, nombre, false) }
-            .setNeutralButton("Cancelar") { _, _ -> archivo.delete() }
+            .setTitle(nombre + " contiene JavaScript")
+            .setItems(opciones) { _, i ->
+                when (i) {
+                    0 -> pedirEspacioApp(archivo, nombre)
+                    1 -> abrirLocal(archivo, nombre, true)
+                    else -> abrirLocal(archivo, nombre, false)
+                }
+            }
+            .setNegativeButton("Cancelar") { _, _ -> archivo.delete() }
             .setOnCancelListener { archivo.delete() }
             .show()
+    }
+
+    /** Confirmación de «Aplicación web»: avisa de lo que puede hacer el archivo y deja elegir el espacio de datos. */
+    private fun pedirEspacioApp(archivo: File, nombre: String) {
+        val campo = android.widget.EditText(this)
+        campo.setSingleLine(true)
+        campo.setText(AppLocal.espacioPorDefecto(nombre))
+        campo.setSelection(campo.text.length)
+        nuevoDialogo()
+            .setTitle("Abrir como aplicación web")
+            .setMessage(
+                "Este archivo podrá usar internet y guardar datos en Optimo, como una web. Ábrelo solo si confías en él.\n\n" +
+                    "Espacio de datos: los archivos con el mismo espacio comparten sus datos. Usa el mismo nombre para las versiones de una " +
+                    "misma aplicación y verán los mismos proyectos.\n\n" +
+                    "«Borrar cookies y datos de sitios» también borra estos datos."
+            )
+            .setView(campo)
+            .setPositiveButton("Abrir") { _, _ -> abrirLocalApp(archivo, nombre, campo.text.toString()) }
+            .setNegativeButton("Cancelar") { _, _ -> archivo.delete() }
+            .setOnCancelListener { archivo.delete() }
+            .show()
+    }
+
+    /**
+     * Abre el archivo como aplicación web (ver [AppLocal]): origen https propio por espacio, con IndexedDB/localStorage, red y descargas blob:.
+     * Sin historial, sin sesión y sin suspensión. Al guardar el marcador (☆) se recuerda el espacio.
+     */
+    private fun abrirLocalApp(archivo: File, nombre: String, espacio: String, urlMarcador: String = "") {
+        val q = crearPestana(false, null, true, false)
+        if (q == null) {
+            archivo.delete()
+            return
+        }
+        val esp = AppLocal.limpiarEspacio(espacio).ifEmpty { "aplicacion" }
+        q.archivoLocal = true
+        q.appWeb = true
+        q.appEspacio = esp
+        q.appNombre = AppLocal.nombreSeguro(nombre)
+        q.appHost = AppLocal.host(esp)
+        q.permitirJs = true
+        q.archivoRuta = archivo.absolutePath
+        q.urlLocal = urlMarcador
+        q.url = AppLocal.registrar(esp, q.appNombre, archivo)
+        q.titulo = nombre
+        activar(q)
+        q.web?.loadUrl(q.url)
+    }
+
+    // ---------------------------------------------------------------- aplicación web local: descargas blob:
+
+    private val ejecutorDescargas: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()
+    private var descargaBlob: EscritorDescarga? = null
+    private var tokenBlob: String? = null
+
+    private val soportaPuenteApp: Boolean by lazy {
+        try { WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) } catch (e: Throwable) { false }
+    }
+    private val soportaInicioApp: Boolean by lazy {
+        try { WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) } catch (e: Throwable) { false }
+    }
+
+    /** Instala (antes de cargar nada) el script de blobs y el puente de descargas, ambos restringidos a los orígenes de aplicaciones web. */
+    private fun instalarPuenteApp(w: WebView) {
+        if (!soportaPuenteApp || !soportaInicioApp) return
+        try {
+            WebViewCompat.addDocumentStartJavaScript(w, AppLocal.GUION_INICIO, setOf(AppLocal.REGLA_ORIGEN))
+            WebViewCompat.addWebMessageListener(w, AppLocal.NOMBRE_PUENTE, setOf(AppLocal.REGLA_ORIGEN)) { _, mensaje, origen, _, respuesta ->
+                alMensajeDescarga(origen, mensaje.data, respuesta)
+            }
+        } catch (e: Exception) {
+            // Sin puente: la aplicación funciona igual, solo fallan las descargas blob:.
+        }
+    }
+
+    private fun descargarBlob(w: WebView, url: String, disposicion: String?, mime: String?) {
+        if (!soportaPuenteApp) {
+            toast("Este WebView no admite descargas de la aplicación; actualiza Android System WebView")
+            return
+        }
+        if (tokenBlob != null || descargaBlob != null) {
+            toast("Ya hay una descarga en curso")
+            return
+        }
+        if (Build.VERSION.SDK_INT < 29 &&
+            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendienteDescarga = { descargarBlob(w, url, disposicion, mime) }
+            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
+            return
+        }
+        val token = java.util.UUID.randomUUID().toString()
+        tokenBlob = token
+        // Si la página no empieza a mandar datos en 30 s, se olvida el intento.
+        w.postDelayed({ if (tokenBlob == token && descargaBlob == null) tokenBlob = null }, 30000)
+        val nombre = if (disposicion != null && disposicion.contains("filename", true)) URLUtil.guessFileName(url, disposicion, mime) else ""
+        w.evaluateJavascript(AppLocal.guionDescarga(token, url, nombre), null)
+    }
+
+    private fun abortarDescargaBlob(mensaje: String) {
+        val esc = descargaBlob
+        descargaBlob = null
+        tokenBlob = null
+        if (esc != null) ejecutorDescargas.execute { esc.abortar() }
+        toast(mensaje)
+    }
+
+    /** Mensajes de la página durante una descarga blob: solo de un origen de aplicación web y solo con el token de la descarga en curso. */
+    private fun alMensajeDescarga(origen: Uri, texto: String?, respuesta: androidx.webkit.JavaScriptReplyProxy) {
+        if (origen.scheme != "https" || !AppLocal.esHostApp(origen.host?.lowercase())) return
+        val j = try { JSONObject(texto ?: return) } catch (e: Exception) { return }
+        val token = tokenBlob ?: return
+        if (j.optString("t") != token) return
+        when (j.optString("a")) {
+            "ini" -> {
+                if (descargaBlob != null) return
+                val esc = EscritorDescarga(this, j.optString("n"), j.optString("m").ifEmpty { "application/octet-stream" })
+                if (!esc.abrir()) {
+                    abortarDescargaBlob("No se pudo crear el archivo en Descargas")
+                    return
+                }
+                descargaBlob = esc
+                respuesta.postMessage("ok")
+            }
+            "dat" -> {
+                val esc = descargaBlob ?: return
+                val datos = j.optString("d")
+                ejecutorDescargas.execute {
+                    val ok = try {
+                        esc.escribir(android.util.Base64.decode(datos, android.util.Base64.DEFAULT))
+                        true
+                    } catch (e: Exception) {
+                        false
+                    }
+                    runOnUiThread {
+                        if (descargaBlob !== esc) return@runOnUiThread
+                        if (ok) respuesta.postMessage("ok") else abortarDescargaBlob("No se pudo escribir el archivo")
+                    }
+                }
+            }
+            "fin" -> {
+                val esc = descargaBlob ?: return
+                descargaBlob = null
+                tokenBlob = null
+                ejecutorDescargas.execute {
+                    val ok = esc.cerrar()
+                    runOnUiThread { toast(if (ok) "Descargado en Descargas: " + esc.nombre else "No se pudo guardar el archivo") }
+                }
+            }
+            "err" -> abortarDescargaBlob("No se pudo leer el archivo de la página")
+        }
     }
 
     /** Abre la copia en una pestaña visor: sin red, sin almacenamiento y sin historial; los enlaces se abren en una pestaña normal. */
@@ -5612,7 +5783,7 @@ class MainActivity : Activity() {
         val destino = File(dir, id + ".html")
         return try {
             origen.copyTo(destino, false)
-            val url = PREFIJO_LOCAL + id + ".html" + (if (p.permitirJs) "#js" else "")
+            val url = PREFIJO_LOCAL + id + ".html" + (if (p.appWeb) "#app=" + p.appEspacio else if (p.permitirJs) "#js" else "")
             p.urlLocal = url
             url
         } catch (e: Exception) {
@@ -5649,6 +5820,7 @@ class MainActivity : Activity() {
         }
         val titulo = marcadores.buscar(url)?.titulo ?: nombre
         val conJs = u.fragment == "js"
+        val espacioApp = u.fragment?.takeIf { it.startsWith("app=") }?.substring(4)
         Thread {
             var copia: File? = null
             try {
@@ -5662,7 +5834,9 @@ class MainActivity : Activity() {
             }
             val c = copia
             runOnUiThread {
-                if (c == null) toast("No se pudo abrir el archivo") else abrirLocal(c, titulo.ifBlank { nombre }, conJs, url)
+                if (c == null) toast("No se pudo abrir el archivo")
+                else if (espacioApp != null) abrirLocalApp(c, titulo.ifBlank { nombre }, espacioApp, url)
+                else abrirLocal(c, titulo.ifBlank { nombre }, conJs, url)
             }
         }.start()
     }
@@ -5711,7 +5885,7 @@ class MainActivity : Activity() {
         var activa = 0
         var n = 0
         for (p in pestanas) {
-            if (p.privada || p.sinConexion) continue
+            if (p.privada || p.sinConexion || p.appWeb) continue
             if (p === actual) activa = n
             arr.put(if (p.inicio) "" else p.url)
             n++
@@ -5883,6 +6057,8 @@ class MainActivity : Activity() {
         }
 
         override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+            // Aplicación web local: el archivo se sirve solo a la pestaña que lo abrió y solo para su propio origen.
+            if (request != null && p.appWeb && request.url.host == p.appHost) return AppLocal.respuesta(request.url)
             if (request != null && request.isForMainFrame && p.esEmergente && !p.libre && vigilarEmergente(p, request.url)) {
                 // Emergente de anuncios: no llega a salir la petición.
                 return WebResourceResponse("text/plain", "utf-8", java.io.ByteArrayInputStream(ByteArray(0)))
@@ -5917,7 +6093,7 @@ class MainActivity : Activity() {
                     pestanaVoz = null
                 }
             }
-            if (view != null) anuncios.alEmpezar(view, url)
+            if (view != null && !p.appWeb) anuncios.alEmpezar(view, url)
             if (view != null) agenteDev.alEmpezar(view)
             if (view != null) silenciador.alEmpezar(view, p.silenciada)
             p.dev.limpiar()
@@ -5939,7 +6115,7 @@ class MainActivity : Activity() {
             fijarUrl(p, url)
             val titulo = view?.title ?: ""
             if (titulo.isNotEmpty() && !p.inicio) p.titulo = titulo
-            if (ajustes.guardarHistorial && !p.privada && !p.inicio && url != null && titulo != Paginas.TITULO_ERROR &&
+            if (ajustes.guardarHistorial && !p.privada && !p.inicio && !p.appWeb && url != null && titulo != Paginas.TITULO_ERROR &&
                 (url.startsWith("http://") || url.startsWith("https://"))
             ) {
                 historial.agregar(Entrada(if (titulo.isNotEmpty()) titulo else url, url, System.currentTimeMillis()))
