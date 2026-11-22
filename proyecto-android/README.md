@@ -486,3 +486,7 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntes
 - **Quitarlo:** quitar el marcador (☆ o «Eliminar» en el gestor) borra su copia. Al arrancar, Optimo borra las copias sin marcador de más de un día.
 - **Límites:** los marcadores de archivo van en la copia de seguridad como dirección, no con el archivo: restaurados en otro móvil avisan de que el archivo no está. Siguen sin cargarse los recursos de la misma carpeta (imágenes, estilos).
 - Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
+
+## 1.23.1 — Los marcadores de archivos locales también salen en la pantalla de inicio
+
+- La pantalla de inicio solo pintaba accesos con dirección `http://` o `https://`, y descartaba los marcadores de archivo local (`optimo://local/…`). Ahora los incluye; al tocarlos se abren en el visor sin red. Sin otros cambios. Kotlin sin compilar ni probar en dispositivo.
