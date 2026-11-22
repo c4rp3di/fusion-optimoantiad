@@ -334,6 +334,135 @@ class Ajustes(contexto: Context) {
         if (modo == 2) ponerEnConjunto("oscuro_no", host)
     }
 
+    // ---------------------------------------------------------------- más ajustes por sitio (por defecto: «según ajustes»)
+
+    /** Largo de la clave más específica del conjunto [k] que cubre [host] (él o un dominio superior); -1 si ninguna. */
+    private fun coincidencia(k: String, host: String): Int {
+        val s = conjunto(k)
+        if (s.isEmpty()) return -1
+        var h = claveSitio(host)
+        while (h.isNotEmpty()) {
+            if (s.contains(h)) return h.length
+            val i = h.indexOf('.')
+            if (i < 0) return -1
+            h = h.substring(i + 1)
+        }
+        return -1
+    }
+
+    /** Ajuste de tres estados guardado en dos conjuntos: 0 según ajustes, 1 el conjunto [si], 2 el conjunto [no]. Manda la regla más específica. */
+    private fun triEstadoEn(si: String, no: String, host: String): Int {
+        val a = coincidencia(si, host)
+        val b = coincidencia(no, host)
+        if (a < 0 && b < 0) return 0
+        return if (a >= b) 1 else 2
+    }
+
+    private fun fijarTriEstadoEn(si: String, no: String, host: String, modo: Int) {
+        quitarDeConjunto(si, host)
+        quitarDeConjunto(no, host)
+        if (modo == 1) ponerEnConjunto(si, host)
+        if (modo == 2) ponerEnConjunto(no, host)
+    }
+
+    /**
+     * Pestañas emergentes y redirecciones en un sitio: -1 según el ajuste general, 0 recomendado, 1 estricto, 2 permitir todas.
+     * Si hay reglas de un dominio y de un subdominio suyo, manda la más específica.
+     */
+    fun emergentesEn(host: String): Int {
+        val ok = coincidencia("emergentes_ok", host)
+        val est = coincidencia("emergentes_est", host)
+        val rec = coincidencia("emergentes_rec", host)
+        val mejor = maxOf(ok, maxOf(est, rec))
+        if (mejor < 0) return -1
+        return if (ok == mejor) 2 else if (est == mejor) 1 else 0
+    }
+
+    fun fijarEmergentesEn(host: String, modo: Int) {
+        quitarDeConjunto("emergentes_ok", host)
+        quitarDeConjunto("emergentes_est", host)
+        quitarDeConjunto("emergentes_rec", host)
+        when (modo) {
+            0 -> ponerEnConjunto("emergentes_rec", host)
+            1 -> ponerEnConjunto("emergentes_est", host)
+            2 -> ponerEnConjunto("emergentes_ok", host)
+        }
+    }
+
+    /** Modo de emergentes que vale en [host]: el del sitio o, si no tiene, el general. */
+    fun emergentesEfectivo(host: String): Int {
+        val m = emergentesEn(host)
+        return if (m >= 0) m else emergentes
+    }
+
+    /** Cookies de terceros en un sitio: 0 según ajustes, 1 permitir, 2 bloquear. */
+    fun cookiesTercerosModoEn(host: String): Int = triEstadoEn("cookies3_si", "cookies3_no", host)
+
+    fun fijarCookiesTercerosEn(host: String, modo: Int) = fijarTriEstadoEn("cookies3_si", "cookies3_no", host, modo)
+
+    /** ¿Se aceptan cookies de terceros en [host]? La regla del sitio manda sobre el ajuste general. */
+    fun cookiesTercerosEn(host: String): Boolean = when (cookiesTercerosModoEn(host)) {
+        1 -> true
+        2 -> false
+        else -> cookiesTerceros
+    }
+
+    /** Imágenes en un sitio: 0 según el ahorro de datos general, 1 cargar siempre, 2 sin imágenes. */
+    fun imagenesEn(host: String): Int = triEstadoEn("imagenes_si", "imagenes_no", host)
+
+    fun fijarImagenesEn(host: String, modo: Int) = fijarTriEstadoEn("imagenes_si", "imagenes_no", host, modo)
+
+    /** Sitios cuyas pestañas no se suspenden por inactividad. */
+    fun noSuspenderEn(host: String): Boolean = enConjunto("no_suspender", host)
+
+    fun fijarNoSuspenderEn(host: String, v: Boolean) {
+        quitarDeConjunto("no_suspender", host)
+        if (v) ponerEnConjunto("no_suspender", host)
+    }
+
+    private val CLAVES_SITIO = listOf(
+        "escritorio_sitios", "oscuro_si", "oscuro_no", "emergentes_ok", "emergentes_est", "emergentes_rec",
+        "cookies3_si", "cookies3_no", "imagenes_si", "imagenes_no", "no_suspender"
+    )
+
+    /** Sitios con algún ajuste propio (clave exacta guardada), ordenados. */
+    fun sitiosConAjustes(): List<String> {
+        val r = HashSet<String>()
+        for (k in CLAVES_SITIO) r.addAll(conjunto(k))
+        r.addAll(pausados())
+        return r.sorted()
+    }
+
+    /** Qué tiene personalizado el sitio [h] (clave exacta). */
+    fun resumenSitio(h: String): List<String> {
+        val l = ArrayList<String>()
+        fun en(k: String): Boolean = conjunto(k).contains(h)
+        if (en("escritorio_sitios")) l.add("Versión de escritorio")
+        if (en("oscuro_si")) l.add("Modo oscuro: siempre")
+        if (en("oscuro_no")) l.add("Modo oscuro: nunca")
+        if (en("emergentes_rec")) l.add("Emergentes: recomendado")
+        if (en("emergentes_est")) l.add("Emergentes: estricto")
+        if (en("emergentes_ok")) l.add("Emergentes: permitir todas")
+        if (en("cookies3_si")) l.add("Cookies de terceros: permitir")
+        if (en("cookies3_no")) l.add("Cookies de terceros: bloquear")
+        if (en("imagenes_si")) l.add("Imágenes: cargar siempre")
+        if (en("imagenes_no")) l.add("Imágenes: sin imágenes")
+        if (en("no_suspender")) l.add("No se suspende por inactividad")
+        if (pausados().contains(h)) l.add("Bloqueo de anuncios pausado")
+        return l
+    }
+
+    /** Quita todos los ajustes propios del sitio [h] (clave exacta). No toca permisos, reglas ni CSS. */
+    fun restablecerSitio(h: String) {
+        val ed = sp.edit()
+        for (k in CLAVES_SITIO) {
+            val s = HashSet(conjunto(k))
+            if (s.remove(h)) ed.putStringSet(k, s)
+        }
+        ed.apply()
+        pausarBloqueoEn(h, false)
+    }
+
     /** Qué borrar al cerrar Optimo (suma de bits): 1 cookies y datos de sitios, 2 historial, 4 caché. */
     var borrarAlSalir: Int
         get() = sp.getInt("borrar_al_salir", 0).coerceIn(0, 7)
@@ -364,7 +493,9 @@ class Ajustes(contexto: Context) {
         "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
         "enlaces_propio" to "s", "listas_propias" to "s", "motor" to "s",
         "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss",
-        "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss"
+        "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss",
+        "emergentes_est" to "ss", "emergentes_rec" to "ss", "cookies3_si" to "ss", "cookies3_no" to "ss",
+        "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
