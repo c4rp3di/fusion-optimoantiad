@@ -497,3 +497,22 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntes
 - **Enlaces `intent:` (`abrirExternoSistema`):** se quitan las banderas de concesión de permisos de URI y se rechazan los que apunten a datos `file:`/`content:`. Los enlaces normales a apps no cambian; abrir `.html` locales tampoco (va por `procesarIntent`).
 - **Visor sin red:** `allowFileAccessFromFileURLs` y `allowUniversalAccessFromFileURLs` a `false` de forma explícita (ya eran el valor por defecto).
 - Kotlin sin compilar ni probar en dispositivo (revisado a mano).
+
+## 1.24.0 — Archivos .html locales como «aplicación web»
+
+Un .html del dispositivo que contiene JavaScript ofrece ahora tres opciones: **Aplicación web** (almacenamiento y red, como en otro navegador), «Con JavaScript, sin red ni almacenamiento» y «Sin JavaScript» (las dos últimas, el visor sin red de 1.22.0, sin cambios).
+
+**Aplicación web** (`AppLocal.kt`, `MainActivity.abrirLocalApp`)
+- Pide confirmación por archivo («Ábrelo solo si confías en él») y un **espacio de datos**, sugerido a partir del nombre sin números de versión (`Fusion-25-compila.html` → `fusion-compila`). Los archivos con el mismo espacio comparten datos, así que una versión nueva de la misma aplicación ve los proyectos de la anterior.
+- El archivo no se abre con `file://` sino como `https://app-<espacio>.optimo-local.invalid/<nombre>.html`, servido desde `shouldInterceptRequest` solo a la pestaña que lo abrió. `.invalid` es un dominio reservado que nunca resuelve: si la intercepción fallara, no saldría ninguna petición a un servidor real. Al ser un origen https, la página es un contexto seguro y funcionan **IndexedDB, localStorage, red (fetch/XHR) y el resto de APIs web**; el almacenamiento persiste entre aperturas.
+- Se comporta como una web normal (permisos con confirmación, contenido mixto bloqueado, avisos de certificado de los destinos), salvo: sin bloqueador de anuncios en la propia página, sin historial, sin guardar en la sesión, sin suspensión por inactividad y sin «Guardar para leer sin conexión». Si la página navega a otra web, la pestaña vuelve a ser normal.
+- **☆**: el marcador recuerda el espacio (`optimo://local/<id>.html#app=<espacio>`); abrirlo no vuelve a preguntar.
+- Candado y barra de direcciones: 📄 y `file:///<nombre>`.
+- **Borrar datos:** «Borrar cookies y datos de sitios», «Borrar todo» y el borrado al salir también borran los datos de las aplicaciones web locales (se avisa en el primero).
+
+**Descargas blob:** `<a download>` con `URL.createObjectURL` (exportar ZIP, copias de seguridad…) ya no falla en estas aplicaciones. Un script de inicio recuerda los últimos blobs y el nombre del `download`; al saltar la descarga, Optimo ejecuta en la página un script que pasa el blob a trozos de 768 KB, con confirmación de cada uno, y los escribe en **Descargas** (MediaStore en Android 10+; carpeta pública antes, con permiso). Una a la vez; flujo controlado para no llenar la memoria.
+- **Único puente de la app hacia páginas:** `WebMessageListener` «optimoDescarga», restringido por regla de origen a `https://*.optimo-local.invalid`, con un token aleatorio por descarga (la página no puede iniciar escrituras por su cuenta) y validando el origen de cada mensaje. Las webs normales no lo ven, y siguen sin `addJavascriptInterface`.
+- Solo en aplicaciones web locales: en webs normales las descargas blob: siguen sin admitirse.
+
+Límites: los archivos de la misma carpeta (imágenes, estilos) siguen sin cargarse (404), y el HTML sigue limitado a 20 MB al abrirlo (los datos grandes van en IndexedDB, no en el HTML). El **uso de memoria depende de la propia aplicación** (p. ej. un editor que carga o reescribe todos los proyectos a la vez); Optimo no lo puede arreglar. Android puede liberar el almacenamiento web si falta espacio en el dispositivo: conviene exportar copias.
+Kotlin sin compilar ni probar en dispositivo (revisado a mano).
