@@ -88,3 +88,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 
 - **Probar:** bloquear desde el candado una emergente de anuncios, una página normal con historial y la única pestaña abierta; desbloquear desde el candado y desde «Mis dominios bloqueados».
 - **Idea (no hecho a propósito):** página «Sitio bloqueado por ti · Desbloquear» al abrir a propósito un dominio bloqueado.
+
+## Apuntado en 1.20.0
+
+- **Probar:** cada ajuste por sitio en una web real (emergentes en los tres modos con un sitio de anuncios, cookies de terceros con un inicio de sesión que las necesite, imágenes, suspensión) y «Ajustes por sitio» (ver, restablecer).
+- **Comprobar** que `setAcceptThirdPartyCookies` por navegación se respeta al saltar de un sitio a otro dentro de la misma pestaña.
+- **Idea (no hecho):** audio al cambiar de pestaña por sitio, y mostrar en «Ajustes por sitio» también las reglas y los permisos.
