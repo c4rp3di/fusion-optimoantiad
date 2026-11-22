@@ -1011,6 +1011,7 @@ class MainActivity : Activity() {
     private fun mostrarInfoSitio() {
         val p = actual ?: return
         val estado = when {
+            p.archivoLocal -> "Archivo de este dispositivo (sin conexión)"
             p.sinConexion -> "Página guardada (sin conexión)"
             p.privada -> "Pestaña privada"
             p.inicio -> "Página de inicio de Optimo"
@@ -1182,9 +1183,10 @@ class MainActivity : Activity() {
         s.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         s.cacheMode = if (p.privada) WebSettings.LOAD_NO_CACHE else WebSettings.LOAD_DEFAULT
         if (p.sinConexion) {
-            // Visor de una página guardada: solo lee su archivo. Sin red (ni imágenes, ni enlaces), sin JavaScript y sin almacenamiento.
+            // Visor de una página guardada o de un .html local: solo lee su archivo. Sin red (ni imágenes, ni enlaces) y sin almacenamiento;
+            // sin JavaScript salvo que el usuario lo permita para un archivo local.
             s.allowFileAccess = true
-            s.javaScriptEnabled = false
+            s.javaScriptEnabled = p.permitirJs
             s.domStorageEnabled = false
             s.databaseEnabled = false
             s.blockNetworkLoads = true
@@ -5394,11 +5396,143 @@ class MainActivity : Activity() {
         if (i == null) return
         if (i.action == Intent.ACTION_VIEW) {
             val d = i.data
-            if (d != null) abrirDesdeFuera(d.toString())
+            if (d != null) {
+                val esquema = d.scheme?.lowercase()
+                if (esquema == "content" || esquema == "file") abrirArchivoLocal(d, i.type?.lowercase()) else abrirDesdeFuera(d.toString())
+            }
         } else if (i.action == Intent.ACTION_SEND) {
             val t = i.getStringExtra(Intent.EXTRA_TEXT)
             if (t != null) abrirDesdeFuera(t)
         }
+    }
+
+    // ---------------------------------------------------------------- archivos .html del dispositivo (abrir con Optimo)
+
+    private val MAX_ARCHIVO_LOCAL = 20L * 1024 * 1024
+
+    /** Nombre legible del archivo (el del gestor de archivos si lo da), limpio para mostrar y para usarlo de título. */
+    private fun nombreDeArchivo(uri: Uri): String {
+        var nombre: String? = null
+        try {
+            if (uri.scheme == "content") {
+                contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst()) nombre = c.getString(0)
+                    Unit
+                }
+            }
+        } catch (e: Exception) {
+            nombre = null
+        }
+        if (nombre.isNullOrBlank()) nombre = uri.lastPathSegment
+        val limpio = (nombre ?: "archivo.html").replace(Regex("[^\\p{L}\\p{N} ._()\\-]"), "_")
+        return if (limpio.isBlank()) "archivo.html" else limpio.take(80)
+    }
+
+    /** ¿Hay un <script en los primeros 4 MB del archivo? Sirve para avisar antes de abrirlo con JavaScript. */
+    private fun contieneScripts(archivo: File): Boolean {
+        return try {
+            archivo.inputStream().use { ins ->
+                val buf = ByteArray(4 * 1024 * 1024)
+                var leidos = 0
+                while (leidos < buf.size) {
+                    val n = ins.read(buf, leidos, buf.size - leidos)
+                    if (n < 0) break
+                    leidos += n
+                }
+                String(buf, 0, leidos, Charsets.ISO_8859_1).lowercase().contains("<script")
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    /**
+     * Un .html del dispositivo abierto desde otra app (gestor de archivos, descargas…). Se copia a la caché (máximo 20 MB) y se muestra
+     * en el visor sin red. Los recursos de la misma carpeta (imágenes, estilos) no se cargan: Android solo da acceso al archivo.
+     */
+    private fun abrirArchivoLocal(uri: Uri, tipo: String?) {
+        val nombre = nombreDeArchivo(uri)
+        val minuscula = nombre.lowercase()
+        val esHtml = tipo == "text/html" || tipo == "application/xhtml+xml" ||
+            minuscula.endsWith(".html") || minuscula.endsWith(".htm") || minuscula.endsWith(".xhtml")
+        if (!esHtml) {
+            toast("Optimo solo abre archivos HTML desde el dispositivo")
+            return
+        }
+        Thread {
+            var archivo: File? = null
+            var error: String? = null
+            try {
+                val dir = File(cacheDir, "local")
+                dir.mkdirs()
+                val limite = System.currentTimeMillis() - 12 * 3600000L
+                dir.listFiles()?.forEach { f ->
+                    if (f.lastModified() < limite) f.delete()
+                }
+                val destino = File(dir, System.currentTimeMillis().toString() + ".html")
+                val entrada = contentResolver.openInputStream(uri)
+                if (entrada == null) {
+                    error = "No se pudo leer el archivo"
+                } else {
+                    entrada.use { ins ->
+                        destino.outputStream().use { out ->
+                            val buf = ByteArray(16384)
+                            var total = 0L
+                            while (true) {
+                                val n = ins.read(buf)
+                                if (n < 0) break
+                                total += n
+                                if (total > MAX_ARCHIVO_LOCAL) {
+                                    error = "El archivo es demasiado grande (máximo 20 MB)"
+                                    break
+                                }
+                                out.write(buf, 0, n)
+                            }
+                        }
+                    }
+                    if (error == null) archivo = destino else destino.delete()
+                }
+            } catch (e: Exception) {
+                error = "No se pudo leer el archivo"
+            }
+            val a = archivo
+            val err = error
+            val conScripts = if (a != null) contieneScripts(a) else false
+            runOnUiThread {
+                if (a == null) toast(err ?: "No se pudo leer el archivo") else decidirScriptsLocal(a, nombre, conScripts)
+            }
+        }.start()
+    }
+
+    private fun decidirScriptsLocal(archivo: File, nombre: String, conScripts: Boolean) {
+        if (!conScripts) {
+            abrirLocal(archivo, nombre, false)
+            return
+        }
+        nuevoDialogo()
+            .setTitle(nombre)
+            .setMessage("Este archivo contiene JavaScript. Optimo lo abre sin conexión a internet, y con JavaScript el archivo puede ejecutar su código dentro de la página. Muchos archivos lo necesitan para verse bien.")
+            .setPositiveButton("Con JavaScript") { _, _ -> abrirLocal(archivo, nombre, true) }
+            .setNegativeButton("Sin JavaScript") { _, _ -> abrirLocal(archivo, nombre, false) }
+            .setNeutralButton("Cancelar") { _, _ -> archivo.delete() }
+            .setOnCancelListener { archivo.delete() }
+            .show()
+    }
+
+    /** Abre la copia en una pestaña visor: sin red, sin almacenamiento y sin historial; los enlaces se abren en una pestaña normal. */
+    private fun abrirLocal(archivo: File, nombre: String, conJs: Boolean) {
+        val q = crearPestana(false, null, true, false)
+        if (q == null) {
+            archivo.delete()
+            return
+        }
+        q.sinConexion = true
+        q.archivoLocal = true
+        q.permitirJs = conJs
+        q.url = "file:///" + nombre
+        q.titulo = nombre
+        activar(q)
+        q.web?.loadUrl("file://" + archivo.absolutePath)
     }
 
     private fun abrirDesdeFuera(texto: String) {
