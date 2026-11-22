@@ -114,13 +114,29 @@ object AlmacenSeguro {
         }
     }
 
+    /**
+     * Archivos que existen cifrados pero no se pudieron descifrar en esta ejecución (p. ej. el Keystore falló al arrancar).
+     * No se les escribe encima: quien los lea verá «sin datos», y el siguiente guardado los sobrescribiría vacíos.
+     * Se reintenta al reabrir la app; si se descifran, se desbloquean.
+     */
+    private val bloqueados = HashSet<String>()
+
+    private fun sufijoCopia(f: File) = File(f.path + ".corrupto")
+
     /** Lee un archivo cifrado (o uno antiguo en texto plano, que migra). Null si no existe o no se puede descifrar. */
     fun leerTexto(f: File, etiqueta: String = f.name): String? {
         try {
             if (!f.exists()) return null
             val datos = f.readBytes()
             if (esCifrado(datos)) {
-                val claro = descifrarBytes(datos, etiqueta) ?: return null
+                val claro = descifrarBytes(datos, etiqueta)
+                if (claro == null) {
+                    protegerIlegible(f, datos)
+                    return null
+                }
+                synchronized(bloqueados) { bloqueados.remove(f.absolutePath) }
+                val copia = sufijoCopia(f)
+                if (copia.exists()) copia.delete() // el fallo era pasajero: la copia de seguridad ya no hace falta
                 return String(claro, Charsets.UTF_8)
             }
             val texto = String(datos, Charsets.UTF_8)
@@ -131,8 +147,27 @@ object AlmacenSeguro {
         }
     }
 
+    /**
+     * Un archivo cifrado que no se descifra: la primera vez se guarda una copia («.corrupto») y se bloquea su escritura en esta ejecución,
+     * por si el fallo es pasajero. Si ya había copia (segundo arranque con el mismo fallo, la clave se perdió de verdad) no se bloquea,
+     * para que la app pueda volver a guardar datos nuevos.
+     */
+    private fun protegerIlegible(f: File, datos: ByteArray) {
+        try {
+            val copia = sufijoCopia(f)
+            if (!copia.exists()) {
+                copia.writeBytes(datos)
+                synchronized(bloqueados) { bloqueados.add(f.absolutePath) }
+            }
+        } catch (e: Exception) {
+            // Sin espacio para la copia: se bloquea igualmente, mejor no guardar que perder el original.
+            synchronized(bloqueados) { bloqueados.add(f.absolutePath) }
+        }
+    }
+
     /** Escribe cifrado y de forma atomica (archivo temporal + renombrar). False si no se pudo. */
     fun escribirTexto(f: File, texto: String, etiqueta: String = f.name): Boolean {
+        if (synchronized(bloqueados) { bloqueados.contains(f.absolutePath) }) return false
         val cifrado = cifrarBytes(texto.toByteArray(Charsets.UTF_8), etiqueta) ?: return false
         return try {
             val tmp = File(f.path + ".tmp")
