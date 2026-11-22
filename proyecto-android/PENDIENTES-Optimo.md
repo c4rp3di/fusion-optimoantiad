@@ -109,3 +109,11 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 
 - **Probar:** ☆ en un `.html` local y abrirlo desde marcadores y desde la pantalla de inicio; quitar la ☆ y volver a ponerla; marcador con y sin JavaScript; borrar el marcador desde el gestor (comprobar que se libera el archivo); cerrar y reabrir Optimo.
 - **Idea:** guardar el archivo dentro de la copia de seguridad de marcadores, y permitir cambiar el permiso de JavaScript de un marcador ya guardado.
+
+## Apuntado en 1.24.0 (aplicación web local)
+
+- **Probar:** abrir `Fusion-25-compila.html` como aplicación web, crear un proyecto, cerrar y reabrir (debe seguir ahí), abrir otra versión con el mismo espacio (debe ver los mismos proyectos), guardar con ☆ y abrir desde marcadores y desde la pantalla de inicio.
+- **Probar descargas blob:** exportar un ZIP desde el editor (nombre correcto en Descargas, tamaño correcto, uno grande ≥ 100 MB), y dos descargas seguidas. En Android 8-9 pide el permiso de almacenamiento.
+- **Comprobar** que `shouldInterceptRequest` se llama para `*.optimo-local.invalid` sin resolver DNS (si falla, aparecería «no se puede encontrar el servidor»), que `addWebMessageListener` acepta la regla `https://*.optimo-local.invalid`, y que los orígenes con `.invalid` no activan Safe Browsing ni bloqueos.
+- **Memoria:** con los ~400 MB de proyectos, mirar si el WebView se reinicia (`onRenderProcessGone`) al abrir o al guardar; si pasa, el arreglo está en el editor (guardar solo el proyecto cambiado y cargar los proyectos bajo demanda).
+- **Idea:** excluir los orígenes de aplicaciones web de «Borrar cookies y datos de sitios» (WebStorage.deleteAllData no lo permite; habría que borrar origen por origen), subir el límite de 20 MB con un ajuste, y servir archivos de la misma carpeta si el usuario elige la carpeta.
