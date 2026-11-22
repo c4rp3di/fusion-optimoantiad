@@ -1188,6 +1188,12 @@ class MainActivity : Activity() {
             // Visor de una página guardada o de un .html local: solo lee su archivo. Sin red (ni imágenes, ni enlaces) y sin almacenamiento;
             // sin JavaScript salvo que el usuario lo permita para un archivo local.
             s.allowFileAccess = true
+            // Que un archivo local no pueda leer otros archivos (ya es el valor por defecto; se deja explícito).
+            @Suppress("DEPRECATION")
+            run {
+                s.allowFileAccessFromFileURLs = false
+                s.allowUniversalAccessFromFileURLs = false
+            }
             s.javaScriptEnabled = p.permitirJs
             s.domStorageEnabled = false
             s.databaseEnabled = false
@@ -5394,6 +5400,18 @@ class MainActivity : Activity() {
                 Intent(Intent.ACTION_VIEW, Uri.parse(url))
             }
             val respaldo = intent.getStringExtra("browser_fallback_url")
+            // Un enlace de una web no puede concedir acceso a archivos ni apuntar a archivos locales (como hace Chrome).
+            val esquemaDatos = intent.data?.scheme?.lowercase()
+            if (esquemaDatos == "file" || esquemaDatos == "content") {
+                toast("Enlace bloqueado por seguridad")
+                return
+            }
+            intent.flags = intent.flags and (
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                    Intent.FLAG_GRANT_WRITE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION or
+                    Intent.FLAG_GRANT_PREFIX_URI_PERMISSION
+                ).inv()
             intent.addCategory(Intent.CATEGORY_BROWSABLE)
             intent.component = null
             intent.selector = null
