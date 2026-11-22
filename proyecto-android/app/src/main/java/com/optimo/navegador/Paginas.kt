@@ -122,7 +122,8 @@ object Paginas {
             var n = 0
             for ((titulo, url) in atajos) {
                 if (n >= cfg.maxAccesos) break
-                if (!(url.startsWith("http://") || url.startsWith("https://"))) continue
+                // Solo direcciones web y marcadores de archivos locales (optimo://local/…, los abre MainActivity).
+                if (!(url.startsWith("http://") || url.startsWith("https://") || url.startsWith("optimo://local/"))) continue
                 val nombre = if (titulo.isNotBlank()) titulo.trim() else Omnibox.hostDe(url)
                 val inicial = nombre.firstOrNull()?.uppercaseChar()?.toString() ?: "?"
                 sb.append("<a class=\"a\" href=\"").append(esc(url)).append("\">")
