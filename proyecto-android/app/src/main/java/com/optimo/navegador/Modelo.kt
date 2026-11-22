@@ -113,6 +113,10 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Solo en el visor de un archivo local: el usuario permitió su JavaScript (sigue sin red ni almacenamiento). */
     var permitirJs: Boolean = false
 
+    /** Visor de un archivo local: ruta del archivo (en la caché) que muestra, y dirección de su marcador si ya está guardado. */
+    var archivoRuta: String = ""
+    var urlLocal: String = ""
+
     /** Pestaña suspendida: su WebView se destruyó para liberar memoria y se rehace, con su historial y scroll, al volver a ella. */
     var suspendida: Boolean = false
     var estadoSuspendida: android.os.Bundle? = null
