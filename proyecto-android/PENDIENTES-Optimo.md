@@ -104,3 +104,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - **Probar:** abrir un `.html` desde el gestor de archivos y desde Descargas, con y sin `<script`; un archivo de más de 20 MB; un archivo que no sea HTML; con la app ya abierta y cerrada.
 - **Probar** que Optimo aparece en «Abrir con» en tu gestor de archivos (algunos envían `application/octet-stream` y no lo ofrecerían).
 - **Idea:** abrir `.mhtml`/`.mht`, PDF y archivos con su carpeta de recursos (necesitaría que el usuario elija la carpeta).
+
+## Apuntado en 1.23.0
+
+- **Probar:** ☆ en un `.html` local y abrirlo desde marcadores y desde la pantalla de inicio; quitar la ☆ y volver a ponerla; marcador con y sin JavaScript; borrar el marcador desde el gestor (comprobar que se libera el archivo); cerrar y reabrir Optimo.
+- **Idea:** guardar el archivo dentro de la copia de seguridad de marcadores, y permitir cambiar el permiso de JavaScript de un marcador ya guardado.
