@@ -235,7 +235,7 @@ class MainActivity : Activity() {
         uaEscritorio = calcularUaEscritorio()
         construirUi()
         configurarVentana()
-        restaurarSesion()
+        restaurarSesion(ajustes.arranque == 1 && savedInstanceState == null && !traeEnlace(intent))
         procesarIntent(intent)
         ServicioSegundoPlano.manejador = { orden -> controlarMedios(orden) }
         registrarEscuchaAudio()
@@ -1802,6 +1802,7 @@ class MainActivity : Activity() {
             mostrarAjustes()
         }
         add("Pantalla de inicio…") { mostrarAjustesInicio() }
+        add("Al abrir Optimo: " + nombreArranque()) { elegirArranque() }
         add("Enlaces multimedia, magnets y Mega…") { mostrarAjustesMedia() }
         add("Ventanas emergentes y redirecciones…") { mostrarAjustesEmergentes() }
         add("Listas de bloqueo…") { mostrarListas() }
@@ -2920,6 +2921,31 @@ class MainActivity : Activity() {
             .setNegativeButton("Cancelar") { _, _ -> volver() }
             .setOnCancelListener { volver() }
             .show()
+    }
+
+    // ---------------------------------------------------------------- qué se muestra al abrir Optimo
+
+    private fun nombreArranque(): String =
+        if (!ajustes.guardarSesion) "pantalla de inicio (no se guardan pestañas)"
+        else if (ajustes.arranque == 1) "pantalla de inicio"
+        else "última pestaña"
+
+    private fun elegirArranque() {
+        val modoActual = if (!ajustes.guardarSesion || ajustes.arranque == 1) 1 else 0
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair((if (modoActual == 0) "● " else "") + "Última pestaña: continúa donde lo dejaste, con las demás pestañas abiertas") {
+            ajustes.arranque = 0
+            if (!ajustes.guardarSesion) {
+                ajustes.guardarSesion = true
+                toast("Activado: guardar pestañas abiertas al cerrar")
+            }
+            mostrarAjustes()
+        })
+        items.add(Pair((if (modoActual == 1) "● " else "") + "Pantalla de inicio: se abre una pestaña de inicio nueva (las pestañas guardadas quedan detrás)") {
+            ajustes.arranque = 1
+            mostrarAjustes()
+        })
+        opciones("Al abrir Optimo", items)
     }
 
     // ---------------------------------------------------------------- ajustes por sitio: emergentes y resumen
@@ -5419,7 +5445,15 @@ class MainActivity : Activity() {
         ed.apply()
     }
 
-    private fun restaurarSesion() {
+    /** ¿El intent que abre Optimo trae una dirección (un enlace desde otra app)? Entonces no se añade la pantalla de inicio. */
+    private fun traeEnlace(i: Intent?): Boolean {
+        if (i == null) return false
+        return (i.action == Intent.ACTION_VIEW && i.data != null) ||
+            (i.action == Intent.ACTION_SEND && i.getStringExtra(Intent.EXTRA_TEXT) != null)
+    }
+
+    /** [irAlInicio]: «Al abrir Optimo: pantalla de inicio»; las pestañas guardadas se restauran igualmente y quedan detrás. */
+    private fun restaurarSesion(irAlInicio: Boolean) {
         var restaurada = false
         try {
             val sp = getSharedPreferences("optimo_sesion", Context.MODE_PRIVATE)
@@ -5450,6 +5484,8 @@ class MainActivity : Activity() {
         }
         if (!restaurada) {
             pestanas.clear()
+            nuevaPestana(null)
+        } else if (irAlInicio && actual?.inicio != true) {
             nuevaPestana(null)
         }
     }
