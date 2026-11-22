@@ -98,3 +98,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 ## Apuntado en 1.21.0
 
 - **Probar:** «Al abrir Optimo» en los dos modos con varias pestañas abiertas; abrir un enlace desde otra app con «pantalla de inicio» (no debe quedar una pestaña de inicio de más) y con el guardado de pestañas apagado.
+
+## Apuntado en 1.22.0
+
+- **Probar:** abrir un `.html` desde el gestor de archivos y desde Descargas, con y sin `<script`; un archivo de más de 20 MB; un archivo que no sea HTML; con la app ya abierta y cerrada.
+- **Probar** que Optimo aparece en «Abrir con» en tu gestor de archivos (algunos envían `application/octet-stream` y no lo ofrecerían).
+- **Idea:** abrir `.mhtml`/`.mht`, PDF y archivos con su carpeta de recursos (necesitaría que el usuario elija la carpeta).
