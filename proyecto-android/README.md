@@ -450,3 +450,15 @@ Todo dentro de la lista de pestañas (botón de pestañas), sin servicios ni tar
 - **Listas de bloqueo › «Mis dominios bloqueados (N)…»**: lista de tus dominios; tocar uno lo desbloquea (con confirmación), «Añadir dominio…» a mano (acepta una URL) y «Desbloquear todos…». Usa los mismos datos que «Reglas de sitios y anuncios», sin duplicarlos; también entran en la copia de seguridad.
 - **Alcance, sin cambios:** el bloqueo actúa sobre recursos que cargan otras páginas y sobre emergentes y redirecciones automáticas; la página principal no se bloquea al abrirla a propósito. Necesita «Bloquear anuncios» activado (y «Bloquear redirecciones» para las automáticas).
 - Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
+
+## 1.20.0 — Más ajustes por sitio y pantalla «Ajustes por sitio»
+
+En ⋮ › **Personalizar este sitio…** (ya tenía versión de escritorio, modo oscuro, pausa del bloqueo, CSS y reglas) ahora también, siempre con «según ajustes» por defecto y recordado por sitio (el subdominio hereda del dominio; si hay reglas de ambos manda la más específica):
+- **Ventanas emergentes en este sitio:** según ajustes, recomendado, estricto o permitir todas. Antes solo se podía permitir un sitio. «Permitir todas» incluye las redirecciones automáticas; «recomendado» y «estricto» las bloquean aunque el ajuste general de redirecciones esté apagado. El atajo del menú ⋮ («Emergentes y redirecciones en este sitio») escribe el mismo valor, y los sitios permitidos de antes se conservan.
+- **Cookies de terceros en este sitio:** según ajustes, permitir o bloquear (útil para un inicio de sesión o un contenido incrustado sin abrirlas en todas partes). Se aplica al empezar a navegar; al cambiarlo la página se recarga.
+- **Imágenes en este sitio:** según el ahorro de datos, cargar siempre o sin imágenes.
+- **No suspender este sitio por inactividad** (aparece si la suspensión de pestañas está activada).
+
+**Ajustes › Ajustes por sitio (N)…:** lista de los sitios con algo personalizado; al tocar uno se ve qué tiene (escritorio, modo oscuro, emergentes, cookies, imágenes, suspensión, pausa del bloqueo) y se puede restablecer, o restablecer todos. No toca permisos, reglas ni CSS. Las claves nuevas entran en la copia de seguridad.
+
+Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntesis, tipos y nulos). Sin cambios de JavaScript.
