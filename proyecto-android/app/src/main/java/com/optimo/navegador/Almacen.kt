@@ -487,7 +487,7 @@ class Ajustes(contexto: Context) {
         "enlaces_otros" to "b", "enlaces_tipos" to "i", "rastro_otros" to "b", "rastro_cookies" to "b", "rastro_robots" to "b",
         "rastro_prof" to "i", "rastro_paginas" to "i", "rastro_min" to "i", "rastro_pausa" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
-        "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "historial_dias" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
+        "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "historial_dias" to "i", "arranque" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
         "inicio_c_acento" to "s", "inicio_c_fondo" to "s", "inicio_c_sup" to "s", "inicio_c_texto" to "s", "inicio_propios" to "s",
         "inicio_subtitulo" to "s", "inicio_tema" to "s", "inicio_titulo" to "s", "lectura_fuente" to "s", "lectura_tema" to "s",
@@ -946,6 +946,16 @@ class Ajustes(contexto: Context) {
         get() = sp.getBoolean("guardar_sesion", true)
         set(v) {
             sp.edit().putBoolean("guardar_sesion", v).apply()
+        }
+
+    /**
+     * Qué se muestra al abrir Optimo: 0 la última pestaña (con las demás guardadas), 1 la pantalla de inicio (las guardadas quedan detrás).
+     * Sin «guardar pestañas abiertas al cerrar» siempre se abre la pantalla de inicio.
+     */
+    var arranque: Int
+        get() = sp.getInt("arranque", 0).coerceIn(0, 1)
+        set(v) {
+            sp.edit().putInt("arranque", v.coerceIn(0, 1)).apply()
         }
 
     private fun claveSitio(host: String): String = host.lowercase().removePrefix("www.")
