@@ -94,3 +94,7 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - **Probar:** cada ajuste por sitio en una web real (emergentes en los tres modos con un sitio de anuncios, cookies de terceros con un inicio de sesión que las necesite, imágenes, suspensión) y «Ajustes por sitio» (ver, restablecer).
 - **Comprobar** que `setAcceptThirdPartyCookies` por navegación se respeta al saltar de un sitio a otro dentro de la misma pestaña.
 - **Idea (no hecho):** audio al cambiar de pestaña por sitio, y mostrar en «Ajustes por sitio» también las reglas y los permisos.
+
+## Apuntado en 1.21.0
+
+- **Probar:** «Al abrir Optimo» en los dos modos con varias pestañas abiertas; abrir un enlace desde otra app con «pantalla de inicio» (no debe quedar una pestaña de inicio de más) y con el guardado de pestañas apagado.
