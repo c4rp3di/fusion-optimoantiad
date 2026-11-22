@@ -478,3 +478,11 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano: llaves, paréntes
 - **Limitación:** las imágenes, estilos y otros archivos de la misma carpeta no se cargan, porque Android solo da acceso al archivo elegido. Un `.html` suelto se ve bien; una página guardada con su carpeta de recursos, no.
 - El candado muestra 📄 y el panel «Archivo de este dispositivo (sin conexión)».
 - Si el gestor de archivos envía otro tipo (por ejemplo `application/octet-stream`), Android no ofrecerá Optimo para ese archivo. Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
+
+## 1.23.0 — Marcadores de archivos .html del dispositivo
+
+- **☆ en un archivo local:** al guardar como marcador un `.html` abierto desde el dispositivo, Optimo hace una **copia permanente** del archivo (en el almacenamiento privado de la app; hasta 200 MB en total) y el marcador queda como `optimo://local/<id>.html` (con `#js` si habías permitido su JavaScript). Funciona la ☆ normal y la pulsación larga (nombre y carpeta).
+- **Abrirlo:** tocar el marcador (en el gestor de marcadores o en los accesos de la pantalla de inicio) copia el archivo a la caché y lo muestra en el mismo visor sin red de la 1.22.0, con la decisión de JavaScript que guardaste. En el gestor aparece como «Archivo del dispositivo (sin conexión)».
+- **Quitarlo:** quitar el marcador (☆ o «Eliminar» en el gestor) borra su copia. Al arrancar, Optimo borra las copias sin marcador de más de un día.
+- **Límites:** los marcadores de archivo van en la copia de seguridad como dirección, no con el archivo: restaurados en otro móvil avisan de que el archivo no está. Siguen sin cargarse los recursos de la misma carpeta (imágenes, estilos).
+- Kotlin sin compilar ni probar en dispositivo (revisado a mano). Sin cambios de JavaScript.
