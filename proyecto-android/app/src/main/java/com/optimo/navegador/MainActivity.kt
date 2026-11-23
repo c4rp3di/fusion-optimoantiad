@@ -1356,11 +1356,15 @@ class MainActivity : Activity() {
     }
 
     private fun opciones(titulo: String?, items: List<Pair<String, () -> Unit>>) {
-        val b = nuevoDialogo()
-        if (titulo != null) b.setTitle(titulo)
-        val etiquetas = Array(items.size) { i -> items[i].first }
-        b.setItems(etiquetas) { _, i -> items[i].second() }
-        b.show()
+        val h = Hoja(this, paleta, actual?.privada == true)
+        if (titulo != null) h.titulo(titulo)
+        for (par in items) {
+            h.fila(par.first) {
+                h.cerrar()
+                par.second()
+            }
+        }
+        h.mostrar()
     }
 
     // ---------------------------------------------------------------- pestañas
@@ -1966,108 +1970,115 @@ class MainActivity : Activity() {
 
     private fun si(b: Boolean): String = if (b) "sí" else "no"
 
+    // ---------------------------------------------------------------- menú lateral (sustituye al menú ⋮ y a Ajustes)
+
     private fun mostrarMenu() {
-        val p = actual ?: return
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Nueva pestaña") { nuevaPestana(null) }
-        add("Nueva pestaña privada") { nuevaPestana(null, true) }
-        add("Buscar en la página") { mostrarBusqueda() }
-        val medio = p.medioDetectado
-        if (medio != null && AppsMedia.apps(this, medio, null).isNotEmpty()) {
-            add("▶ Reproducir vídeo de la página en otra app…") {
-                elegirAppMedio(medio, null, p, p.web?.settings?.userAgentString, p.titulo)
-            }
-        }
-        if (!p.privada && ReproductorExterno.esMega(p.url) && AppsMedia.apps(this, p.url, null).isNotEmpty()) {
-            add("▶ Abrir este enlace de Mega en otra app…") {
-                elegirAppMedio(p.url, null, p, null, p.titulo)
-            }
-        }
-        add("Marcadores") { mostrarMarcadores() }
-        add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
-        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) add("Buscar enlaces en la página…") { buscarEnlaces(p) }
-        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) add("Rastrear este sitio…") { configurarRastreo(p) }
-        val ur = ultimoRastreo
-        if (ur != null) add("Ver el último rastreo (" + ur.enlaces.size + " enlaces)") { mostrarResultadoRastreo(p, ur) }
-        if (ListasEnlaces.todas().isNotEmpty()) add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
-        add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
-        // Todo el bloqueo y la privacidad de la página (y el acceso al resto de ajustes) está en el escudo.
-        add("🛡 Protección y privacidad…") { alPulsarEscudo() }
-        if (!p.inicio && p.url.isNotEmpty()) {
-            if (!p.archivoLocal) add("Compartir página") { compartir(p.url) }
-            if (p.url.startsWith("http")) {
-                if (p.web?.settings?.blockNetworkImage == true) {
-                    add("Cargar imágenes en esta página (ahorro de datos)") {
-                        val w = p.web
-                        if (w != null) {
-                            w.settings.blockNetworkImage = false
-                            w.reload()
-                        }
-                    }
-                }
-                if (!p.privada && !p.sinConexion && !p.appWeb) add("Guardar página para leer sin conexión") { guardarSinConexion(p) }
-                add("Modo lectura") { abrirModoLectura(p) }
-                // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
-                if (!p.privada) add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
-            }
-            add("Herramientas de desarrollo") { herramientas.alternar() }
-        }
-        add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
-        add("Pantalla completa") { entrarPaginaCompleta() }
-        add("Ir a la página de inicio") { mostrarInicio(p) }
-        add("Descargas") { abrirDescargas() }
-        add("Ajustes") { mostrarAjustes() }
-        if (cerradas.isNotEmpty()) add("Reabrir pestaña cerrada (" + cerradas.size + ")…") { mostrarCerradas() }
-        add("Cerrar todas las pestañas") { cerrarTodas() }
-        val partes = ArrayList<String>()
-        if (ajustes.bloquearAnuncios) partes.add("Bloqueados en esta página: " + p.bloqueados.get())
-        val em = p.emergentesBloqueados.get()
-        if (em > 0) partes.add("Emergentes y redirecciones bloqueadas: $em")
-        opciones(if (partes.isEmpty()) null else partes.joinToString("\n"), items)
+        abrirMenuLateral()
     }
 
-    private fun mostrarAjustes() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
+    private fun abrirMenuLateral(destino: String = MenuLateral.RAIZ) {
+        MenuLateral(this, paleta, anfitrionMenu, ajustes, destino).mostrar()
+    }
+
+    /** Lo que el menú lateral pregunta y pide a esta pantalla. */
+    private val anfitrionMenu = object : AnfitrionMenu {
+        override fun pestana(): Pestana? = actual
+        override fun ejecutar(a: AccionMenu) = ejecutarMenu(a)
+        override fun estado(p: Pestana): EstadoEscudo = estadoEscudo(p)
+        override fun cerradas(): Int = this@MainActivity.cerradas.size
+        override fun paginasGuardadas(): Int = PaginasGuardadas.todas().size
+        override fun listasEnlaces(): Int = ListasEnlaces.todas().size
+        override fun enlacesRastreo(): Int = ultimoRastreo?.enlaces?.size ?: -1
+
+        override fun hayMedio(p: Pestana): Boolean {
+            val m = p.medioDetectado
+            return m != null && AppsMedia.apps(this@MainActivity, m, null).isNotEmpty()
         }
-        add("Buscador: " + Omnibox.motor(ajustes.motor).nombre) { elegirMotor() }
-        add("🛡 Protección y privacidad…") { abrirCentro() }
-        add("Barra de direcciones…") { mostrarAjustesBarra() }
-        add("Pantalla de inicio…") { mostrarAjustesInicio() }
-        add("Al abrir Optimo: " + nombreArranque()) { elegirArranque() }
-        add("Enlaces multimedia, magnets y Mega…") { mostrarAjustesMedia() }
-        add("Herramientas de desarrollo: captura desde el inicio: " + si(ajustes.devCaptura)) {
-            ajustes.devCaptura = !ajustes.devCaptura
-            reinstalarDev()
-            toast("Recarga las páginas abiertas para aplicarlo")
-            mostrarAjustes()
-        }
-        add("Oscurecer páginas web: " + si(ajustes.oscurecerPaginas)) {
-            ajustes.oscurecerPaginas = !ajustes.oscurecerPaginas
-            for (q in pestanas) {
-                val w = q.web
-                if (w != null) aplicarAjustesWeb(w)
+
+        override fun hayMega(p: Pestana): Boolean =
+            !p.privada && ReproductorExterno.esMega(p.url) && AppsMedia.apps(this@MainActivity, p.url, null).isNotEmpty()
+
+        override fun imagenesBloqueadas(p: Pestana): Boolean = p.web?.settings?.blockNetworkImage == true
+        override fun escritorio(p: Pestana): Boolean = p.escritorio
+        override fun buscador(): String = Omnibox.motor(ajustes.motor).nombre
+        override fun arranque(): String = nombreArranque()
+        override fun oscurecer(): Boolean = ajustes.oscurecerPaginas
+        override fun ahorro(): String = NOMBRES_AHORRO[ajustes.ahorroDatos]
+        override fun devCaptura(): Boolean = ajustes.devCaptura
+    }
+
+    private fun ejecutarMenu(a: AccionMenu) {
+        val p = actual
+        when (a) {
+            AccionMenu.NUEVA -> nuevaPestana(null)
+            AccionMenu.PRIVADA -> nuevaPestana(null, true)
+            AccionMenu.MARCADORES -> mostrarMarcadores()
+            AccionMenu.HISTORIAL -> mostrarLista("Historial", historial, "El historial está vacío", true)
+            AccionMenu.DESCARGAS -> abrirDescargas()
+            AccionMenu.COMPARTIR -> if (p != null) compartir(p.url)
+            AccionMenu.COPIAR_DIRECCION -> if (p != null) copiar(p.url)
+            AccionMenu.IR_INICIO -> if (p != null) mostrarInicio(p)
+            AccionMenu.PROTECCION_PAGINA -> alPulsarEscudo()
+            AccionMenu.CENTRO -> abrirCentro()
+            AccionMenu.BUSCAR_PAGINA -> mostrarBusqueda()
+            AccionMenu.LEER -> if (p != null) abrirModoLectura(p)
+            AccionMenu.ESCRITORIO -> alternarEscritorio()
+            AccionMenu.PANTALLA -> entrarPaginaCompleta()
+            AccionMenu.GUARDAR_SIN_CONEXION -> if (p != null) guardarSinConexion(p)
+            AccionMenu.BUSCAR_ENLACES -> if (p != null) buscarEnlaces(p)
+            AccionMenu.RASTREAR -> if (p != null) configurarRastreo(p)
+            AccionMenu.VER_RASTREO -> {
+                val ur = ultimoRastreo
+                if (p != null && ur != null) mostrarResultadoRastreo(p, ur)
             }
-            mostrarAjustes()
-        }
-        add("Ahorro de datos (sin imágenes): " + NOMBRES_AHORRO[ajustes.ahorroDatos]) {
-            ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
-            for (q in pestanas) {
-                val w = q.web
-                if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w, hostDeWeb(w))
+            AccionMenu.CARGAR_IMAGENES -> {
+                val w = p?.web
+                if (w != null) {
+                    w.settings.blockNetworkImage = false
+                    w.reload()
+                }
             }
-            toast("Se aplica a las páginas que cargues desde ahora")
-            mostrarAjustes()
+            AccionMenu.PERSONALIZAR -> if (p != null) mostrarPersonalizarSitio(p)
+            AccionMenu.HERRAMIENTAS -> herramientas.alternar()
+            AccionMenu.REPRODUCIR_MEDIO -> {
+                val medio = p?.medioDetectado
+                if (p != null && medio != null) elegirAppMedio(medio, null, p, p.web?.settings?.userAgentString, p.titulo)
+            }
+            AccionMenu.ABRIR_MEGA -> if (p != null) elegirAppMedio(p.url, null, p, null, p.titulo)
+            AccionMenu.PAGINAS_GUARDADAS -> mostrarPaginasGuardadas()
+            AccionMenu.LISTAS_ENLACES -> mostrarListasEnlaces()
+            AccionMenu.REABRIR -> mostrarCerradas()
+            AccionMenu.CERRAR_TODAS -> cerrarTodas()
+            AccionMenu.MEDIA -> mostrarAjustesMedia()
+            AccionMenu.SEGUNDO_PLANO -> mostrarSegundoPlano()
+            AccionMenu.LECTURA_VOZ -> mostrarAjustesLectura()
+            AccionMenu.BARRA -> mostrarAjustesBarra()
+            AccionMenu.INICIO_AJUSTES -> mostrarAjustesInicio()
+            AccionMenu.OSCURECER -> {
+                ajustes.oscurecerPaginas = !ajustes.oscurecerPaginas
+                for (q in pestanas) {
+                    val w = q.web
+                    if (w != null) aplicarAjustesWeb(w)
+                }
+            }
+            AccionMenu.AHORRO -> {
+                ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
+                for (q in pestanas) {
+                    val w = q.web
+                    if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w, hostDeWeb(w))
+                }
+                toast("Se aplica a las páginas que cargues desde ahora")
+            }
+            AccionMenu.MOTOR -> elegirMotor()
+            AccionMenu.ARRANQUE -> elegirArranque()
+            AccionMenu.DEV_CAPTURA -> {
+                ajustes.devCaptura = !ajustes.devCaptura
+                reinstalarDev()
+                toast("Recarga las páginas abiertas para aplicarlo")
+            }
+            AccionMenu.COPIA -> mostrarCopiaSeguridad()
+            AccionMenu.ACERCA -> acercaDe()
         }
-        add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
-        add("Lectura y voz…") { mostrarAjustesLectura() }
-        add("Copia de seguridad…") { mostrarCopiaSeguridad() }
-        add("Acerca de Optimo") { acercaDe() }
-        opciones("Ajustes", items)
     }
 
     // ---------------------------------------------------------------- ventanas emergentes y redirecciones
@@ -2515,7 +2526,7 @@ class MainActivity : Activity() {
             .setSingleChoiceItems(nombres, elegido) { d, i ->
                 ajustes.motor = Omnibox.MOTORES[i].id
                 d.dismiss()
-                mostrarAjustes()
+                abrirMenuLateral(MenuLateral.GENERAL)
             }
             .setNegativeButton("Cerrar", null)
             .show()
@@ -3160,11 +3171,11 @@ class MainActivity : Activity() {
                 ajustes.guardarSesion = true
                 toast("Activado: guardar pestañas abiertas al cerrar")
             }
-            mostrarAjustes()
+            abrirMenuLateral(MenuLateral.GENERAL)
         })
         items.add(Pair((if (modoActual == 1) "● " else "") + "Pantalla de inicio: se abre una pestaña de inicio nueva (las pestañas guardadas quedan detrás)") {
             ajustes.arranque = 1
-            mostrarAjustes()
+            abrirMenuLateral(MenuLateral.GENERAL)
         })
         opciones("Al abrir Optimo", items)
     }
@@ -3198,7 +3209,7 @@ class MainActivity : Activity() {
             items.add(Pair<String, () -> Unit>(h + " — " + n + (if (n == 1) " ajuste" else " ajustes"), { detalleAjustesSitio(h) }))
         }
         if (sitios.isNotEmpty()) items.add(Pair<String, () -> Unit>("Restablecer todos…", { confirmarRestablecerSitios() }))
-        items.add(Pair<String, () -> Unit>("Listo", { mostrarAjustes() }))
+        items.add(Pair<String, () -> Unit>("Listo", { abrirCentro() }))
         val titulo = if (sitios.isEmpty()) {
             "Ningún sitio tiene ajustes propios\n(se crean en ⋮ › Personalizar este sitio)"
         } else {
