@@ -195,6 +195,13 @@ class MainActivity : Activity() {
     private lateinit var btnMarcador: TextView
     private lateinit var btnPestanas: TextView
     private lateinit var btnAltavoz: TextView
+    private lateinit var btnEscudo: android.widget.FrameLayout
+    private lateinit var escudoIcono: VistaEscudo
+    private lateinit var escudoNum: TextView
+    private lateinit var btnMarcadores: TextView
+    private lateinit var btnPantalla: TextView
+    private lateinit var cajaOmnibox: android.widget.FrameLayout
+    private val escudoPendiente = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var barraSuperior: LinearLayout
     private lateinit var borrarTexto: TextView
     private lateinit var barraInferior: LinearLayout
@@ -224,6 +231,8 @@ class MainActivity : Activity() {
         silenciador = Silenciador(this)
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
+        BarraConfig.iniciar(this)
+        EstadisticasBloqueo.iniciar(this)
         PaginasGuardadas.iniciar(this)
         ListasEnlaces.iniciar(this)
         ListasManager.iniciar(this, ajustes)
@@ -276,6 +285,7 @@ class MainActivity : Activity() {
         enPantalla = false
         rastreador?.parar("app en segundo plano")
         revisarSuspension(false)
+        EstadisticasBloqueo.guardarSiHaceFalta()
         if (ajustes.borrarAlSalir != 0 && !isChangingConfigurations) ajustes.salidaPendiente = true
     }
 
@@ -727,7 +737,7 @@ class MainActivity : Activity() {
         candado.gravity = Gravity.CENTER
         candado.isClickable = true
         candado.setOnClickListener { mostrarInfoSitio() }
-        barraSup.addView(candado, LinearLayout.LayoutParams(34.dp(), ViewGroup.LayoutParams.WRAP_CONTENT))
+        // Los botones de la barra se colocan en aplicarBarra() según Ajustes › Barra de direcciones.
 
         omnibox = EditText(this)
         omnibox.hint = "Busca o escribe una dirección"
@@ -774,21 +784,34 @@ class MainActivity : Activity() {
             omnibox.requestFocus()
             mostrarTeclado(omnibox)
         }
-        val cajaOmnibox = FrameLayout(this)
+        cajaOmnibox = FrameLayout(this)
         cajaOmnibox.addView(omnibox, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         cajaOmnibox.addView(
             borrarTexto,
             FrameLayout.LayoutParams(36.dp(), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.END or Gravity.CENTER_VERTICAL)
         )
-        barraSup.addView(cajaOmnibox, LinearLayout.LayoutParams(0, 40.dp(), 1f))
         // Altavoz: solo aparece si la pestaña suena o está silenciada (tocar para silenciar / activar el sonido)
         btnAltavoz = boton("🔊", 17f) { actual?.let { alternarSilencio(it) } }
         btnAltavoz.visibility = View.GONE
-        barraSup.addView(btnAltavoz, LinearLayout.LayoutParams(38.dp(), 40.dp()))
-        // Marcadores (junto al de pantalla completa, que queda en el extremo derecho)
-        barraSup.addView(boton("🔖", 17f) { mostrarMarcadores() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
-        barraSup.addView(boton("⛶", 18f) { entrarPaginaCompleta() }, LinearLayout.LayoutParams(38.dp(), 40.dp()))
+        btnMarcadores = boton("🔖", 17f) { mostrarMarcadores() }
+        btnPantalla = boton("⛶", 18f) { entrarPaginaCompleta() }
+        // Escudo: estado de la protección en la página activa (toca para ver el panel)
+        btnEscudo = android.widget.FrameLayout(this)
+        btnEscudo.isClickable = true
+        ripple(btnEscudo)
+        btnEscudo.setOnClickListener { alPulsarEscudo() }
+        escudoIcono = VistaEscudo(this)
+        btnEscudo.addView(escudoIcono, android.widget.FrameLayout.LayoutParams(22.dp(), 22.dp(), Gravity.CENTER))
+        escudoNum = TextView(this)
+        escudoNum.textSize = 9f
+        escudoNum.setTextColor(Color.WHITE)
+        escudoNum.gravity = Gravity.CENTER
+        escudoNum.setPadding(4.dp(), 0, 4.dp(), 0)
+        escudoNum.background = fondoRedondeado(paleta.seguro, 8.dp())
+        escudoNum.visibility = View.GONE
+        btnEscudo.addView(escudoNum, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 14.dp(), Gravity.TOP or Gravity.END))
         barraSuperior = barraSup
+        aplicarBarra()
         principal.addView(
             barraSup,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -980,7 +1003,195 @@ class MainActivity : Activity() {
         btnAltavoz.visibility = if (verAltavoz) View.VISIBLE else View.GONE
         btnAltavoz.text = if (p.silenciada) "🔇" else "🔊"
         btnAltavoz.setTextColor(if (p.silenciada) paleta.advertencia else paleta.texto)
+        actualizarEscudo(p)
         actualizarProgreso()
+    }
+
+    // ---------------------------------------------------------------- barra de direcciones configurable y escudo
+
+    /** Monta la barra de direcciones según [BarraConfig]: elementos visibles, orden, tamaños, separación y alto. */
+    private fun aplicarBarra() {
+        val barra = barraSuperior
+        barra.removeAllViews()
+        val alto = BarraConfig.alto.dp()
+        var primero = true
+        for (e in BarraConfig.orden()) {
+            if (e.id != BarraConfig.OMNIBOX && !e.visible) continue
+            val v: View
+            val lp: LinearLayout.LayoutParams
+            if (e.id == BarraConfig.OMNIBOX) {
+                v = cajaOmnibox
+                lp = LinearLayout.LayoutParams(0, alto, 1f)
+            } else {
+                v = when (e.id) {
+                    "candado" -> candado
+                    "escudo" -> btnEscudo
+                    "altavoz" -> btnAltavoz
+                    "marcadores" -> btnMarcadores
+                    else -> btnPantalla
+                }
+                lp = LinearLayout.LayoutParams(e.tamano.dp(), alto)
+                if (v is TextView) v.textSize = e.tamano * 0.45f
+                if (e.id == "escudo") {
+                    val lado = (e.tamano * 0.58f).toInt().dp()
+                    escudoIcono.layoutParams = android.widget.FrameLayout.LayoutParams(lado, lado, Gravity.CENTER)
+                }
+            }
+            if (!primero) lp.leftMargin = BarraConfig.separacion.dp()
+            primero = false
+            barra.addView(v, lp)
+        }
+        if (actual != null) actualizarUi()
+    }
+
+    private fun estadoEscudo(p: Pestana): EstadoEscudo {
+        if (p.inicio || p.appWeb || p.sinConexion || p.archivoLocal || !p.url.startsWith("http")) return EstadoEscudo.NO_APLICA
+        if (!ajustes.bloquearAnuncios) return EstadoEscudo.APAGADO
+        if (bloqueoPausadoEnPagina(p.url)) return EstadoEscudo.PAUSADO
+        return EstadoEscudo.ACTIVO
+    }
+
+    private fun actualizarEscudo(p: Pestana) {
+        val estado = estadoEscudo(p)
+        when (estado) {
+            EstadoEscudo.ACTIVO -> escudoIcono.fijar(paleta.seguro, true, false, true)
+            EstadoEscudo.PAUSADO -> escudoIcono.fijar(paleta.advertencia, false, true, false)
+            EstadoEscudo.APAGADO -> escudoIcono.fijar(paleta.tenue, false, true, false)
+            EstadoEscudo.NO_APLICA -> escudoIcono.fijar(paleta.tenue, false, false, false)
+        }
+        btnEscudo.alpha = if (estado == EstadoEscudo.NO_APLICA) 0.5f else 1f
+        val n = p.bloqueados.get() + p.emergentesBloqueados.get()
+        if (estado == EstadoEscudo.ACTIVO && n > 0 && BarraConfig.contador) {
+            escudoNum.text = if (n > 99) "99+" else n.toString()
+            escudoNum.visibility = View.VISIBLE
+        } else {
+            escudoNum.visibility = View.GONE
+        }
+    }
+
+    /** Desde cualquier hilo: refresca el contador del escudo como mucho cada 0,7 s. */
+    private fun solicitarRefrescoEscudo(p: Pestana) {
+        if (p.privada && !BarraConfig.contador) return
+        if (!escudoPendiente.compareAndSet(false, true)) return
+        manejadorPrincipal.postDelayed({
+            escudoPendiente.set(false)
+            val a = actual
+            if (a != null && a === p) actualizarEscudo(a)
+        }, 700L)
+    }
+
+    /** Cuenta una emergente o redirección bloqueada (cualquier hilo): contador de la página y estadísticas. */
+    private fun contarEmergente(p: Pestana?, redireccion: Boolean = false) {
+        if (p == null) return
+        p.emergentesBloqueados.incrementAndGet()
+        if (!p.privada) {
+            EstadisticasBloqueo.registrar(
+                if (redireccion) EstadisticasBloqueo.REDIRECCION else EstadisticasBloqueo.EMERGENTE,
+                ReglasUsuario.clave(hostDePagina(p.url)), null
+            )
+        }
+        solicitarRefrescoEscudo(p)
+    }
+
+    private fun alPulsarEscudo() {
+        val p = actual ?: return
+        if (estadoEscudo(p) == EstadoEscudo.NO_APLICA) abrirCentro() else PanelProteccion(this, paleta, ajustes, anfitrion, p).mostrar()
+    }
+
+    private fun abrirCentro() {
+        CentroProteccion(this, paleta, ajustes, anfitrion, actual?.privada == true).mostrar()
+    }
+
+    private fun mostrarAjustesBarra() {
+        AjustesBarra(this, paleta, { nuevoDialogo() }) { aplicarBarra() }.mostrar()
+    }
+
+    /** Lo que el panel del escudo y el centro de protección piden a esta pantalla. */
+    private val anfitrion = object : AnfitrionProteccion {
+        override fun estado(p: Pestana) = estadoEscudo(p)
+
+        override fun fijarBloqueoGlobal(activo: Boolean) {
+            ajustes.bloquearAnuncios = activo
+            reinstalarAnuncios()
+            actual?.let { actualizarEscudo(it) }
+        }
+
+        override fun fijarCookiesTerceros(activas: Boolean) {
+            ajustes.cookiesTerceros = activas
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) aplicarAjustesWeb(w)
+            }
+        }
+
+        override fun alternarPausa(p: Pestana) {
+            alternarPausaBloqueo(p)
+            actualizarEscudo(p)
+        }
+
+        override fun recargarConAjustes(p: Pestana, host: String) {
+            val w = p.web
+            if (w != null) {
+                prepararNavegacion(p, w, host)
+                w.reload()
+            }
+            actualizarEscudo(p)
+        }
+
+        override fun elegirEmergentes(p: Pestana, host: String, alTerminar: () -> Unit) = elegirEmergentesSitio(p, host, alTerminar)
+        override fun quitarCapa(p: Pestana) = quitarMuros(p)
+        override fun elegirElemento(p: Pestana) = iniciarSeleccion(p)
+        override fun bloquearSitio(p: Pestana) = this@MainActivity.bloquearSitio(p)
+        override fun desbloquearSitio(p: Pestana) = this@MainActivity.desbloquearSitio(p)
+        override fun datosDelSitio(host: String) = mostrarPrivacidadSitio(host)
+        override fun personalizar(p: Pestana) = mostrarPersonalizarSitio(p)
+        override fun conexion() = mostrarInfoSitio()
+        override fun verBloqueados(p: Pestana, host: String) = mostrarBloqueadosPagina(p, host)
+
+        override fun permitirDominio(p: Pestana, dominio: String) {
+            val items = ArrayList<Pair<String, () -> Unit>>()
+            items.add(Pair<String, () -> Unit>("Permitir solo en este sitio", {
+                toast(permitirDominioDevTools(dominio, false))
+                p.web?.reload()
+            }))
+            items.add(Pair<String, () -> Unit>("Permitir en todos los sitios", {
+                toast(permitirDominioDevTools(dominio, true))
+                p.web?.reload()
+            }))
+            items.add(Pair<String, () -> Unit>("Cancelar", { }))
+            opciones("Permitir " + dominio, items)
+        }
+
+        override fun abrirCentro() = this@MainActivity.abrirCentro()
+
+        override fun abrir(destino: Destino) {
+            when (destino) {
+                Destino.LISTAS -> mostrarListas()
+                Destino.TECNICAS -> elegirTecnicasAnuncios()
+                Destino.REGLAS -> mostrarReglasUsuario()
+                Destino.DOMINIOS -> mostrarDominiosPropios()
+                Destino.PAUSADOS -> mostrarSitiosPausados()
+                Destino.POR_SITIO -> mostrarAjustesPorSitio()
+                Destino.EMERGENTES_MODO -> elegirModoEmergentes()
+                Destino.EMERGENTES_SITIOS -> editarSitiosEmergentes()
+                Destino.PRIVACIDAD -> mostrarPrivacidad()
+                Destino.COPIA -> mostrarCopiaSeguridad()
+                Destino.CERTIFICADOS -> mostrarExcepcionesSsl()
+                Destino.PERMISOS -> mostrarPermisosSitios()
+                Destino.BARRA -> mostrarAjustesBarra()
+            }
+        }
+
+        override fun avisar(texto: String) = toast(texto)
+
+        override fun confirmar(titulo: String, mensaje: String, boton: String, accion: () -> Unit) {
+            nuevoDialogo()
+                .setTitle(titulo)
+                .setMessage(mensaje)
+                .setPositiveButton(boton) { _, _ -> accion() }
+                .setNegativeButton("Cancelar", null)
+                .show()
+        }
     }
 
     // ---------------------------------------------------------------- silenciar pestañas
@@ -1606,7 +1817,7 @@ class MainActivity : Activity() {
         }
         val cfg = Paginas.ConfigInicio(
             ajustes.inicioTitulo, ajustes.inicioSubtitulo, ajustes.inicioBuscador, ajustes.inicioAccesos,
-            max, ajustes.inicioCuadrados, ajustes.inicioEnlacePersonalizar
+            max, ajustes.inicioCuadrados, ajustes.inicioEnlacePersonalizar, ajustes.inicioEscudo
         )
         return Paginas.inicio(coloresInicio(), Omnibox.motor(ajustes.motor), atajos, cfg)
     }
@@ -1783,14 +1994,11 @@ class MainActivity : Activity() {
         if (ur != null) add("Ver el último rastreo (" + ur.enlaces.size + " enlaces)") { mostrarResultadoRastreo(p, ur) }
         if (ListasEnlaces.todas().isNotEmpty()) add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
+        // Todo el bloqueo y la privacidad de la página (y el acceso al resto de ajustes) está en el escudo.
+        add("🛡 Protección y privacidad…") { alPulsarEscudo() }
         if (!p.inicio && p.url.isNotEmpty()) {
             if (!p.archivoLocal) add("Compartir página") { compartir(p.url) }
-            add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
             if (p.url.startsWith("http")) {
-                val pausadoAqui = bloqueoPausadoEnPagina(p.url)
-                if (!p.privada && !p.appWeb && (ajustes.bloquearAnuncios || pausadoAqui)) {
-                    add("Bloqueo de anuncios en este sitio: " + (if (pausadoAqui) "pausado (reanudar)" else "activo (pausar)")) { alternarPausaBloqueo(p) }
-                }
                 if (p.web?.settings?.blockNetworkImage == true) {
                     add("Cargar imágenes en esta página (ahorro de datos)") {
                         val w = p.web
@@ -1801,24 +2009,14 @@ class MainActivity : Activity() {
                     }
                 }
                 if (!p.privada && !p.sinConexion && !p.appWeb) add("Guardar página para leer sin conexión") { guardarSinConexion(p) }
-                add("Quitar capa que tapa la página") { quitarMuros(p) }
                 add("Modo lectura") { abrirModoLectura(p) }
                 // Se guardan en disco con el nombre del sitio: no se ofrecen en pestañas privadas.
                 if (!p.privada) add("Personalizar este sitio…") { mostrarPersonalizarSitio(p) }
             }
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
-        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) {
-            if (!p.privada) add("Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) }
-            val hostEm = Omnibox.hostDe(p.url)
-            val ok = ajustes.emergentesEfectivo(hostEm) == 2
-            add("Emergentes y redirecciones en este sitio: " + (if (ok) "permitidas" else "bloqueadas")) {
-                // Atajo: permitir todas o volver al modo normal. Los otros modos se eligen en «Personalizar este sitio».
-                ajustes.fijarEmergentesEn(hostEm, if (!ok) 2 else if (ajustes.emergentes == 2) 0 else -1)
-                toast(if (ok) "Bloqueadas en este sitio" else "Permitidas en este sitio")
-            }
-        }
         add("Versión de escritorio: " + si(p.escritorio)) { alternarEscritorio() }
+        add("Pantalla completa") { entrarPaginaCompleta() }
         add("Ir a la página de inicio") { mostrarInicio(p) }
         add("Descargas") { abrirDescargas() }
         add("Ajustes") { mostrarAjustes() }
@@ -1837,27 +2035,15 @@ class MainActivity : Activity() {
             items.add(Pair(t, a))
         }
         add("Buscador: " + Omnibox.motor(ajustes.motor).nombre) { elegirMotor() }
-        add("Bloquear anuncios y rastreadores: " + si(ajustes.bloquearAnuncios)) {
-            ajustes.bloquearAnuncios = !ajustes.bloquearAnuncios
-            reinstalarAnuncios()
-            mostrarAjustes()
-        }
+        add("🛡 Protección y privacidad…") { abrirCentro() }
+        add("Barra de direcciones…") { mostrarAjustesBarra() }
         add("Pantalla de inicio…") { mostrarAjustesInicio() }
         add("Al abrir Optimo: " + nombreArranque()) { elegirArranque() }
         add("Enlaces multimedia, magnets y Mega…") { mostrarAjustesMedia() }
-        add("Ventanas emergentes y redirecciones…") { mostrarAjustesEmergentes() }
-        add("Listas de bloqueo…") { mostrarListas() }
-        add("Técnicas contra anuncios…") { elegirTecnicasAnuncios() }
-        add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
-        add("Ajustes por sitio (" + ajustes.sitiosConAjustes().size + ")…") { mostrarAjustesPorSitio() }
         add("Herramientas de desarrollo: captura desde el inicio: " + si(ajustes.devCaptura)) {
             ajustes.devCaptura = !ajustes.devCaptura
             reinstalarDev()
             toast("Recarga las páginas abiertas para aplicarlo")
-            mostrarAjustes()
-        }
-        add("Usar HTTPS primero: " + si(ajustes.httpsPrimero)) {
-            ajustes.httpsPrimero = !ajustes.httpsPrimero
             mostrarAjustes()
         }
         add("Oscurecer páginas web: " + si(ajustes.oscurecerPaginas)) {
@@ -1877,18 +2063,9 @@ class MainActivity : Activity() {
             toast("Se aplica a las páginas que cargues desde ahora")
             mostrarAjustes()
         }
-        add("Permitir cookies de terceros: " + si(ajustes.cookiesTerceros)) {
-            ajustes.cookiesTerceros = !ajustes.cookiesTerceros
-            for (q in pestanas) {
-                val w = q.web
-                if (w != null) aplicarAjustesWeb(w)
-            }
-            mostrarAjustes()
-        }
         add("Reproducción en segundo plano…") { mostrarSegundoPlano() }
         add("Lectura y voz…") { mostrarAjustesLectura() }
         add("Copia de seguridad…") { mostrarCopiaSeguridad() }
-        add("Privacidad y datos…") { mostrarPrivacidad() }
         add("Acerca de Optimo") { acercaDe() }
         opciones("Ajustes", items)
     }
@@ -1920,7 +2097,7 @@ class MainActivity : Activity() {
         if (q.cerrando) return
         q.cerrando = true
         val origen = q.abiertaPor
-        origen?.emergentesBloqueados?.incrementAndGet()
+        contarEmergente(origen)
         manejadorPrincipal.post {
             if (!pestanas.contains(q)) return@post
             val eraActual = q === actual
@@ -1971,7 +2148,7 @@ class MainActivity : Activity() {
         val sinTocar = !request.hasGesture() && !mismoSitio(host, actualHost) &&
             android.os.SystemClock.uptimeMillis() - p.toqueMs > 5000L
         if (!aAnuncio && !sinTocar) return false
-        p.emergentesBloqueados.incrementAndGet()
+        contarEmergente(p, true)
         toast(if (aAnuncio) "Redirección a anuncios bloqueada" else "Redirección automática bloqueada (" + host + ")")
         if (p === actual) actualizarUi()
         return true
@@ -2074,6 +2251,9 @@ class MainActivity : Activity() {
         }
         add("Enlace «Personalizar» al pie de la pantalla: " + si(ajustes.inicioEnlacePersonalizar), cambiar {
             ajustes.inicioEnlacePersonalizar = !ajustes.inicioEnlacePersonalizar
+        })
+        add("Icono de escudo (protección) al pie: " + si(ajustes.inicioEscudo), cambiar {
+            ajustes.inicioEscudo = !ajustes.inicioEscudo
         })
         add("Restablecer el aspecto original") {
             ajustes.restablecerInicio()
@@ -2991,7 +3171,7 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- ajustes por sitio: emergentes y resumen
 
-    private fun elegirEmergentesSitio(p: Pestana, sitio: String) {
+    private fun elegirEmergentesSitio(p: Pestana, sitio: String, alTerminar: () -> Unit = { mostrarPersonalizarSitio(p) }) {
         val actualModo = ajustes.emergentesEn(sitio)
         val nombresGeneral = listOf("recomendado", "estricto", "permitir todas")
         val items = ArrayList<Pair<String, () -> Unit>>()
@@ -2999,7 +3179,7 @@ class MainActivity : Activity() {
             items.add(Pair((if (actualModo == n) "● " else "") + texto) {
                 ajustes.fijarEmergentesEn(sitio, n)
                 toast("Emergentes en " + sitio + ": " + NOMBRES_EMERGENTES_SITIO[n + 1])
-                mostrarPersonalizarSitio(p)
+                alTerminar()
             })
         }
         modo(-1, "Según ajustes (ahora: " + nombresGeneral[ajustes.emergentes] + ")")
@@ -3108,7 +3288,7 @@ class MainActivity : Activity() {
             return
         }
         val aviso = if (ajustes.bloquearAnuncios) "" else " El bloqueo de anuncios está desactivado: actívalo para que surta efecto."
-        toast("Bloqueado: " + d + ". Se revierte en Listas de bloqueo › Mis dominios bloqueados." + aviso)
+        toast("Bloqueado: " + d + ". Se revierte en Protección y privacidad › Mis dominios bloqueados." + aviso)
         // La página principal nunca se bloquea: si era una página de anuncios, se sale de ella.
         val w = p.web
         if (p.esEmergente) {
@@ -3543,6 +3723,7 @@ class MainActivity : Activity() {
                 borrarDatos()
                 borrarCache()
                 ajustes.quitarTodosPermisos()
+                EstadisticasBloqueo.reiniciar()
             }
         }
         opciones("Privacidad y datos", items)
@@ -3779,7 +3960,7 @@ class MainActivity : Activity() {
             .setMessage(
                 "Navegador ligero sobre el WebView del sistema (motor Chromium).\n\n" +
                     "• Bloqueador de anuncios y rastreadores por dominio (" + (AdBlock.TOTAL + ListasManager.filtro.totalDominios) + " dominios, con las listas descargadas), con técnicas extra: vídeo de anuncio sustituido por uno vacío válido, scripts sustitutos, ocultar huecos y saltar anuncios (se eligen en Ajustes). Mantén pulsado un anuncio para ocultarlo o bloquear su dominio.\n" +
-                    "• Ventanas emergentes: cierra las pestañas de anuncios, limita una por toque y bloquea redirecciones automáticas (Ajustes › Ventanas emergentes y redirecciones; por sitio desde el menú ⋮).\n" +
+                    "• Ventanas emergentes: cierra las pestañas de anuncios, limita una por toque y bloquea redirecciones automáticas (Ajustes › Protección y privacidad; por sitio desde el escudo de la barra).\n" +
                     "• Silenciar pestañas: altavoz en la barra de direcciones (aparece si la pestaña suena o está silenciada), en el candado y en la lista de pestañas.\n" +
                     "• Pantalla de inicio editable (Ajustes › Pantalla de inicio): colores, accesos o marcadores, buscador, título e iconos.\n" +
                     "• Vídeos, audios, listas .m3u/.m3u8, torrents, magnets y enlaces de Mega: pregunta si abrirlos aquí o en otra app (Optimo Play u otras); se ajusta en Ajustes.\n" +
@@ -6055,6 +6236,7 @@ class MainActivity : Activity() {
             }
             if (esquema == "optimo") {
                 if (uri.toString() == Paginas.URL_PERSONALIZAR) mostrarAjustesInicio()
+                else if (uri.toString() == Paginas.URL_PROTECCION) abrirCentro()
                 else if (p.inicio && uri.host == "local" && request.hasGesture()) abrirMarcadorLocal(uri.toString())
                 return true
             }
@@ -6086,10 +6268,14 @@ class MainActivity : Activity() {
                 }
             }
             if (request != null && ajustes.bloquearAnuncios && !request.isForMainFrame && !bloqueoPausadoEnPagina(p.url)) {
-                val respuesta = anuncios.interceptar(request, hostDePagina(p.url))
+                var categoria = EstadisticasBloqueo.ANUNCIO
+                val paginaHost = hostDePagina(p.url)
+                val respuesta = anuncios.interceptar(request, paginaHost) { c -> categoria = c }
                 if (respuesta != null) {
                     p.bloqueados.incrementAndGet()
                     p.dev.bloqueo(request.url.toString(), request.method ?: "GET")
+                    if (!p.privada) EstadisticasBloqueo.registrar(categoria, ReglasUsuario.clave(paginaHost), request.url.host)
+                    solicitarRefrescoEscudo(p)
                     return respuesta
                 }
             }
@@ -6320,7 +6506,7 @@ class MainActivity : Activity() {
             if (resultMsg == null) return false
             if (!isUserGesture) {
                 // Una página que abre pestañas sin que toques nada: siempre bloqueado.
-                p.emergentesBloqueados.incrementAndGet()
+                contarEmergente(p)
                 return false
             }
             val modoEm = ajustes.emergentesEfectivo(Omnibox.hostDe(p.url))
@@ -6330,7 +6516,7 @@ class MainActivity : Activity() {
                 val ahora = android.os.SystemClock.uptimeMillis()
                 // Límite: una emergente por toque y como mucho una cada 4 s (las ráfagas de 3 o 4 pestañas son anuncios).
                 if ((p.toqueMs != 0L && p.emergenteDelToque == p.toqueMs) || ahora - p.ultimoEmergenteMs < 4000L) {
-                    p.emergentesBloqueados.incrementAndGet()
+                    contarEmergente(p)
                     toast("Pestaña emergente bloqueada")
                     return false
                 }
@@ -6339,7 +6525,7 @@ class MainActivity : Activity() {
                     val r = view?.hitTestResult
                     val tipo = r?.type
                     if (tipo != WebView.HitTestResult.SRC_ANCHOR_TYPE && tipo != WebView.HitTestResult.SRC_IMAGE_ANCHOR_TYPE) {
-                        p.emergentesBloqueados.incrementAndGet()
+                        contarEmergente(p)
                         toast("Pestaña emergente bloqueada")
                         return false
                     }
