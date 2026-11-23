@@ -114,7 +114,8 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
     // ---------------------------------------------------------------- red
 
     /** Respuesta inventada o bloqueo para una petición de subrecurso; null si se deja pasar. */
-    fun interceptar(request: WebResourceRequest, paginaHost: String = ""): WebResourceResponse? {
+    /** [motivo] (opcional) recibe la categoría de [EstadisticasBloqueo] justo antes de devolver una respuesta de bloqueo. */
+    fun interceptar(request: WebResourceRequest, paginaHost: String = "", motivo: ((Int) -> Unit)? = null): WebResourceResponse? {
         if (request.isForMainFrame) return null
         val uri = request.url
         val host = (uri.host ?: return null).lowercase()
@@ -130,7 +131,10 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
         val patronJuguete = r.juguete.firstOrNull { url.contains(it) }
         if (ajustes.tecnica("juguete") && ((ruta.endsWith(".mp4") && listaNegra) || patronJuguete != null)) {
             val resp = respuestaJuguete(request)
-            if (resp != null) return resp
+            if (resp != null) {
+                motivo?.invoke(EstadisticasBloqueo.SUSTITUIDO)
+                return resp
+            }
         }
         // 2) Scripts sustitutos.
         if (ajustes.tecnica("stubs")) {
@@ -143,12 +147,14 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
                     else -> ""
                 }
                 if (js.isEmpty()) continue
+                motivo?.invoke(EstadisticasBloqueo.SUSTITUIDO)
                 return conCors(request, "application/javascript", js.toByteArray(Charsets.UTF_8))
             }
         }
         // 3) VAST / VMAP vacíos.
         if (ajustes.tecnica("vast") && r.vast.any { url.contains(it) }) {
             val vmap = url.contains("vmap")
+            motivo?.invoke(EstadisticasBloqueo.SUSTITUIDO)
             return conCors(request, "application/xml", (if (vmap) VMAP_VACIO else VAST_VACIO).toByteArray(Charsets.UTF_8))
         }
         // 4) Lista «permitir»: se deja pasar (p. ej. el script que detecta bloqueadores y rompería la web).
@@ -156,6 +162,7 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
         // 5) Bloqueo clásico por dominio y, opcionalmente, por rutas típicas de anuncios; respuesta vacía con CORS.
         if (listaNegra || (ajustes.tecnica("rutas") && RUTAS.any { ruta.contains(it) })) {
             val mime = if (ruta.endsWith(".js")) "application/javascript" else "text/plain"
+            motivo?.invoke(EstadisticasBloqueo.ANUNCIO)
             return conCors(request, mime, ByteArray(0))
         }
         return null
