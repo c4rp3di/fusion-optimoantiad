@@ -1352,6 +1352,11 @@ class MainActivity : Activity() {
 
     private fun nuevaPestana(url: String?, privada: Boolean = false): Pestana? {
         if (url != null && esMarcadorLocal(url)) {
+            if (privada && url.contains("#app=")) {
+                // Una aplicación web local guarda datos en el perfil normal: no se abre en una pestaña privada.
+                toast("Las aplicaciones web locales no se abren en pestañas privadas")
+                return null
+            }
             abrirMarcadorLocal(url)
             return null
         }
@@ -1772,18 +1777,18 @@ class MainActivity : Activity() {
         }
         add("Marcadores") { mostrarMarcadores() }
         add("Páginas guardadas (" + PaginasGuardadas.todas().size + ")…") { mostrarPaginasGuardadas() }
-        if (!p.inicio && p.url.startsWith("http")) add("Buscar enlaces en la página…") { buscarEnlaces(p) }
-        if (!p.inicio && p.url.startsWith("http")) add("Rastrear este sitio…") { configurarRastreo(p) }
+        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) add("Buscar enlaces en la página…") { buscarEnlaces(p) }
+        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) add("Rastrear este sitio…") { configurarRastreo(p) }
         val ur = ultimoRastreo
         if (ur != null) add("Ver el último rastreo (" + ur.enlaces.size + " enlaces)") { mostrarResultadoRastreo(p, ur) }
         if (ListasEnlaces.todas().isNotEmpty()) add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
         add("Historial") { mostrarLista("Historial", historial, "El historial está vacío", true) }
         if (!p.inicio && p.url.isNotEmpty()) {
-            add("Compartir página") { compartir(p.url) }
+            if (!p.archivoLocal) add("Compartir página") { compartir(p.url) }
             add("Bloquear un anuncio (tocar)") { iniciarSeleccion(p) }
             if (p.url.startsWith("http")) {
                 val pausadoAqui = bloqueoPausadoEnPagina(p.url)
-                if (!p.privada && (ajustes.bloquearAnuncios || pausadoAqui)) {
+                if (!p.privada && !p.appWeb && (ajustes.bloquearAnuncios || pausadoAqui)) {
                     add("Bloqueo de anuncios en este sitio: " + (if (pausadoAqui) "pausado (reanudar)" else "activo (pausar)")) { alternarPausaBloqueo(p) }
                 }
                 if (p.web?.settings?.blockNetworkImage == true) {
@@ -1803,7 +1808,7 @@ class MainActivity : Activity() {
             }
             add("Herramientas de desarrollo") { herramientas.alternar() }
         }
-        if (!p.inicio && p.url.startsWith("http")) {
+        if (!p.inicio && !p.appWeb && p.url.startsWith("http")) {
             if (!p.privada) add("Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) }
             val hostEm = Omnibox.hostDe(p.url)
             val ok = ajustes.emergentesEfectivo(hostEm) == 2
@@ -3951,7 +3956,14 @@ class MainActivity : Activity() {
         campoUrl.hint = "Dirección (https://…)"
         campoUrl.setSingleLine(true)
         campoUrl.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-        campoUrl.setText(url)
+        // Un marcador de archivo del dispositivo (optimo://local/…) no es una dirección web: se muestra sin poder editarse ni validarse como URL.
+        val esLocal = esMarcadorLocal(url)
+        if (esLocal) {
+            campoUrl.setText(if (url.contains("#app=")) "Archivo del dispositivo (aplicación web)" else "Archivo del dispositivo (sin conexión)")
+            campoUrl.isEnabled = false
+        } else {
+            campoUrl.setText(url)
+        }
         val etiquetaCarpeta = TextView(this)
         etiquetaCarpeta.textSize = 15f
         etiquetaCarpeta.setTextColor(paleta.acento)
@@ -3979,7 +3991,7 @@ class MainActivity : Activity() {
             .create()
         d.show()
         d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-            val u = normalizarUrl(campoUrl.text.toString())
+            val u = if (esLocal) url else normalizarUrl(campoUrl.text.toString())
             if (u == null) {
                 toast("Dirección no válida")
             } else {
@@ -6043,7 +6055,7 @@ class MainActivity : Activity() {
             }
             if (esquema == "optimo") {
                 if (uri.toString() == Paginas.URL_PERSONALIZAR) mostrarAjustesInicio()
-                else if (uri.host == "local" && request.hasGesture()) abrirMarcadorLocal(uri.toString())
+                else if (p.inicio && uri.host == "local" && request.hasGesture()) abrirMarcadorLocal(uri.toString())
                 return true
             }
             if (esquema == "about" || esquema == "blob" || esquema == "data" || esquema == "javascript") return false
