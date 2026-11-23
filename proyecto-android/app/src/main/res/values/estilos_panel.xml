@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Animación del panel lateral (menú): entra y sale por la derecha. -->
+    <style name="AnimPanelLateral">
+        <item name="android:windowEnterAnimation">@anim/panel_entra</item>
+        <item name="android:windowExitAnimation">@anim/panel_sale</item>
+    </style>
+</resources>
