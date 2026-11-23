@@ -31,6 +31,8 @@ object Paginas {
             "background:" + c.superficie + ";color:" + c.acento + ";font-size:22px;font-weight:bold}" +
             ".t{display:block;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
             "a.p{font-size:12px;color:" + c.tenue + ";text-decoration:none;opacity:.8}" +
+            "a.e{position:fixed;bottom:20px;left:50%;margin-left:-26px;width:52px;height:52px;border-radius:50%;" +
+            "background:" + c.superficie + ";display:flex;align-items:center;justify-content:center;opacity:.92}" +
             "a.b{display:inline-block;margin-top:8px;padding:12px 26px;border-radius:24px;" +
             "background:" + c.acento + ";color:" + c.fondo + ";text-decoration:none;font-weight:bold}"
 
@@ -59,7 +61,8 @@ object Paginas {
         val accesos: Boolean,
         val maxAccesos: Int,
         val cuadrados: Boolean,
-        val enlacePersonalizar: Boolean
+        val enlacePersonalizar: Boolean,
+        val escudo: Boolean = true
     )
 
     /** Tema de colores de la página de inicio. [colores] es null en «Automático» (sigue al sistema) y «Personalizado». */
@@ -137,12 +140,22 @@ object Paginas {
             sb.append("<p style=\"margin-top:36px\"><a class=\"p\" href=\"").append(URL_PERSONALIZAR)
             sb.append("\">⚙ Personalizar esta pantalla</a></p>")
         }
+        if (cfg.escudo) {
+            sb.append("<a class=\"e\" href=\"").append(URL_PROTECCION).append("\" aria-label=\"Protección y privacidad\">")
+            sb.append("<svg viewBox=\"0 0 24 24\" width=\"26\" height=\"26\" fill=\"none\" stroke=\"").append(c.acento)
+            sb.append("\" stroke-width=\"1.8\" stroke-linejoin=\"round\" stroke-linecap=\"round\">")
+            sb.append("<path d=\"M12 2.5l7.5 3v5.5c0 5-3.3 8.8-7.5 10.5C7.8 19.8 4.5 16 4.5 11V5.5z\"/>")
+            sb.append("<path d=\"M8.3 12l2.7 2.7 4.8-5.5\"/></svg></a>")
+        }
         sb.append("</body></html>")
         return sb.toString()
     }
 
     /** Enlace interno de la página de inicio que abre sus ajustes (lo recoge MainActivity). */
     const val URL_PERSONALIZAR = "optimo://personalizar"
+
+    /** Icono de escudo de la página de inicio: abre el centro de protección y privacidad. */
+    const val URL_PROTECCION = "optimo://proteccion"
 
     /** Pagina de error de carga con enlace para reintentar. */
     fun error(c: Colores, url: String, descripcion: String): String {
