@@ -516,3 +516,12 @@ Un .html del dispositivo que contiene JavaScript ofrece ahora tres opciones: **A
 
 Límites: los archivos de la misma carpeta (imágenes, estilos) siguen sin cargarse (404), y el HTML sigue limitado a 20 MB al abrirlo (los datos grandes van en IndexedDB, no en el HTML). El **uso de memoria depende de la propia aplicación** (p. ej. un editor que carga o reescribe todos los proyectos a la vez); Optimo no lo puede arreglar. Android puede liberar el almacenamiento web si falta espacio en el dispositivo: conviene exportar copias.
 Kotlin sin compilar ni probar en dispositivo (revisado a mano).
+
+## 1.24.1 — Marcadores de archivos locales: edición y revisión de choques
+
+- **Editar un marcador de archivo local** («URL no válida» al cambiarle el nombre): el diálogo validaba su dirección `optimo://local/…` como si fuera web. Ahora la dirección se muestra como «Archivo del dispositivo (sin conexión / aplicación web)», no se edita ni se valida, y el nombre y la carpeta se cambian con normalidad. Afectaba también a la pulsación larga en ☆.
+- **Menú ⋮ en archivos locales:** ya no ofrece «Compartir página» (solo habría compartido `file:///nombre` o la dirección interna de la aplicación web) ni, en una aplicación web local, «Buscar enlaces en la página», «Rastrear este sitio», «Bloqueo de anuncios en este sitio», «Privacidad de este sitio» ni «Emergentes y redirecciones en este sitio», que actuarían sobre una dirección interna que no es un sitio real.
+- **Pestañas privadas:** un marcador de aplicación web local no se abre en una pestaña privada (guarda datos en el perfil normal); se avisa.
+- **Enlace interno `optimo://local/…`:** solo se admite desde la pantalla de inicio, no desde una web cualquiera.
+- **Copia de seguridad:** al importar marcadores se descartan los de archivos locales (el archivo no viaja con la copia, quedarían muertos); corrige lo dicho en la 1.23.0.
+- Kotlin sin compilar ni probar en dispositivo (revisado a mano).
