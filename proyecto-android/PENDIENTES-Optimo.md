@@ -130,3 +130,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Incluir `BarraConfig` y los ajustes de estadísticas en la copia de seguridad.
 - Estadísticas: separar anuncios de rastreadores si las listas lo permiten; contador por página por categoría.
 - Sin compilar en este entorno (sin SDK): revisar errores de compilación en la primera ejecución del pipeline.
+
+## Apuntado en 1.26.0
+- Pasar `nuevoDialogo()` (confirmar, escribir texto, elegir) y `mostrarLista` (historial, descargas…) al diseño de hojas.
+- Pantallas todavía en lista simple que merecen diseño propio: Marcadores, Historial, Descargas, Páginas guardadas, Listas de enlaces, Reglas de usuario, Ajustes por sitio, Ajustes de medios, Lectura y voz, Pantalla de inicio.
+- Aligerar `MainActivity` al crear cada categoría: lo siguiente con más peso es privacidad y datos (borrados, retención, copia, cookies por sitio).
+- Panel lateral: gesto de deslizar para cerrar y, en horizontal, panel más estrecho.
