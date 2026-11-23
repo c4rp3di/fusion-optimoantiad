@@ -738,6 +738,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("inicio_enlace", v).apply()
         }
 
+    /** Icono de escudo al pie de la pantalla de inicio (abre el centro de protección). */
+    var inicioEscudo: Boolean
+        get() = sp.getBoolean("inicio_escudo", true)
+        set(v) {
+            sp.edit().putBoolean("inicio_escudo", v).apply()
+        }
+
     /** Accesos propios: (nombre, url). Se guardan en una cadena con tabuladores y saltos de línea. */
     fun accesosPropios(): List<Pair<String, String>> {
         val texto = sp.getString("inicio_propios", "") ?: ""
@@ -763,7 +770,7 @@ class Ajustes(contexto: Context) {
             .remove("inicio_tema").remove("inicio_c_fondo").remove("inicio_c_texto").remove("inicio_c_acento")
             .remove("inicio_c_sup").remove("inicio_titulo").remove("inicio_subtitulo").remove("inicio_buscador")
             .remove("inicio_accesos").remove("inicio_origen").remove("inicio_max").remove("inicio_cuadrados")
-            .remove("inicio_enlace")
+            .remove("inicio_enlace").remove("inicio_escudo")
             .apply()
     }
 
