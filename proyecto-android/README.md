@@ -534,3 +534,11 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - **Estadísticas de bloqueo** (`EstadisticasBloqueo` en `Proteccion.kt`): por día y categoría (anuncios y rastreadores, scripts y vídeos sustituidos, emergentes, redirecciones), con dominios y sitios más bloqueados. Solo en el dispositivo, cifradas, hasta 90 días; no cuentan las pestañas privadas; se pueden desactivar y borrar, y «Borrar todo» también las borra. `MotorAnuncios.interceptar` acepta un parámetro opcional con el motivo del bloqueo.
 - **Menú ⋮ y Ajustes más cortos**: las entradas de bloqueo del menú (pausar, emergentes, quitar capa, bloquear anuncio, privacidad del sitio) y de Ajustes (bloqueo, emergentes, listas, técnicas, reglas, por sitio, HTTPS primero, cookies de terceros, privacidad y datos) pasan a una sola entrada «🛡 Protección y privacidad…». No se pierde ninguna función.
 - Nuevos: `Hoja.kt` (hoja inferior reutilizable con filas, interruptores, cifras y gráfico), `Proteccion.kt` (estado, icono, estadísticas e interfaz `AnfitrionProteccion`).
+
+## 1.26.0 — Menú lateral y listas con el diseño de las hojas
+
+- **Menú lateral** (`MenuLateral.kt`) en lugar del menú ⋮ y de la lista de Ajustes: sale por la derecha con la página actual (y su escudo, tocable), una cuadrícula de accesos rápidos (nueva, privada, marcadores, historial, descargas, compartir/inicio) y seis categorías que se abren dentro del mismo panel con «‹» para volver (el botón atrás también vuelve):
+  🛡 Protección y privacidad (abre el centro de protección) · 📄 Esta página · 🔖 Marcadores y datos · 🎬 Multimedia · 🎨 Aspecto · ⚙ General.
+- **Todas las listas nativas** (`opciones()`, unas 46 pantallas) se dibujan ahora como hojas inferiores con el mismo estilo, así que ya no queda ninguna lista del sistema; los diálogos de confirmar, escribir y elegir (`nuevoDialogo()`) siguen siendo nativos y son el siguiente paso.
+- `Hoja` gana modo lateral, tarjetas de categoría, accesos rápidos, barra de título con «‹» y filas con icono. Animación de entrada y salida del panel en `res/anim`.
+- `MainActivity` solo conserva `ejecutarMenu()` y el objeto `anfitrionMenu`; los textos y el orden del menú viven en `MenuLateral.kt` (interfaz `AnfitrionMenu` + enum `AccionMenu`).
