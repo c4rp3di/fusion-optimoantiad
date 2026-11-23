@@ -122,3 +122,11 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 
 - **Probar:** renombrar y mover un marcador de `.html` local (con ☆ larga y desde el gestor), con y sin «aplicación web»; el menú ⋮ en un archivo local y en una aplicación web.
 - **Idea:** evitar duplicados al marcar dos veces el mismo `.html` abierto en momentos distintos (hoy cada ☆ guarda otra copia).
+
+## Apuntado en 1.25.0 (siguientes fases del centro de privacidad)
+- Código de bloqueo y datos aún dentro de `MainActivity` (pausa, muros, bloquear sitio, borrados, retención, copia): moverlo a `Proteccion`/`LimpiezaDatos`/`CopiaSeguridad`/`Muros` detrás de `AnfitrionProteccion`.
+- Centro de privacidad con **datos por sitio** (lista con cookies, permisos, reglas y ajustes de cada sitio y «borrar todo de este sitio») y **datos globales** (tamaño de cada cosa). Android no permite listar el almacenamiento de otros sitios: partir de historial, permisos, ajustes y reglas.
+- Barra inferior configurable con el mismo sistema (`BarraConfig` está pensado para generalizarse).
+- Incluir `BarraConfig` y los ajustes de estadísticas en la copia de seguridad.
+- Estadísticas: separar anuncios de rastreadores si las listas lo permiten; contador por página por categoría.
+- Sin compilar en este entorno (sin SDK): revisar errores de compilación en la primera ejecución del pipeline.
