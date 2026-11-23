@@ -53,7 +53,7 @@ private class VistaBarras(c: Context, private val valores: IntArray, private val
  * Hoja inferior con el aspecto de Optimo: título, secciones, filas, interruptores, cifras y gráfico.
  * Se vuelve a pintar entera con [pintar] cuando cambia algo (así los interruptores y los números siempre están al día).
  */
-class Hoja(private val act: Activity, private val paleta: Paleta, private val privada: Boolean) {
+class Hoja(private val act: Activity, private val paleta: Paleta, private val privada: Boolean, private val lateral: Boolean = false) {
     private val dialogo = Dialog(act)
     private val contenido = LinearLayout(act)
     private var cuandoCierra: (() -> Unit)? = null
@@ -63,36 +63,51 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     init {
         dialogo.requestWindowFeature(Window.FEATURE_NO_TITLE)
         contenido.orientation = LinearLayout.VERTICAL
-        contenido.setPadding(dp(16), dp(8), dp(16), dp(20))
-        val maxAlto = (act.resources.displayMetrics.heightPixels * 0.86f).toInt()
-        val scroll = ScrollLimitado(act, maxAlto)
-        scroll.addView(contenido, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        contenido.setPadding(dp(16), dp(if (lateral) 20 else 8), dp(16), dp(20))
         val raiz = LinearLayout(act)
         raiz.orientation = LinearLayout.VERTICAL
         val fondo = GradientDrawable()
         fondo.setColor(paleta.barra)
-        fondo.cornerRadii = floatArrayOf(dp(20).toFloat(), dp(20).toFloat(), dp(20).toFloat(), dp(20).toFloat(), 0f, 0f, 0f, 0f)
+        val r = dp(20).toFloat()
+        fondo.cornerRadii = if (lateral) floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
         raiz.background = fondo
-        // Tirador
-        val tirador = View(act)
-        val formaTirador = GradientDrawable()
-        formaTirador.setColor(paleta.tenue)
-        formaTirador.cornerRadius = dp(2).toFloat()
-        tirador.background = formaTirador
-        tirador.alpha = 0.5f
-        val lpT = LinearLayout.LayoutParams(dp(36), dp(4))
-        lpT.gravity = Gravity.CENTER_HORIZONTAL
-        lpT.topMargin = dp(8)
-        raiz.addView(tirador, lpT)
-        raiz.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        if (lateral) {
+            val scroll = ScrollView(act)
+            scroll.addView(contenido, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            raiz.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        } else {
+            val maxAlto = (act.resources.displayMetrics.heightPixels * 0.86f).toInt()
+            val scroll = ScrollLimitado(act, maxAlto)
+            scroll.addView(contenido, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            // Tirador
+            val tirador = View(act)
+            val formaTirador = GradientDrawable()
+            formaTirador.setColor(paleta.tenue)
+            formaTirador.cornerRadius = dp(2).toFloat()
+            tirador.background = formaTirador
+            tirador.alpha = 0.5f
+            val lpT = LinearLayout.LayoutParams(dp(36), dp(4))
+            lpT.gravity = Gravity.CENTER_HORIZONTAL
+            lpT.topMargin = dp(8)
+            raiz.addView(tirador, lpT)
+            raiz.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         dialogo.setContentView(raiz)
+        dialogo.setCanceledOnTouchOutside(true)
         val w = dialogo.window
         if (w != null) {
             w.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
-            w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            w.setGravity(Gravity.BOTTOM)
+            if (lateral) {
+                val ancho = minOf((act.resources.displayMetrics.widthPixels * 0.88f).toInt(), dp(420))
+                w.setLayout(ancho, ViewGroup.LayoutParams.MATCH_PARENT)
+                w.setGravity(Gravity.END)
+                w.attributes.windowAnimations = R.style.AnimPanelLateral
+            } else {
+                w.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+                w.setGravity(Gravity.BOTTOM)
+                w.attributes.windowAnimations = android.R.style.Animation_InputMethod
+            }
             w.setDimAmount(0.45f)
-            w.attributes.windowAnimations = android.R.style.Animation_InputMethod
             if (privada) w.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         dialogo.setOnDismissListener { cuandoCierra?.invoke() }
@@ -104,6 +119,13 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
 
     fun cerrar() {
         if (dialogo.isShowing) dialogo.dismiss()
+    }
+
+    /** Para que «atrás» pueda volver a la página anterior del panel: [f] devuelve true si lo ha gestionado. */
+    fun interceptarAtras(f: () -> Boolean) {
+        dialogo.setOnKeyListener { _, tecla, ev ->
+            tecla == android.view.KeyEvent.KEYCODE_BACK && ev.action == android.view.KeyEvent.ACTION_UP && f()
+        }
     }
 
     fun alCerrar(accion: () -> Unit) {
@@ -176,12 +198,17 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     /** Fila táctil: título, detalle opcional debajo y [valor] a la derecha (si no hay, una flecha). */
-    fun fila(titulo: String, detalle: String? = null, valor: String? = null, aviso: Boolean = false, accion: () -> Unit) {
+    fun fila(titulo: String, detalle: String? = null, valor: String? = null, aviso: Boolean = false, icono: String? = null, accion: () -> Unit) {
         val fila = LinearLayout(act)
         fila.orientation = LinearLayout.HORIZONTAL
         fila.gravity = Gravity.CENTER_VERTICAL
         fila.minimumHeight = dp(52)
         fila.setPadding(dp(4), dp(6), dp(4), dp(6))
+        if (icono != null) {
+            val ic = texto(icono, 18f, paleta.texto)
+            ic.gravity = Gravity.CENTER
+            fila.addView(ic, LinearLayout.LayoutParams(dp(34), ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
         val col = LinearLayout(act)
         col.orientation = LinearLayout.VERTICAL
         col.addView(texto(titulo, 15f, paleta.texto))
@@ -274,6 +301,99 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         fila.addView(texto(nombre, 14f, paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         fila.addView(texto(valor, 14f, paleta.tenue))
         agregar(fila)
+    }
+
+    /** Título de una lista sencilla (varias líneas si hace falta). */
+    fun titulo(t: String) {
+        val v = texto(t, 15f, paleta.tenue)
+        v.setPadding(dp(4), dp(12), dp(4), dp(8))
+        agregar(v)
+    }
+
+    /** Barra de título de una página del panel lateral: «‹» para volver (si [atras] no es null), título y «✕» para cerrar. */
+    fun barraTitulo(t: String, atras: (() -> Unit)?, cerrar: () -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(0, dp(4), 0, dp(8))
+        if (atras != null) fila.addView(botonIcono("‹") { atras() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        val tt = texto(t, 20f, paleta.texto, true)
+        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        if (atras == null) lp.leftMargin = dp(4)
+        fila.addView(tt, lp)
+        fila.addView(botonIcono("✕") { cerrar() }, LinearLayout.LayoutParams(dp(44), dp(44)))
+        agregar(fila)
+    }
+
+    /** Cuadrícula de accesos rápidos: (icono, etiqueta, acción), [porFila] por fila. */
+    fun accesos(items: List<Triple<String, String, () -> Unit>>, porFila: Int = 3) {
+        var i = 0
+        while (i < items.size) {
+            val fila = LinearLayout(act)
+            fila.orientation = LinearLayout.HORIZONTAL
+            fila.setPadding(0, dp(4), 0, dp(4))
+            for (j in 0 until porFila) {
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                if (j > 0) lp.leftMargin = dp(8)
+                if (i + j < items.size) {
+                    val it3 = items[i + j]
+                    val t = LinearLayout(act)
+                    t.orientation = LinearLayout.VERTICAL
+                    t.gravity = Gravity.CENTER
+                    t.setPadding(dp(4), dp(12), dp(4), dp(10))
+                    val f = GradientDrawable()
+                    f.setColor(paleta.campo)
+                    f.cornerRadius = dp(14).toFloat()
+                    t.background = f
+                    val ic = texto(it3.first, 22f, paleta.texto)
+                    ic.gravity = Gravity.CENTER
+                    t.addView(ic)
+                    val et = texto(it3.second, 11f, paleta.tenue)
+                    et.gravity = Gravity.CENTER
+                    et.setSingleLine(true)
+                    t.addView(et)
+                    t.isClickable = true
+                    t.setOnClickListener { it3.third() }
+                    fila.addView(t, lp)
+                } else {
+                    fila.addView(View(act), lp)
+                }
+            }
+            agregar(fila)
+            i += porFila
+        }
+    }
+
+    /** Tarjeta de categoría: icono en círculo, título, detalle y flecha. */
+    fun tarjeta(icono: String, titulo: String, detalle: String?, accion: () -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(dp(12), dp(12), dp(12), dp(12))
+        val f = GradientDrawable()
+        f.setColor(paleta.campo)
+        f.cornerRadius = dp(16).toFloat()
+        fila.background = f
+        val circulo = texto(icono, 20f, paleta.texto)
+        circulo.gravity = Gravity.CENTER
+        val fc = GradientDrawable()
+        fc.setColor(Color.argb(40, Color.red(paleta.acento), Color.green(paleta.acento), Color.blue(paleta.acento)))
+        fc.shape = GradientDrawable.OVAL
+        circulo.background = fc
+        fila.addView(circulo, LinearLayout.LayoutParams(dp(42), dp(42)))
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(texto(titulo, 15f, paleta.texto, true))
+        if (!detalle.isNullOrEmpty()) col.addView(texto(detalle, 12f, paleta.tenue))
+        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        lp.leftMargin = dp(12)
+        fila.addView(col, lp)
+        fila.addView(texto("›", 20f, paleta.tenue))
+        fila.isClickable = true
+        fila.setOnClickListener { accion() }
+        val lpf = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lpf.topMargin = dp(8)
+        agregar(fila, lpf)
     }
 
     /** Botón de texto ancho (acciones destructivas o principales). */
