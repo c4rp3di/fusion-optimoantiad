@@ -117,3 +117,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - **Comprobar** que `shouldInterceptRequest` se llama para `*.optimo-local.invalid` sin resolver DNS (si falla, aparecería «no se puede encontrar el servidor»), que `addWebMessageListener` acepta la regla `https://*.optimo-local.invalid`, y que los orígenes con `.invalid` no activan Safe Browsing ni bloqueos.
 - **Memoria:** con los ~400 MB de proyectos, mirar si el WebView se reinicia (`onRenderProcessGone`) al abrir o al guardar; si pasa, el arreglo está en el editor (guardar solo el proyecto cambiado y cargar los proyectos bajo demanda).
 - **Idea:** excluir los orígenes de aplicaciones web de «Borrar cookies y datos de sitios» (WebStorage.deleteAllData no lo permite; habría que borrar origen por origen), subir el límite de 20 MB con un ajuste, y servir archivos de la misma carpeta si el usuario elige la carpeta.
+
+## Apuntado en 1.24.1
+
+- **Probar:** renombrar y mover un marcador de `.html` local (con ☆ larga y desde el gestor), con y sin «aplicación web»; el menú ⋮ en un archivo local y en una aplicación web.
+- **Idea:** evitar duplicados al marcar dos veces el mismo `.html` abierto en momentos distintos (hoy cada ☆ guarda otra copia).
