@@ -1102,10 +1102,6 @@ class MainActivity : Activity() {
         CentroProteccion(this, paleta, ajustes, anfitrion, actual?.privada == true).mostrar()
     }
 
-    private fun mostrarAjustesBarra() {
-        AjustesBarra(this, paleta, { nuevoDialogo() }) { aplicarBarra() }.mostrar()
-    }
-
     /** Lo que el panel del escudo y el centro de protección piden a esta pantalla. */
     private val anfitrion = object : AnfitrionProteccion {
         override fun estado(p: Pestana) = estadoEscudo(p)
@@ -1180,7 +1176,7 @@ class MainActivity : Activity() {
                 Destino.COPIA -> mostrarCopiaSeguridad()
                 Destino.CERTIFICADOS -> abrirPrivacidad(CentroPrivacidad.CERTIFICADOS)
                 Destino.PERMISOS -> abrirPrivacidad(CentroPrivacidad.SITIOS, "", CentroPrivacidad.F_PERMISOS)
-                Destino.BARRA -> mostrarAjustesBarra()
+                Destino.BARRA -> abrirAspecto(PanelAspecto.BARRA)
             }
         }
 
@@ -1456,6 +1452,7 @@ class MainActivity : Activity() {
         val hostWeb = if (u == null) "" else Omnibox.hostDe(u).lowercase()
         aplicarOscuro(w, oscuroPara(hostWeb))
         w.settings.blockNetworkImage = imagenesBloqueadas(w, hostWeb)
+        w.settings.textZoom = ajustes.textoZoomEfectivo(hostWeb)
         gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTercerosEn(hostWeb))
     }
 
@@ -1514,6 +1511,7 @@ class MainActivity : Activity() {
         }
         aplicarOscuro(w, oscuroPara(h))
         w.settings.blockNetworkImage = imagenesBloqueadas(w, h)
+        w.settings.textZoom = ajustes.textoZoomEfectivo(h)
         gestorCookies(w).setAcceptThirdPartyCookies(w, ajustes.cookiesTercerosEn(h))
     }
 
@@ -2046,6 +2044,130 @@ class MainActivity : Activity() {
             }
     }
 
+    // ---------------------------------------------------------------- aspecto (Aspecto.kt) y pestañas (GestorPestanas.kt)
+
+    private fun abrirAspecto(pagina: String = PanelAspecto.RAIZ) {
+        PanelAspecto(this, paleta, ajustes, anfitrionAspecto, pagina).mostrar()
+    }
+
+    private fun mostrarPestanas() {
+        GestorPestanas(this, paleta, anfitrionPestanas, actual?.privada == true).mostrar()
+    }
+
+    /** Activa el modo de tocar un elemento de la página para ocultarlo o cambiarlo. */
+    private fun ocultarElementoTocando() {
+        val p = actual
+        if (p == null || p.inicio) {
+            toast("Abre una página primero")
+            return
+        }
+        p.eligiendo = true
+        p.eligiendoElemento = true
+        toast("Toca el elemento que quieres ocultar o cambiar")
+    }
+
+    /** Aplica a las páginas abiertas el alto contraste, las animaciones y el zoom forzado, y a las nuevas por script de inicio. */
+    private fun aplicarVisibilidadWeb() {
+        reinstalarAnuncios()
+        for (q in pestanas) {
+            val w = q.web ?: continue
+            w.evaluateJavascript(anuncios.guionAccesibilidad(), null)
+        }
+    }
+
+    private val anfitrionAspecto = object : AnfitrionAspecto {
+        override fun pestana(): Pestana? = actual
+        override fun ocultarElemento() = ocultarElementoTocando()
+
+        override fun quitarCapa() {
+            val p = actual
+            if (p != null) quitarMuros(p)
+        }
+
+        override fun reglasDe(sitio: String) = mostrarReglasUsuario(sitio)
+
+        override fun aplicarTexto() {
+            for (q in pestanas) {
+                val w = q.web ?: continue
+                val h = if (q.url.startsWith("http")) ReglasUsuario.clave(Omnibox.hostDe(q.url)) else ""
+                w.settings.textZoom = ajustes.textoZoomEfectivo(h)
+            }
+        }
+
+        override fun aplicarVisibilidad() = aplicarVisibilidadWeb()
+
+        override fun aplicarOscurecer() {
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) aplicarAjustesWeb(w)
+            }
+        }
+
+        override fun aplicarBarra() = this@MainActivity.aplicarBarra()
+        override fun nombreAhorro(): String = NOMBRES_AHORRO[ajustes.ahorroDatos]
+
+        override fun ciclarAhorro() {
+            ajustes.ahorroDatos = (ajustes.ahorroDatos + 1) % 3
+            for (q in pestanas) {
+                val w = q.web
+                if (w != null) w.settings.blockNetworkImage = imagenesBloqueadas(w, hostDeWeb(w))
+            }
+            toast("Se aplica a las páginas que cargues desde ahora")
+        }
+
+        override fun refrescarInicio() = this@MainActivity.refrescarInicio()
+        override fun coloresInicio(): Colores = this@MainActivity.coloresInicio()
+        override fun normalizarUrl(texto: String): String? = this@MainActivity.normalizarUrl(texto)
+        override fun avisar(texto: String) = toast(texto)
+        override fun volverAlMenu() = abrirMenuLateral()
+    }
+
+    private val anfitrionPestanas = object : AnfitrionPestanas {
+        override fun pestanas(): List<Pestana> = ArrayList(this@MainActivity.pestanas)
+        override fun actual(): Pestana? = this@MainActivity.actual
+        override fun titulo(p: Pestana): String = tituloDe(p)
+        override fun sonando(): Pestana? = this@MainActivity.sonando
+        override fun activar(p: Pestana) = this@MainActivity.activar(p)
+        override fun cerrar(p: Pestana) = cerrarPestana(p)
+        override fun silenciar(p: Pestana) = alternarSilencio(p)
+
+        override fun dormir(p: Pestana, alTerminar: (Boolean) -> Unit) {
+            val w = p.web
+            if (w == null || !elegibleSuspension(p)) {
+                alTerminar(false)
+                return
+            }
+            w.evaluateJavascript(JS_PUEDE_SUSPENDER) { r ->
+                val ok = r == "0" && p.web === w && pestanas.contains(p) && elegibleSuspension(p)
+                if (ok) suspender(p)
+                alTerminar(ok)
+            }
+        }
+
+        override fun nueva(privada: Boolean) {
+            nuevaPestana(null, privada)
+        }
+
+        override fun cerradas(): Int = this@MainActivity.cerradas.size
+        override fun reabrir() = mostrarCerradas()
+        override fun cerrarTodas() = this@MainActivity.cerrarTodas()
+
+        override fun marcar(p: Pestana): Boolean {
+            val u = p.url
+            return u.startsWith("http") && !marcadores.contiene(u) && marcadores.agregar(tituloDe(p), u, 0L)
+        }
+
+        override fun comprobarSonido(alCambiar: () -> Unit) {
+            comprobarSuena()
+            manejadorPrincipal.postDelayed({ alCambiar() }, 700L)
+        }
+
+        override fun usoHace(p: Pestana): Long = android.os.SystemClock.elapsedRealtime() - p.ultimoUsoMs
+        override fun compartir(url: String) = this@MainActivity.compartir(url)
+        override fun copiar(url: String) = this@MainActivity.copiar(url)
+        override fun avisar(texto: String) = toast(texto)
+    }
+
     // ---------------------------------------------------------------- guardados (Guardados.kt)
 
     private val editorMarcador by lazy {
@@ -2138,8 +2260,12 @@ class MainActivity : Activity() {
             AccionMenu.MEDIA -> mostrarAjustesMedia()
             AccionMenu.SEGUNDO_PLANO -> mostrarSegundoPlano()
             AccionMenu.LECTURA_VOZ -> mostrarAjustesLectura()
-            AccionMenu.BARRA -> mostrarAjustesBarra()
-            AccionMenu.INICIO_AJUSTES -> mostrarAjustesInicio()
+            AccionMenu.BARRA -> abrirAspecto(PanelAspecto.BARRA)
+            AccionMenu.ASPECTO -> abrirAspecto()
+            AccionMenu.OCULTAR_ELEMENTO -> ocultarElementoTocando()
+            AccionMenu.QUITAR_CAPA -> if (p != null) quitarMuros(p)
+            AccionMenu.PESTANAS -> mostrarPestanas()
+            AccionMenu.INICIO_AJUSTES -> abrirAspecto(PanelAspecto.INICIO)
             AccionMenu.OSCURECER -> {
                 ajustes.oscurecerPaginas = !ajustes.oscurecerPaginas
                 for (q in pestanas) {
@@ -2285,149 +2411,6 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- ajustes de la pantalla de inicio
 
-    private val NOMBRES_ORIGEN_INICIO = listOf("marcadores recientes", "lista propia", "predeterminados")
-
-    private fun nombreTemaInicio(): String =
-        Paginas.TEMAS_INICIO.firstOrNull { it.id == ajustes.inicioTema }?.nombre?.substringBefore(" (") ?: "Automático"
-
-    private fun mostrarAjustesInicio() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        fun cambiar(a: () -> Unit): () -> Unit = {
-            a()
-            refrescarInicio()
-            mostrarAjustesInicio()
-        }
-        add("Colores: " + nombreTemaInicio() + "…") { elegirTemaInicio() }
-        add("Mostrar accesos directos / marcadores: " + si(ajustes.inicioAccesos), cambiar {
-            ajustes.inicioAccesos = !ajustes.inicioAccesos
-        })
-        if (ajustes.inicioAccesos) {
-            add("Origen de los accesos: " + NOMBRES_ORIGEN_INICIO[ajustes.inicioOrigen], cambiar {
-                ajustes.inicioOrigen = (ajustes.inicioOrigen + 1) % 3
-            })
-            if (ajustes.inicioOrigen == 1) {
-                add("Editar mis accesos (" + ajustes.accesosPropios().size + ")…") { editarAccesosPropios() }
-            }
-            add("Cantidad de accesos: " + ajustes.inicioMaxAccesos, cambiar {
-                ajustes.inicioMaxAccesos = if (ajustes.inicioMaxAccesos >= 12) 4 else ajustes.inicioMaxAccesos + 4
-            })
-            add("Forma de los iconos: " + (if (ajustes.inicioCuadrados) "cuadrados" else "redondos"), cambiar {
-                ajustes.inicioCuadrados = !ajustes.inicioCuadrados
-            })
-        }
-        add("Mostrar el buscador: " + si(ajustes.inicioBuscador), cambiar {
-            ajustes.inicioBuscador = !ajustes.inicioBuscador
-        })
-        add("Título: " + (if (ajustes.inicioTitulo.isBlank()) "(ninguno)" else ajustes.inicioTitulo) + "…") {
-            pedirTextoOpcional("Título de la pantalla de inicio (vacío = sin título)", ajustes.inicioTitulo) { t ->
-                ajustes.inicioTitulo = t
-                refrescarInicio()
-                mostrarAjustesInicio()
-            }
-        }
-        add("Subtítulo: " + (if (ajustes.inicioSubtitulo.isBlank()) "(ninguno)" else ajustes.inicioSubtitulo) + "…") {
-            pedirTextoOpcional("Subtítulo (vacío = sin subtítulo)", ajustes.inicioSubtitulo) { t ->
-                ajustes.inicioSubtitulo = t
-                refrescarInicio()
-                mostrarAjustesInicio()
-            }
-        }
-        add("Enlace «Personalizar» al pie de la pantalla: " + si(ajustes.inicioEnlacePersonalizar), cambiar {
-            ajustes.inicioEnlacePersonalizar = !ajustes.inicioEnlacePersonalizar
-        })
-        add("Icono de escudo (protección) al pie: " + si(ajustes.inicioEscudo), cambiar {
-            ajustes.inicioEscudo = !ajustes.inicioEscudo
-        })
-        add("Restablecer el aspecto original") {
-            ajustes.restablecerInicio()
-            refrescarInicio()
-            toast("Pantalla de inicio restablecida")
-            mostrarAjustesInicio()
-        }
-        opciones("Pantalla de inicio", items)
-    }
-
-    private fun elegirTemaInicio() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (t in Paginas.TEMAS_INICIO) {
-            val marca = if (t.id == ajustes.inicioTema) "● " else ""
-            items.add(Pair(marca + t.nombre) {
-                ajustes.inicioTema = t.id
-                refrescarInicio()
-                if (t.id == "personalizado") editarColoresInicio() else mostrarAjustesInicio()
-            })
-        }
-        opciones("Colores de la pantalla de inicio", items)
-    }
-
-    /** Los cuatro colores del tema personalizado, uno a uno, en hexadecimal (#RRGGBB). */
-    private fun editarColoresInicio() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun color(nombre: String, valor: String, guardar: (String) -> Unit) {
-            items.add(Pair(nombre + ": " + valor) {
-                pedirTexto(nombre + " (#RRGGBB)", valor) { t ->
-                    val h = Paginas.normalizarHex(t)
-                    if (h == null) {
-                        toast("Color no válido. Ejemplo: #1E88E5")
-                    } else {
-                        guardar(h)
-                        refrescarInicio()
-                    }
-                    editarColoresInicio()
-                }
-            })
-        }
-        color("Fondo", ajustes.inicioColorFondo) { ajustes.inicioColorFondo = it }
-        color("Texto", ajustes.inicioColorTexto) { ajustes.inicioColorTexto = it }
-        color("Acento (título y botones)", ajustes.inicioColorAcento) { ajustes.inicioColorAcento = it }
-        color("Iconos y buscador", ajustes.inicioColorSuperficie) { ajustes.inicioColorSuperficie = it }
-        items.add(Pair("Listo") { mostrarAjustesInicio() })
-        opciones("Colores personalizados", items)
-    }
-
-    /** Lista propia de accesos directos de la pantalla de inicio: añadir, añadir la página actual o quitar. */
-    private fun editarAccesosPropios() {
-        val lista = ajustes.accesosPropios()
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair("➕ Añadir un acceso…") {
-            pedirTexto("Dirección del sitio", "https://") { u ->
-                val url = normalizarUrl(u)
-                if (url == null) {
-                    toast("Dirección no válida")
-                    editarAccesosPropios()
-                } else {
-                    pedirTexto("Nombre", Omnibox.hostDe(url).removePrefix("www.")) { nombre ->
-                        ajustes.guardarAccesosPropios(ajustes.accesosPropios() + Pair(nombre, url))
-                        refrescarInicio()
-                        editarAccesosPropios()
-                    }
-                }
-            }
-        })
-        val p = actual
-        if (p != null && !p.inicio && p.url.startsWith("http")) {
-            items.add(Pair("➕ Añadir la página actual") {
-                val nombre = if (p.titulo.isNotBlank()) p.titulo else Omnibox.hostDe(p.url)
-                ajustes.guardarAccesosPropios(ajustes.accesosPropios() + Pair(nombre, p.url))
-                refrescarInicio()
-                editarAccesosPropios()
-            })
-        }
-        for ((i, e) in lista.withIndex()) {
-            items.add(Pair("✕ " + e.first + " — " + Omnibox.hostDe(e.second)) {
-                val nueva = ArrayList(ajustes.accesosPropios())
-                if (i < nueva.size) nueva.removeAt(i)
-                ajustes.guardarAccesosPropios(nueva)
-                refrescarInicio()
-                editarAccesosPropios()
-            })
-        }
-        items.add(Pair("Listo") { mostrarAjustesInicio() })
-        opciones("Mis accesos (toca uno para quitarlo)", items)
-    }
 
     /** Como pedirTexto, pero admite dejar el campo vacío (para quitar el título o el subtítulo). */
     private fun pedirTextoOpcional(titulo: String, inicial: String, alAceptar: (String) -> Unit) {
@@ -3546,185 +3529,6 @@ class MainActivity : Activity() {
         }
         items.add(Pair<String, () -> Unit>("Vaciar esta lista", { cerradas.clear() }))
         opciones("Pestañas cerradas (solo en memoria)", items)
-    }
-
-    /** Lista de pestañas con búsqueda por título o dirección, selección múltiple para cerrar y acceso a las cerradas. */
-    private fun mostrarPestanas() {
-        val lista = ListView(this)
-        var dialogo: AlertDialog? = null
-        var adaptador: BaseAdapter? = null
-        var filtro = ""
-        var seleccion = false
-        val marcadas = HashSet<Int>()
-        val visibles = ArrayList<Pestana>()
-        var actualizarBarra: () -> Unit = {}
-
-        fun refrescar() {
-            visibles.clear()
-            val palabras = filtro.lowercase().split(' ').filter { it.isNotEmpty() }
-            for (q in pestanas) {
-                val txt = (tituloDe(q) + " " + q.url).lowercase()
-                if (palabras.all { txt.contains(it) }) visibles.add(q)
-            }
-            val ids = HashSet<Int>()
-            for (q in pestanas) ids.add(q.id)
-            marcadas.retainAll(ids)
-            adaptador?.notifyDataSetChanged()
-            actualizarBarra()
-        }
-
-        adaptador = object : BaseAdapter() {
-            override fun getCount(): Int = visibles.size
-            override fun getItem(position: Int): Any = visibles[position]
-            override fun getItemId(position: Int): Long = visibles[position].id.toLong()
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val p = visibles[position]
-                val fila = LinearLayout(this@MainActivity)
-                fila.setOrientation(LinearLayout.HORIZONTAL)
-                fila.setGravity(Gravity.CENTER_VERTICAL)
-                fila.setPadding(16.dp(), 8.dp(), 4.dp(), 8.dp())
-                val textos = LinearLayout(this@MainActivity)
-                textos.setOrientation(LinearLayout.VERTICAL)
-                val t1 = TextView(this@MainActivity)
-                t1.text = (if (seleccion) (if (marcadas.contains(p.id)) "☑ " else "☐ ") else "") +
-                    (if (p === actual) "● " else "") + (if (p === sonando) "🔊 " else "") + (if (p.suspendida) "💤 " else "") +
-                    (if (p.privada) "🕶 " else "") + tituloDe(p)
-                t1.textSize = 16f
-                t1.maxLines = 1
-                t1.ellipsize = TextUtils.TruncateAt.END
-                t1.setTextColor(paleta.texto)
-                val t2 = TextView(this@MainActivity)
-                t2.text = if (p.url.isNotEmpty()) p.url else "Pestaña nueva"
-                t2.textSize = 12f
-                t2.maxLines = 1
-                t2.ellipsize = TextUtils.TruncateAt.END
-                t2.setTextColor(paleta.tenue)
-                textos.addView(t1)
-                textos.addView(t2)
-                fila.addView(textos, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                if (!seleccion) {
-                    if (p.silenciada || p.suena) {
-                        val altavoz = boton(if (p.silenciada) "🔇" else "🔊", 18f) {
-                            alternarSilencio(p)
-                            notifyDataSetChanged()
-                        }
-                        fila.addView(altavoz, LinearLayout.LayoutParams(44.dp(), 48.dp()))
-                    }
-                    val cerrar = boton("✕", 18f) {
-                        cerrarPestana(p)
-                        refrescar()
-                    }
-                    fila.addView(cerrar, LinearLayout.LayoutParams(48.dp(), 48.dp()))
-                }
-                return fila
-            }
-        }
-        lista.setAdapter(adaptador)
-
-        val campo = EditText(this)
-        campo.hint = "Buscar en pestañas (título o dirección)"
-        campo.isSingleLine = true
-        campo.textSize = 15f
-        campo.setTextColor(paleta.texto)
-        campo.setHintTextColor(paleta.tenue)
-        campo.addTextChangedListener(object : android.text.TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-            override fun afterTextChanged(s: android.text.Editable?) {
-                filtro = s?.toString() ?: ""
-                refrescar()
-            }
-        })
-
-        val btnSel = boton("☑ Seleccionar", 14f) {
-            seleccion = !seleccion
-            marcadas.clear()
-            refrescar()
-        }
-        val btnTodas = boton("Todas", 14f) {
-            val todas = marcadas.size == visibles.size
-            marcadas.clear()
-            if (!todas) for (q in visibles) marcadas.add(q.id)
-            refrescar()
-        }
-        val btnCerrarSel = boton("Cerrar", 14f) {
-            val aCerrar = pestanas.filter { marcadas.contains(it.id) }
-            if (aCerrar.isEmpty()) {
-                toast("Marca alguna pestaña")
-            } else {
-                for (q in aCerrar) cerrarPestana(q)
-                marcadas.clear()
-                seleccion = false
-                refrescar()
-                toast(aCerrar.size.toString() + " pestañas cerradas. Se pueden reabrir desde «↩ Cerradas»")
-            }
-        }
-        val btnCerradas = boton("↩ Cerradas", 14f) {
-            dialogo?.dismiss()
-            mostrarCerradas()
-        }
-        actualizarBarra = {
-            btnSel.text = if (seleccion) "Salir" else "☑ Seleccionar"
-            btnTodas.visibility = if (seleccion) View.VISIBLE else View.GONE
-            btnCerrarSel.visibility = if (seleccion) View.VISIBLE else View.GONE
-            btnCerrarSel.text = "Cerrar (" + marcadas.size + ")"
-            btnCerradas.visibility = if (seleccion) View.GONE else View.VISIBLE
-            btnCerradas.text = "↩ Cerradas (" + cerradas.size + ")"
-        }
-        val barra = LinearLayout(this)
-        barra.setOrientation(LinearLayout.HORIZONTAL)
-        for (b in listOf(btnSel, btnTodas, btnCerrarSel, btnCerradas)) {
-            barra.addView(b, LinearLayout.LayoutParams(0, 40.dp(), 1f))
-        }
-
-        val vacio = TextView(this)
-        vacio.text = "Sin coincidencias"
-        vacio.setTextColor(paleta.tenue)
-        vacio.gravity = Gravity.CENTER
-        vacio.setPadding(16.dp(), 24.dp(), 16.dp(), 24.dp())
-        vacio.visibility = View.GONE
-
-        val raiz = LinearLayout(this)
-        raiz.setOrientation(LinearLayout.VERTICAL)
-        raiz.setPadding(16.dp(), 4.dp(), 16.dp(), 0)
-        raiz.addView(campo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        raiz.addView(barra, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        raiz.addView(vacio)
-        raiz.addView(lista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        lista.emptyView = vacio
-
-        refrescar()
-        // Qué pestañas suenan ahora: se pregunta a cada página y se refresca la lista según llegan las respuestas.
-        for (q in pestanas) {
-            if (q.silenciada) continue
-            q.web?.evaluateJavascript(JS_SUENA) { r ->
-                val s = r == "1"
-                if (q.suena != s) {
-                    q.suena = s
-                    adaptador?.notifyDataSetChanged()
-                }
-            }
-        }
-        lista.setOnItemClickListener { _, _, pos, _ ->
-            if (pos < 0 || pos >= visibles.size) return@setOnItemClickListener
-            val q = visibles[pos]
-            if (seleccion) {
-                if (!marcadas.remove(q.id)) marcadas.add(q.id)
-                refrescar()
-            } else {
-                dialogo?.dismiss()
-                activar(q)
-            }
-        }
-        val d = nuevoDialogo()
-            .setTitle("Pestañas")
-            .setView(raiz)
-            .setPositiveButton("Nueva") { _, _ -> nuevaPestana(null) }
-            .setNeutralButton("Privada") { _, _ -> nuevaPestana(null, true) }
-            .setNegativeButton("Cerrar", null)
-            .create()
-        dialogo = d
-        d.show()
     }
 
     private fun menuContextual(v: WebView, p: Pestana): Boolean {
@@ -5371,7 +5175,7 @@ class MainActivity : Activity() {
                 return false
             }
             if (esquema == "optimo") {
-                if (uri.toString() == Paginas.URL_PERSONALIZAR) mostrarAjustesInicio()
+                if (uri.toString() == Paginas.URL_PERSONALIZAR) abrirAspecto(PanelAspecto.INICIO)
                 else if (uri.toString() == Paginas.URL_PROTECCION) abrirCentro()
                 else if (p.inicio && uri.host == "local" && request.hasGesture()) abrirMarcadorLocal(uri.toString())
                 return true
