@@ -232,7 +232,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
      */
     fun filaLista(
         letra: String, tono: Int, titulo: String, detalle: String?, marcado: Boolean?,
-        alTocar: () -> Unit, alMantener: (() -> Unit)?, alMenu: (() -> Unit)?
+        alTocar: () -> Unit, alMantener: (() -> Unit)?, alMenu: (() -> Unit)?, alCerrar: (() -> Unit)? = null
     ) {
         val fila = LinearLayout(act)
         fila.orientation = LinearLayout.HORIZONTAL
@@ -263,6 +263,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         lp.leftMargin = dp(12)
         fila.addView(col, lp)
         if (alMenu != null) fila.addView(botonIcono("⋮") { alMenu() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        if (alCerrar != null) fila.addView(botonIcono("✕") { alCerrar() }, LinearLayout.LayoutParams(dp(40), dp(40)))
         fila.isClickable = true
         conRipple(fila)
         fila.setOnClickListener { alTocar() }
@@ -616,6 +617,175 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         val lpf = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         lpf.topMargin = dp(8)
         agregar(fila, lpf)
+    }
+
+    /** Una ficha de la cuadrícula (pestañas): círculo grande con la letra, título y detalle. */
+    class Ficha(
+        val letra: String, val tono: Int, val titulo: String, val detalle: String, val marcado: Boolean?, val activa: Boolean,
+        val alTocar: () -> Unit, val alMantener: (() -> Unit)?, val alCerrar: (() -> Unit)?
+    )
+
+    /** Cuadrícula de dos columnas de fichas. */
+    fun cuadricula(items: List<Ficha>) {
+        var i = 0
+        while (i < items.size) {
+            val fila = LinearLayout(act)
+            fila.orientation = LinearLayout.HORIZONTAL
+            fila.setPadding(0, dp(4), 0, dp(4))
+            for (j in 0..1) {
+                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                if (j == 1) lp.leftMargin = dp(8)
+                if (i + j >= items.size) {
+                    fila.addView(View(act), lp)
+                    continue
+                }
+                val it2 = items[i + j]
+                val tarjeta = LinearLayout(act)
+                tarjeta.orientation = LinearLayout.VERTICAL
+                tarjeta.setPadding(dp(10), dp(10), dp(10), dp(10))
+                val f = GradientDrawable()
+                f.setColor(paleta.campo)
+                f.cornerRadius = dp(14).toFloat()
+                if (it2.activa) f.setStroke(dp(2), paleta.acento)
+                tarjeta.background = f
+                val sel = it2.marcado == true
+                val cuadro = texto(if (sel) "✓" else it2.letra, 24f, if (sel) Color.WHITE else paleta.texto, true)
+                cuadro.gravity = Gravity.CENTER
+                val fc = GradientDrawable()
+                fc.cornerRadius = dp(10).toFloat()
+                fc.setColor(if (sel) paleta.acento else Color.argb(60, Color.red(it2.tono), Color.green(it2.tono), Color.blue(it2.tono)))
+                cuadro.background = fc
+                tarjeta.addView(cuadro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+                val t = texto(it2.titulo, 13f, paleta.texto)
+                t.setSingleLine(true)
+                t.ellipsize = android.text.TextUtils.TruncateAt.END
+                t.setPadding(0, dp(6), 0, 0)
+                tarjeta.addView(t)
+                val d = texto(it2.detalle, 11f, paleta.tenue)
+                d.setSingleLine(true)
+                d.ellipsize = android.text.TextUtils.TruncateAt.END
+                tarjeta.addView(d)
+                if (it2.alCerrar != null) {
+                    val x = botonIcono("✕") { it2.alCerrar.invoke() }
+                    tarjeta.addView(x, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
+                }
+                tarjeta.isClickable = true
+                tarjeta.setOnClickListener { it2.alTocar() }
+                if (it2.alMantener != null) {
+                    tarjeta.setOnLongClickListener {
+                        it2.alMantener.invoke()
+                        true
+                    }
+                }
+                fila.addView(tarjeta, lp)
+            }
+            agregar(fila)
+            i += 2
+        }
+    }
+
+    /** Botón grande de acción principal (color de acento) con icono, título y subtítulo. */
+    fun botonGrande(icono: String, titulo: String, sub: String, activo: Boolean = true, accion: () -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(dp(14), dp(14), dp(14), dp(14))
+        val f = GradientDrawable()
+        f.setColor(if (activo) paleta.acento else paleta.campo)
+        f.cornerRadius = dp(16).toFloat()
+        fila.background = f
+        val ic = texto(icono, 26f, if (activo) Color.WHITE else paleta.tenue)
+        ic.gravity = Gravity.CENTER
+        fila.addView(ic, LinearLayout.LayoutParams(dp(40), ViewGroup.LayoutParams.WRAP_CONTENT))
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(texto(titulo, 15f, if (activo) Color.WHITE else paleta.texto, true))
+        col.addView(texto(sub, 12f, if (activo) Color.argb(220, 255, 255, 255) else paleta.tenue))
+        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        lp.leftMargin = dp(10)
+        fila.addView(col, lp)
+        fila.addView(texto("›", 22f, if (activo) Color.WHITE else paleta.tenue))
+        fila.isClickable = true
+        fila.setOnClickListener { accion() }
+        val lpf = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lpf.bottomMargin = dp(8)
+        agregar(fila, lpf)
+    }
+
+    /** «Etiqueta   −  valor  +». */
+    fun paso(etiqueta: String, valor: String, puedeBajar: Boolean, puedeSubir: Boolean, menos: () -> Unit, mas: () -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.minimumHeight = dp(48)
+        fila.setPadding(dp(4), 0, 0, 0)
+        fila.addView(texto(etiqueta, 15f, paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        fila.addView(miniBoton("−", puedeBajar, menos), LinearLayout.LayoutParams(dp(42), dp(42)))
+        val v = texto(valor, 14f, paleta.texto)
+        v.gravity = Gravity.CENTER
+        fila.addView(v, LinearLayout.LayoutParams(dp(60), ViewGroup.LayoutParams.WRAP_CONTENT))
+        fila.addView(miniBoton("+", puedeSubir, mas), LinearLayout.LayoutParams(dp(42), dp(42)))
+        agregar(fila)
+    }
+
+    private fun miniBoton(t: String, activo: Boolean, accion: () -> Unit): TextView {
+        val b = texto(t, 18f, paleta.texto)
+        b.gravity = Gravity.CENTER
+        b.alpha = if (activo) 1f else 0.3f
+        b.isClickable = activo
+        conRipple(b)
+        if (activo) b.setOnClickListener { accion() }
+        return b
+    }
+
+    /** Deslizador de [min] a [max] de [paso] en [paso]. [alCambiar] mientras se arrastra; [alSoltar] al terminar. */
+    fun deslizador(min: Int, max: Int, paso: Int, valor: Int, alCambiar: (Int) -> Unit, alSoltar: (Int) -> Unit) {
+        val sb = android.widget.SeekBar(act)
+        sb.max = (max - min) / paso
+        sb.progress = ((valor.coerceIn(min, max) - min) / paso)
+        sb.progressTintList = ColorStateList.valueOf(paleta.acento)
+        sb.thumbTintList = ColorStateList.valueOf(paleta.acento)
+        sb.setOnSeekBarChangeListener(object : android.widget.SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: android.widget.SeekBar?, p: Int, deUsuario: Boolean) {
+                if (deUsuario) alCambiar(min + p * paso)
+            }
+
+            override fun onStartTrackingTouch(b: android.widget.SeekBar?) {}
+            override fun onStopTrackingTouch(b: android.widget.SeekBar?) {
+                alSoltar(min + (b?.progress ?: 0) * paso)
+            }
+        })
+        agregar(sb, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+    }
+
+    /** Fila de lista ordenable: nombre, ▲ ▼ y, si [visible] no es null, un interruptor para mostrarla u ocultarla. */
+    fun filaOrden(
+        nombre: String, visible: Boolean?, puedeSubir: Boolean, puedeBajar: Boolean,
+        alSubir: () -> Unit, alBajar: () -> Unit, alVisible: (Boolean) -> Unit
+    ) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.minimumHeight = dp(52)
+        fila.setPadding(dp(4), dp(2), dp(2), dp(2))
+        fila.addView(texto(nombre, 15f, if (visible == false) paleta.tenue else paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        fila.addView(miniBoton("▲", puedeSubir, alSubir), LinearLayout.LayoutParams(dp(40), dp(40)))
+        fila.addView(miniBoton("▼", puedeBajar, alBajar), LinearLayout.LayoutParams(dp(40), dp(40)))
+        if (visible != null) {
+            val sw = Switch(act)
+            val estados = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+            sw.thumbTintList = ColorStateList(estados, intArrayOf(paleta.acento, paleta.tenue))
+            sw.trackTintList = ColorStateList(
+                estados,
+                intArrayOf(Color.argb(110, Color.red(paleta.acento), Color.green(paleta.acento), Color.blue(paleta.acento)), Color.argb(70, Color.red(paleta.tenue), Color.green(paleta.tenue), Color.blue(paleta.tenue)))
+            )
+            sw.isChecked = visible
+            sw.setOnCheckedChangeListener { _, v -> alVisible(v) }
+            fila.addView(sw, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        } else {
+            fila.addView(View(act), LinearLayout.LayoutParams(dp(56), dp(1)))
+        }
+        agregar(fila)
     }
 
     /** Botón de texto ancho (acciones destructivas o principales). */
