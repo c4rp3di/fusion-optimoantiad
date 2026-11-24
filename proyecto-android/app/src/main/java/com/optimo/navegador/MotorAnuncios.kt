@@ -332,7 +332,38 @@ class MotorAnuncios(contexto: Context, private val ajustes: Ajustes) {
                 } catch (e: Exception) { }
             }
         }
+        // Visibilidad (alto contraste, sin animaciones, zoom forzado): vale en todas las páginas.
+        if (ajustes.altoContraste || ajustes.reducirAnimaciones || ajustes.forzarZoom) {
+            try {
+                lista.add(WebViewCompat.addDocumentStartJavaScript(web, guionAccesibilidad(), reglasDeOrigen("*")))
+            } catch (e: Exception) { }
+        }
         manejadores[web] = lista
+    }
+
+    /**
+     * Script de visibilidad según los ajustes: pone o quita una hoja de estilo (alto contraste, sin animaciones) y, con el zoom
+     * forzado, reescribe la etiqueta viewport para permitir el zoom. Sirve al cargar la página y también para aplicarlo o quitarlo
+     * en la página ya abierta.
+     */
+    fun guionAccesibilidad(): String {
+        val css = StringBuilder()
+        if (ajustes.altoContraste) css.append("html{filter:contrast(1.25) saturate(1.15)!important}")
+        if (ajustes.reducirAnimaciones) css.append("*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}")
+        return """(function(){try{
+var id='__optimo_acc',e=document.getElementById(id),c=__CSS__;
+if(c){if(!e){e=document.createElement('style');e.id=id;(document.head||document.documentElement).appendChild(e);}e.textContent=c;}else if(e){e.remove();}
+if(__ZOOM__&&!window.__optimoZoom){window.__optimoZoom=1;
+var fix=function(){var m=document.querySelectorAll('meta[name=viewport]');
+for(var i=0;i<m.length;i++){var v=m[i].getAttribute('content')||'';
+var n=v.replace(/(user-scalable|maximum-scale|minimum-scale)\s*=\s*[^,;]*[,;]?\s*/gi,'').replace(/[,;\s]+$/,'');
+n=(n?n+',':'')+'user-scalable=yes';
+if(n!==v)m[i].setAttribute('content',n);}};
+fix();
+new MutationObserver(fix).observe(document.documentElement,{childList:true,subtree:true,attributes:true,attributeFilter:['content']});}
+}catch(x){}})();"""
+            .replace("__CSS__", org.json.JSONObject.quote(css.toString()))
+            .replace("__ZOOM__", if (ajustes.forzarZoom) "true" else "false")
     }
 
     /** Script que mantiene la página «visible» aunque se bloquee la pantalla; null si la opción está desactivada. */
