@@ -793,7 +793,7 @@ class MainActivity : Activity() {
         // Altavoz: solo aparece si la pestaña suena o está silenciada (tocar para silenciar / activar el sonido)
         btnAltavoz = boton("🔊", 17f) { actual?.let { alternarSilencio(it) } }
         btnAltavoz.visibility = View.GONE
-        btnMarcadores = boton("🔖", 17f) { mostrarMarcadores() }
+        btnMarcadores = boton("🔖", 17f) { abrirGuardados(PantallaGuardados.MARCADORES) }
         btnPantalla = boton("⛶", 18f) { entrarPaginaCompleta() }
         // Escudo: estado de la protección en la página activa (toca para ver el panel)
         btnEscudo = android.widget.FrameLayout(this)
@@ -1163,6 +1163,8 @@ class MainActivity : Activity() {
         }
 
         override fun abrirCentro() = this@MainActivity.abrirCentro()
+        override fun volverAlMenu() = abrirMenuLateral()
+        override fun pestanaActual(): Pestana? = actual
 
         override fun abrir(destino: Destino) {
             when (destino) {
@@ -2026,8 +2028,8 @@ class MainActivity : Activity() {
         override fun avisar(texto: String) = toast(texto)
         override fun copiar(texto: String) = this@MainActivity.copiar(texto)
         override fun volverAlMenu() = abrirMenuLateral()
-        override fun paginasGuardadas() = mostrarPaginasGuardadas()
-        override fun listasEnlaces() = mostrarListasEnlaces()
+        override fun paginasGuardadas() = abrirGuardados(PantallaGuardados.PAGINAS)
+        override fun listasEnlaces() = abrirGuardados(PantallaGuardados.LISTAS)
         override fun reglasDe(sitio: String) = mostrarReglasUsuario(sitio)
         override fun almacenamientoDe(p: Pestana) = inspeccionarAlmacenamiento(p)
         override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
@@ -2044,13 +2046,59 @@ class MainActivity : Activity() {
             }
     }
 
+    // ---------------------------------------------------------------- guardados (Guardados.kt)
+
+    private val editorMarcador by lazy {
+        EditorMarcador(this, paleta, marcadores, anfitrionGuardados) { actual?.privada == true }
+    }
+
+    private fun abrirGuardados(pestana: String = PantallaGuardados.MARCADORES, carpeta: Long = 0L) {
+        PantallaGuardados(
+            this, paleta, marcadores, historial, anfitrionGuardados, editorMarcador, actual?.privada == true, pestana, carpeta
+        ).mostrar()
+    }
+
+    private val anfitrionGuardados = object : AnfitrionGuardados {
+        override fun abrir(url: String) = cargarEnActual(url)
+
+        override fun abrirNueva(url: String) {
+            nuevaPestana(url)
+        }
+
+        override fun copiar(texto: String) = this@MainActivity.copiar(texto)
+        override fun compartir(url: String) = this@MainActivity.compartir(url)
+        override fun avisar(texto: String) = toast(texto)
+        override fun quitarMarcador(url: String) = quitarMarcadorUrl(url)
+        override fun esLocal(url: String): Boolean = esMarcadorLocal(url)
+
+        override fun descripcionLocal(url: String): String =
+            if (url.contains("#app=")) "Archivo del dispositivo (aplicación web)" else "Archivo del dispositivo (sin conexión)"
+
+        override fun normalizarUrl(texto: String): String? = this@MainActivity.normalizarUrl(texto)
+        override fun refrescarUi() = actualizarUi()
+        override fun abrirSinConexion(pg: PaginaGuardada) = this@MainActivity.abrirSinConexion(pg)
+
+        override fun verLista(l: ListaEnlaces) {
+            val p = actual
+            if (p != null) mostrarEnlaces(p, "", l.nombre, l.fuente, l.items, null, false)
+        }
+
+        override fun descargas() = abrirDescargas()
+        override fun ajustesHistorial() = abrirPrivacidad(CentroPrivacidad.HISTORIAL)
+        override fun borrarPorRango(volver: () -> Unit) = nuevoCentroPrivacidad().elegirRangoBorrado(volver)
+        override fun borrarHistorialDe(sitio: String) = limpieza.quitarHistorialDe(sitio)
+        override fun cerradas(): Int = this@MainActivity.cerradas.size
+        override fun reabrir() = mostrarCerradas()
+        override fun volverAlMenu() = abrirMenuLateral()
+    }
+
     private fun ejecutarMenu(a: AccionMenu) {
         val p = actual
         when (a) {
             AccionMenu.NUEVA -> nuevaPestana(null)
             AccionMenu.PRIVADA -> nuevaPestana(null, true)
-            AccionMenu.MARCADORES -> mostrarMarcadores()
-            AccionMenu.HISTORIAL -> mostrarLista("Historial", historial, "El historial está vacío", true)
+            AccionMenu.MARCADORES -> abrirGuardados(PantallaGuardados.MARCADORES)
+            AccionMenu.HISTORIAL -> abrirGuardados(PantallaGuardados.HISTORIAL)
             AccionMenu.DESCARGAS -> abrirDescargas()
             AccionMenu.COMPARTIR -> if (p != null) compartir(p.url)
             AccionMenu.COPIAR_DIRECCION -> if (p != null) copiar(p.url)
@@ -2083,8 +2131,8 @@ class MainActivity : Activity() {
                 if (p != null && medio != null) elegirAppMedio(medio, null, p, p.web?.settings?.userAgentString, p.titulo)
             }
             AccionMenu.ABRIR_MEGA -> if (p != null) elegirAppMedio(p.url, null, p, null, p.titulo)
-            AccionMenu.PAGINAS_GUARDADAS -> mostrarPaginasGuardadas()
-            AccionMenu.LISTAS_ENLACES -> mostrarListasEnlaces()
+            AccionMenu.PAGINAS_GUARDADAS -> abrirGuardados(PantallaGuardados.PAGINAS)
+            AccionMenu.LISTAS_ENLACES -> abrirGuardados(PantallaGuardados.LISTAS)
             AccionMenu.REABRIR -> mostrarCerradas()
             AccionMenu.CERRAR_TODAS -> cerrarTodas()
             AccionMenu.MEDIA -> mostrarAjustesMedia()
@@ -2383,19 +2431,7 @@ class MainActivity : Activity() {
 
     /** Como pedirTexto, pero admite dejar el campo vacío (para quitar el título o el subtítulo). */
     private fun pedirTextoOpcional(titulo: String, inicial: String, alAceptar: (String) -> Unit) {
-        val campo = EditText(this)
-        campo.setSingleLine(true)
-        campo.setText(inicial)
-        campo.setSelectAllOnFocus(true)
-        val caja = FrameLayout(this)
-        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
-        caja.addView(campo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        nuevoDialogo()
-            .setTitle(titulo)
-            .setView(caja)
-            .setPositiveButton("Aceptar") { _, _ -> alAceptar(campo.text.toString().trim().take(80)) }
-            .setNegativeButton("Cancelar", null)
-            .show()
+        Dialogos.texto(this, paleta, actual?.privada == true, titulo, inicial, true) { t -> alAceptar(t.take(80)) }
     }
 
     private fun mostrarSegundoPlano() {
@@ -2911,46 +2947,6 @@ class MainActivity : Activity() {
         mostrarEnlaces(p, "", res.titulo.ifBlank { Omnibox.hostDe(res.inicio) }, res.inicio, res.enlaces, null, true)
     }
 
-    private fun mostrarListasEnlaces() {
-        val listas = ListasEnlaces.todas()
-        if (listas.isEmpty()) {
-            toast("No hay listas guardadas")
-            return
-        }
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        val fmt = java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.getDefault())
-        for (l in listas) {
-            items.add(Pair<String, () -> Unit>(l.nombre + "\n" + l.items.size + " enlaces · " + fmt.format(java.util.Date(l.fecha)), { menuListaEnlaces(l) }))
-        }
-        items.add(Pair<String, () -> Unit>("Borrar todas las listas…", {
-            nuevoDialogo()
-                .setTitle("Borrar listas")
-                .setMessage("Se borrarán las " + listas.size + " listas de enlaces guardadas.")
-                .setPositiveButton("Borrar") { _, _ ->
-                    ListasEnlaces.eliminarTodas()
-                    toast("Listas borradas")
-                }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }))
-        opciones("Listas de enlaces", items)
-    }
-
-    private fun menuListaEnlaces(l: ListaEnlaces) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Ver la lista", {
-            val p = actual
-            if (p != null) mostrarEnlaces(p, "", l.nombre, l.fuente, l.items, null, false)
-        }))
-        if (l.fuente.startsWith("http")) items.add(Pair<String, () -> Unit>("Abrir la página de origen", { nuevaPestana(l.fuente) }))
-        items.add(Pair<String, () -> Unit>("Borrar esta lista", {
-            ListasEnlaces.eliminar(l.id)
-            toast("Lista borrada")
-            if (ListasEnlaces.todas().isNotEmpty()) mostrarListasEnlaces()
-        }))
-        opciones(l.nombre.take(80), items)
-    }
-
     // ---------------------------------------------------------------- páginas guardadas (sin conexión)
 
     /** Guarda la página abierta (MHTML con sus recursos + instantánea del DOM) para leerla sin conexión. Nunca en pestañas privadas. */
@@ -3013,44 +3009,6 @@ class MainActivity : Activity() {
                 toast("Página guardada para leer sin conexión")
             }
         }
-    }
-
-    private fun mostrarPaginasGuardadas() {
-        val todas = PaginasGuardadas.todas()
-        if (todas.isEmpty()) {
-            toast("No hay páginas guardadas")
-            return
-        }
-        val fecha = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (pg in todas) {
-            val etiqueta = pg.titulo + "\n" + Omnibox.hostDe(pg.url) + " · " + fecha.format(java.util.Date(pg.fecha)) + " · " + formatoTamano(pg.bytes)
-            items.add(Pair<String, () -> Unit>(etiqueta, { menuPaginaGuardada(pg) }))
-        }
-        items.add(Pair<String, () -> Unit>("Borrar todas…", {
-            nuevoDialogo()
-                .setTitle("Borrar páginas guardadas")
-                .setMessage("Se borrarán las " + todas.size + " páginas guardadas (" + formatoTamano(PaginasGuardadas.totalBytes()) + ").")
-                .setPositiveButton("Borrar") { _, _ ->
-                    PaginasGuardadas.eliminarTodas()
-                    toast("Páginas guardadas borradas")
-                }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }))
-        opciones("Páginas guardadas (" + todas.size + ", " + formatoTamano(PaginasGuardadas.totalBytes()) + ")", items)
-    }
-
-    private fun menuPaginaGuardada(pg: PaginaGuardada) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Abrir sin conexión", { abrirSinConexion(pg) }))
-        items.add(Pair<String, () -> Unit>("Abrir la dirección original", { nuevaPestana(pg.url) }))
-        items.add(Pair<String, () -> Unit>("Eliminar", {
-            PaginasGuardadas.eliminar(pg.id)
-            toast("Página eliminada")
-            if (PaginasGuardadas.todas().isNotEmpty()) mostrarPaginasGuardadas()
-        }))
-        opciones(pg.titulo, items)
     }
 
     /** Abre la página guardada en una pestaña visor: sin red, sin JavaScript; los enlaces se abren en una pestaña normal. */
@@ -3506,65 +3464,6 @@ class MainActivity : Activity() {
         toast("Copiado")
     }
 
-    private fun mostrarLista(titulo: String, lista: ListaPersistente, vacio: String, conBorrarTodo: Boolean) {
-        if (lista.todos().isEmpty()) {
-            toast(vacio)
-            return
-        }
-        val vista = ListView(this)
-        val adaptador = object : ArrayAdapter<Entrada>(
-            this, android.R.layout.simple_list_item_2, android.R.id.text1, lista.todos()
-        ) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getView(position, convertView, parent)
-                val e = getItem(position)
-                val t1 = v.findViewById<TextView>(android.R.id.text1)
-                val t2 = v.findViewById<TextView>(android.R.id.text2)
-                if (e != null) {
-                    t1.text = if (e.titulo.isNotEmpty()) e.titulo else e.url
-                    t2.text = e.url
-                }
-                t1.maxLines = 1
-                t2.maxLines = 1
-                t1.ellipsize = TextUtils.TruncateAt.END
-                t2.ellipsize = TextUtils.TruncateAt.END
-                t1.setTextColor(paleta.texto)
-                t2.setTextColor(paleta.tenue)
-                return v
-            }
-        }
-        vista.setAdapter(adaptador)
-        var dialogo: AlertDialog? = null
-        vista.setOnItemClickListener { _, _, pos, _ ->
-            val e = lista.todos()[pos]
-            dialogo?.dismiss()
-            cargarEnActual(e.url)
-        }
-        vista.setOnItemLongClickListener { _, _, pos, _ ->
-            val e = lista.todos()[pos]
-            val items = ArrayList<Pair<String, () -> Unit>>()
-            items.add(Pair("Abrir en pestaña nueva", {
-                dialogo?.dismiss()
-                nuevaPestana(e.url)
-                Unit
-            }))
-            items.add(Pair("Eliminar", {
-                lista.quitar(e.url)
-                adaptador.notifyDataSetChanged()
-                actualizarUi()
-            }))
-            opciones(null, items)
-            true
-        }
-        val b = nuevoDialogo().setTitle(titulo).setView(vista).setNegativeButton("Cerrar", null)
-        if (conBorrarTodo) {
-            b.setNeutralButton("Borrar…") { _, _ -> nuevoCentroPrivacidad().elegirRangoBorrado { } }
-        }
-        val d = b.create()
-        dialogo = d
-        d.show()
-    }
-
     private fun actualizarBotonBorrar() {
         borrarTexto.visibility = if (omnibox.hasFocus() && omnibox.text.isNotEmpty()) View.VISIBLE else View.GONE
     }
@@ -3585,103 +3484,7 @@ class MainActivity : Activity() {
     }
 
     private fun pedirTexto(titulo: String, inicial: String, alAceptar: (String) -> Unit) {
-        val campo = EditText(this)
-        campo.setSingleLine(true)
-        campo.setText(inicial)
-        campo.setSelectAllOnFocus(true)
-        val caja = FrameLayout(this)
-        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
-        caja.addView(campo, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        nuevoDialogo()
-            .setTitle(titulo)
-            .setView(caja)
-            .setPositiveButton("Aceptar") { _, _ ->
-                val t = campo.text.toString().trim()
-                if (t.isNotEmpty()) alAceptar(t)
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    /** Lista de carpetas (con sangría) para elegir destino. [excluir] oculta una carpeta y todo lo que cuelga de ella. */
-    private fun elegirCarpeta(titulo: String, actualId: Long, excluir: Long, alElegir: (Long) -> Unit) {
-        val ids = ArrayList<Long>()
-        val nombres = ArrayList<String>()
-        ids.add(0L)
-        nombres.add((if (actualId == 0L) "● " else "") + "Marcadores (raíz)")
-        for ((c, nivel) in marcadores.arbol(excluir)) {
-            ids.add(c.id)
-            nombres.add("    ".repeat(nivel) + (if (c.id == actualId) "● " else "") + "📁 " + c.nombre)
-        }
-        nuevoDialogo()
-            .setTitle(titulo)
-            .setItems(nombres.toTypedArray()) { _, i -> alElegir(ids[i]) }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    /** Formulario nombre + dirección + carpeta. [alGuardar] devuelve false para dejar el formulario abierto. */
-    private fun editarMarcador(
-        encabezado: String,
-        titulo: String,
-        url: String,
-        carpeta: Long,
-        alGuardar: (String, String, Long) -> Boolean
-    ) {
-        val caja = LinearLayout(this)
-        caja.setOrientation(LinearLayout.VERTICAL)
-        caja.setPadding(20.dp(), 8.dp(), 20.dp(), 0)
-        val campoTitulo = EditText(this)
-        campoTitulo.hint = "Nombre"
-        campoTitulo.setSingleLine(true)
-        campoTitulo.setText(titulo)
-        val campoUrl = EditText(this)
-        campoUrl.hint = "Dirección (https://…)"
-        campoUrl.setSingleLine(true)
-        campoUrl.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
-        // Un marcador de archivo del dispositivo (optimo://local/…) no es una dirección web: se muestra sin poder editarse ni validarse como URL.
-        val esLocal = esMarcadorLocal(url)
-        if (esLocal) {
-            campoUrl.setText(if (url.contains("#app=")) "Archivo del dispositivo (aplicación web)" else "Archivo del dispositivo (sin conexión)")
-            campoUrl.isEnabled = false
-        } else {
-            campoUrl.setText(url)
-        }
-        val etiquetaCarpeta = TextView(this)
-        etiquetaCarpeta.textSize = 15f
-        etiquetaCarpeta.setTextColor(paleta.acento)
-        etiquetaCarpeta.setPadding(4.dp(), 14.dp(), 4.dp(), 14.dp())
-        etiquetaCarpeta.isClickable = true
-        var elegida = carpeta
-        fun pintar() {
-            etiquetaCarpeta.text = "📁  " + marcadores.ruta(elegida) + "  ▸"
-        }
-        pintar()
-        etiquetaCarpeta.setOnClickListener {
-            elegirCarpeta("Guardar en", elegida, 0L) { id ->
-                elegida = id
-                pintar()
-            }
-        }
-        caja.addView(campoTitulo, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        caja.addView(campoUrl, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        caja.addView(etiquetaCarpeta, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val d = nuevoDialogo()
-            .setTitle(encabezado)
-            .setView(caja)
-            .setPositiveButton("Guardar", null)
-            .setNegativeButton("Cancelar", null)
-            .create()
-        d.show()
-        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-            val u = if (esLocal) url else normalizarUrl(campoUrl.text.toString())
-            if (u == null) {
-                toast("Dirección no válida")
-            } else {
-                val nombre = campoTitulo.text.toString().trim()
-                if (alGuardar(if (nombre.isEmpty()) u else nombre, u, elegida)) d.dismiss()
-            }
-        }
+        Dialogos.texto(this, paleta, actual?.privada == true, titulo, inicial, false, alAceptar)
     }
 
     /** Pulsación larga en ☆: guardar la página eligiendo nombre y carpeta, o editar su marcador. */
@@ -3694,7 +3497,7 @@ class MainActivity : Activity() {
         val urlM = urlMarcador(p, false)
         val existente = if (urlM.isEmpty()) null else marcadores.buscar(urlM)
         if (existente != null) {
-            editarMarcador("Editar marcador", existente.titulo, existente.url, existente.carpeta) { t, u, c ->
+            editorMarcador.editar("Editar marcador", existente.titulo, existente.url, existente.carpeta) { t, u, c ->
                 val ok = marcadores.actualizar(existente, t, u, c)
                 if (!ok) toast("Ya existe un marcador con esa dirección")
                 actualizarUi()
@@ -3703,7 +3506,7 @@ class MainActivity : Activity() {
         } else {
             val nueva = urlMarcador(p, true)
             if (nueva.isEmpty()) return
-            editarMarcador("Guardar marcador", tituloDe(p), nueva, 0L) { t, u, c ->
+            editorMarcador.editar("Guardar marcador", tituloDe(p), nueva, 0L) { t, u, c ->
                 val ok = marcadores.agregar(t, u, c)
                 if (ok) {
                     toast("Marcador guardado")
@@ -3714,175 +3517,6 @@ class MainActivity : Activity() {
                 ok
             }
         }
-    }
-
-    private fun confirmarBorrarCarpeta(c: CarpetaMarcadores, alBorrar: () -> Unit) {
-        val n = marcadores.elementosEn(c.id)
-        val detalle = if (n > 0) "Sus $n elemento(s) pasarán a «" + marcadores.ruta(c.padre) + "»." else "Está vacía."
-        nuevoDialogo()
-            .setTitle("Eliminar carpeta")
-            .setMessage("Se eliminará «" + c.nombre + "». " + detalle)
-            .setPositiveButton("Eliminar") { _, _ ->
-                marcadores.borrarCarpeta(c)
-                alBorrar()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    /**
-     * Gestor de marcadores: tocar abre (o entra en una carpeta); mantener pulsado abre las acciones
-     * (editar, mover, eliminar, renombrar...). «Nueva carpeta» crea dentro de la carpeta actual.
-     */
-    private fun mostrarMarcadores(carpetaInicial: Long = 0L) {
-        var carpetaActual = if (marcadores.carpeta(carpetaInicial) != null) carpetaInicial else 0L
-        var filas: List<FilaMarcadores> = marcadores.filas(carpetaActual)
-        var dialogo: AlertDialog? = null
-
-        val vacio = TextView(this)
-        vacio.setTextColor(paleta.tenue)
-        vacio.textSize = 14f
-        vacio.setPadding(24.dp(), 16.dp(), 24.dp(), 8.dp())
-        val vista = ListView(this)
-        val adaptador = object : ArrayAdapter<FilaMarcadores>(
-            this, android.R.layout.simple_list_item_2, android.R.id.text1, ArrayList<FilaMarcadores>()
-        ) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getView(position, convertView, parent)
-                val f = getItem(position)
-                val t1 = v.findViewById<TextView>(android.R.id.text1)
-                val t2 = v.findViewById<TextView>(android.R.id.text2)
-                if (f != null) {
-                    val c = f.carpeta
-                    val m = f.marcador
-                    if (f.subir) {
-                        t1.text = "⬆  Subir"
-                        t2.text = marcadores.ruta(marcadores.carpeta(carpetaActual)?.padre ?: 0L)
-                    } else if (c != null) {
-                        t1.text = "📁  " + c.nombre
-                        val n = marcadores.elementosEn(c.id)
-                        t2.text = if (n == 1) "1 elemento" else "$n elementos"
-                    } else if (m != null) {
-                        t1.text = if (m.titulo.isNotEmpty()) m.titulo else m.url
-                        t2.text = if (esMarcadorLocal(m.url)) (if (m.url.contains("#app=")) "Archivo del dispositivo (aplicación web)" else "Archivo del dispositivo (sin conexión)") else m.url
-                    }
-                }
-                t1.maxLines = 1
-                t2.maxLines = 1
-                t1.ellipsize = TextUtils.TruncateAt.END
-                t2.ellipsize = TextUtils.TruncateAt.END
-                t1.setTextColor(paleta.texto)
-                t2.setTextColor(paleta.tenue)
-                return v
-            }
-        }
-        vista.setAdapter(adaptador)
-
-        fun refrescar() {
-            filas = marcadores.filas(carpetaActual)
-            adaptador.clear()
-            adaptador.addAll(filas)
-            adaptador.notifyDataSetChanged()
-            dialogo?.setTitle(marcadores.ruta(carpetaActual))
-            var hay = false
-            for (f in filas) {
-                if (!f.subir) hay = true
-            }
-            vacio.text = if (carpetaActual == 0L) "Aún no tienes marcadores. Pulsa ☆ para guardar una página." else "Carpeta vacía."
-            vacio.visibility = if (hay) View.GONE else View.VISIBLE
-            actualizarUi()
-        }
-
-        vista.setOnItemClickListener { _, _, pos, _ ->
-            val f = filas[pos]
-            val c = f.carpeta
-            val m = f.marcador
-            if (f.subir) {
-                carpetaActual = marcadores.carpeta(carpetaActual)?.padre ?: 0L
-                refrescar()
-            } else if (c != null) {
-                carpetaActual = c.id
-                refrescar()
-            } else if (m != null) {
-                dialogo?.dismiss()
-                cargarEnActual(m.url)
-            }
-        }
-        vista.setOnItemLongClickListener { _, _, pos, _ ->
-            val f = filas[pos]
-            val c = f.carpeta
-            val m = f.marcador
-            val items = ArrayList<Pair<String, () -> Unit>>()
-            if (m != null) {
-                items.add(Pair("Abrir en pestaña nueva", {
-                    dialogo?.dismiss()
-                    nuevaPestana(m.url)
-                    Unit
-                }))
-                items.add(Pair("Editar…", {
-                    editarMarcador("Editar marcador", m.titulo, m.url, m.carpeta) { t, u, cf ->
-                        val ok = marcadores.actualizar(m, t, u, cf)
-                        if (ok) refrescar() else toast("Ya existe un marcador con esa dirección")
-                        ok
-                    }
-                    Unit
-                }))
-                items.add(Pair("Mover a…", {
-                    elegirCarpeta("Mover a", m.carpeta, 0L) { destino ->
-                        marcadores.moverMarcador(m, destino)
-                        refrescar()
-                    }
-                    Unit
-                }))
-                items.add(Pair("Eliminar", {
-                    quitarMarcadorUrl(m.url)
-                    refrescar()
-                    Unit
-                }))
-            } else if (c != null) {
-                items.add(Pair("Renombrar…", {
-                    pedirTexto("Renombrar carpeta", c.nombre) { n ->
-                        marcadores.renombrarCarpeta(c, n)
-                        refrescar()
-                    }
-                    Unit
-                }))
-                items.add(Pair("Mover a…", {
-                    elegirCarpeta("Mover carpeta a", c.padre, c.id) { destino ->
-                        if (marcadores.moverCarpeta(c, destino)) refrescar() else toast("No se puede mover ahí")
-                    }
-                    Unit
-                }))
-                items.add(Pair("Eliminar carpeta", {
-                    confirmarBorrarCarpeta(c) { refrescar() }
-                    Unit
-                }))
-            }
-            if (items.isNotEmpty()) opciones(null, items)
-            true
-        }
-
-        val caja = LinearLayout(this)
-        caja.setOrientation(LinearLayout.VERTICAL)
-        caja.addView(vacio, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        caja.addView(vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-
-        val d = nuevoDialogo()
-            .setTitle(marcadores.ruta(carpetaActual))
-            .setView(caja)
-            .setPositiveButton("Nueva carpeta", null)
-            .setNegativeButton("Cerrar", null)
-            .create()
-        dialogo = d
-        d.show()
-        // «Nueva carpeta» no debe cerrar el gestor.
-        d.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener {
-            pedirTexto("Nueva carpeta", "") { n ->
-                if (marcadores.crearCarpeta(n, carpetaActual) == null) toast("No se pudo crear la carpeta")
-                refrescar()
-            }
-        }
-        refrescar()
     }
 
     /** Últimas pestañas normales cerradas. Solo en memoria: no se guardan en disco, no se anotan las privadas y se vacía al borrar el historial. */
