@@ -52,7 +52,6 @@ class MenuLateral(
     companion object {
         const val RAIZ = "raiz"
         const val PAGINA = "pagina"
-        const val DATOS = "datos"
         const val MULTIMEDIA = "multimedia"
         const val ASPECTO = "aspecto"
         const val GENERAL = "general"
@@ -96,7 +95,6 @@ class MenuLateral(
         hoja.limpiar()
         when (pagina) {
             PAGINA -> pintarPagina()
-            DATOS -> pintarDatos()
             MULTIMEDIA -> pintarMultimedia()
             ASPECTO -> pintarAspecto()
             GENERAL -> pintarGeneral()
@@ -155,7 +153,7 @@ class MenuLateral(
         ) { hacer(AccionMenu.CENTRO) }
         hoja.tarjeta("🔒", "Privacidad y datos", "Historial, datos por sitio, permisos, borrado al salir") { hacer(AccionMenu.PRIVACIDAD) }
         hoja.tarjeta("📄", "Esta página", "Buscar, leer, escritorio, pantalla completa, guardar…") { ir(PAGINA) }
-        hoja.tarjeta("🔖", "Marcadores y guardados", "Marcadores, historial, páginas guardadas, descargas") { ir(DATOS) }
+        hoja.tarjeta("🔖", "Guardados", "Marcadores, historial, páginas guardadas, listas, descargas") { hacer(AccionMenu.MARCADORES) }
         hoja.tarjeta("🎬", "Multimedia", "Enlaces de vídeo, segundo plano, lectura y voz") { ir(MULTIMEDIA) }
         hoja.tarjeta("🎨", "Aspecto", "Barra de direcciones, inicio, oscurecer páginas") { ir(ASPECTO) }
         hoja.tarjeta("⚙", "General", "Buscador, arranque, copia de seguridad, acerca de") { ir(GENERAL) }
@@ -204,18 +202,6 @@ class MenuLateral(
         if (conPagina && http && !p.privada) hoja.fila("Personalizar este sitio…", "CSS propio, modo oscuro, emergentes…", icono = "🎛") { hacer(AccionMenu.PERSONALIZAR) }
         if (conPagina) hoja.fila("Herramientas de desarrollo", icono = "🛠") { hacer(AccionMenu.HERRAMIENTAS) }
         hoja.fila("Ir a la pantalla de inicio", icono = "⌂") { hacer(AccionMenu.IR_INICIO) }
-    }
-
-    // ---------------------------------------------------------------- marcadores y datos
-
-    private fun pintarDatos() {
-        sub("Marcadores y guardados")
-        hoja.fila("Marcadores", icono = "🔖") { hacer(AccionMenu.MARCADORES) }
-        hoja.fila("Historial", icono = "🕘") { hacer(AccionMenu.HISTORIAL) }
-        hoja.fila("Descargas", icono = "⬇") { hacer(AccionMenu.DESCARGAS) }
-        hoja.fila("Páginas guardadas", "Para leer sin conexión", g.paginasGuardadas().toString(), icono = "💾") { hacer(AccionMenu.PAGINAS_GUARDADAS) }
-        hoja.fila("Listas de enlaces", "Enlaces encontrados y guardados", g.listasEnlaces().toString(), icono = "📋") { hacer(AccionMenu.LISTAS_ENLACES) }
-        if (g.cerradas() > 0) hoja.fila("Reabrir pestaña cerrada", null, g.cerradas().toString(), icono = "↺") { hacer(AccionMenu.REABRIR) }
     }
 
     // ---------------------------------------------------------------- multimedia
