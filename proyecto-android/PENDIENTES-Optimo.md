@@ -136,3 +136,10 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Pantallas todavía en lista simple que merecen diseño propio: Marcadores, Historial, Descargas, Páginas guardadas, Listas de enlaces, Reglas de usuario, Ajustes por sitio, Ajustes de medios, Lectura y voz, Pantalla de inicio.
 - Aligerar `MainActivity` al crear cada categoría: lo siguiente con más peso es privacidad y datos (borrados, retención, copia, cookies por sitio).
 - Panel lateral: gesto de deslizar para cerrar y, en horizontal, panel más estrecho.
+
+## Apuntado en 1.27.0
+- Pasar el resto de `nuevoDialogo()` (unos 50) a `Dialogos.confirmar` / `Dialogos.elegir` y a hojas propias (escribir texto, edición de reglas).
+- Pantallas aún en lista simple con diseño propio pendiente: Marcadores, Historial (lista), Descargas, Páginas guardadas, Listas de enlaces, Reglas de usuario, Ajustes de medios, Lectura y voz, Pantalla de inicio.
+- Datos por sitio: contar el almacenamiento (localStorage, IndexedDB) cuando el sitio esté abierto y mostrar su tamaño en la lista; búsqueda por nombre.
+- Copia de seguridad: incluir `BarraConfig` y las estadísticas.
+- Siguiente categoría a aligerar de `MainActivity`: Protección (pausa, muros, bloquear sitio, dominios propios, listas y técnicas).
