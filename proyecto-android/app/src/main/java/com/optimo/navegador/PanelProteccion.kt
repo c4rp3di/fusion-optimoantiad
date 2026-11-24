@@ -170,21 +170,26 @@ class PanelProteccion(
 }
 
 /**
- * Centro de protección: el sitio único de los ajustes globales de bloqueo y privacidad. Muestra las estadísticas y
- * lleva a cada pantalla de ajustes (listas, técnicas, reglas, emergentes, permisos, datos…). Se abre desde el escudo
- * de la barra (⚙), desde el icono de escudo de la pantalla de inicio y desde Ajustes.
+ * Protección: la categoría del menú para todo el bloqueo. Estado y estadísticas arriba, lo que se puede hacer en la página
+ * abierta, y después las listas, reglas, emergentes y rastreo. Se abre desde el menú, desde el ⚙ del escudo y desde el
+ * icono de escudo de la pantalla de inicio.
  */
 class CentroProteccion(
     private val act: Activity,
     private val paleta: Paleta,
     private val ajustes: Ajustes,
     private val g: AnfitrionProteccion,
-    privada: Boolean
+    private val privada: Boolean
 ) {
-    private val hoja = Hoja(act, paleta, privada)
+    private val hoja = Hoja(act, paleta, privada, true)
 
     fun mostrar() {
         pintar()
+        hoja.interceptarAtras {
+            hoja.cerrar()
+            g.volverAlMenu()
+            true
+        }
         hoja.mostrar()
     }
 
@@ -200,23 +205,28 @@ class CentroProteccion(
 
     private fun pintar() {
         hoja.limpiar()
+        hoja.barraTitulo("Protección", {
+            hoja.cerrar()
+            g.volverAlMenu()
+        }, { hoja.cerrar() })
         val activo = ajustes.bloquearAnuncios
+        val hoy = EstadisticasBloqueo.hoy()
+        val nHoy = hoy[0] + hoy[1] + hoy[2] + hoy[3]
         val icono = VistaEscudo(act)
         pintarEscudo(icono, if (activo) EstadoEscudo.ACTIVO else EstadoEscudo.APAGADO, paleta)
-        hoja.cabecera(
-            icono, "Protección y privacidad",
-            if (activo) "Bloqueo de anuncios y rastreadores activo" else "Bloqueo de anuncios y rastreadores desactivado",
-            if (activo) paleta.seguro else paleta.advertencia
-        )
-        hoja.interruptor("Bloquear anuncios y rastreadores", "Para todos los sitios (se puede pausar en cada uno)", activo) { v ->
+        hoja.tarjetaEstado(
+            icono,
+            if (activo) "Protección activa" else "Protección desactivada",
+            if (activo) nHoy.toString() + (if (nHoy == 1) " bloqueo hoy" else " bloqueos hoy") else "Los anuncios y rastreadores no se bloquean",
+            if (activo) paleta.seguro else paleta.advertencia,
+            activo
+        ) { v ->
             g.fijarBloqueoGlobal(v)
             repintar()
         }
 
         // ---- estadísticas
-        hoja.seccion("Estadísticas de bloqueo")
         val total = EstadisticasBloqueo.total()
-        val hoy = EstadisticasBloqueo.hoy()
         val sem = EstadisticasBloqueo.ultimos(7)
         val sumaTotal = total.sum()
         if (!EstadisticasBloqueo.activas && sumaTotal == 0) {
@@ -224,13 +234,7 @@ class CentroProteccion(
         } else if (sumaTotal == 0) {
             hoja.nota("Aún no hay datos. Se irán sumando mientras navegas (las pestañas privadas no cuentan).")
         } else {
-            hoja.cifras(
-                listOf(
-                    Pair(num(hoy.sum()), "hoy"),
-                    Pair(num(sem.sum()), "últimos 7 días"),
-                    Pair(num(sumaTotal), "en total")
-                )
-            )
+            hoja.cifras(listOf(Pair(num(nHoy), "hoy"), Pair(num(sem.sum()), "últimos 7 días"), Pair(num(sumaTotal), "en total")))
             hoja.barras(EstadisticasBloqueo.serieDiaria(14), "hace 14 días", "hoy")
             for (i in 0..3) {
                 if (total[i] > 0) hoja.dato(EstadisticasBloqueo.NOMBRES[i], num(total[i]))
@@ -241,19 +245,52 @@ class CentroProteccion(
             if (dominios.isNotEmpty()) {
                 hoja.seccion("Dominios más bloqueados")
                 for ((d, n) in dominios) hoja.dato(d, num(n))
+                hoja.fila("Ver los 50 más bloqueados…") { verTop(true) }
             }
             val sitios = EstadisticasBloqueo.topSitios(5)
             if (sitios.isNotEmpty()) {
                 hoja.seccion("Sitios con más bloqueos")
                 for ((s, n) in sitios) hoja.dato(s, num(n))
+                hoja.fila("Ver los 50 sitios con más bloqueos…") { verTop(false) }
             }
         }
 
-        // ---- bloqueo
-        hoja.seccion("Bloqueo")
+        // ---- la página abierta
+        val p = g.pestanaActual()
+        if (p != null && g.estado(p) != EstadoEscudo.NO_APLICA) {
+            val host = ReglasUsuario.clave(Omnibox.hostDe(p.url))
+            hoja.seccion("En esta página · " + host)
+            if (!p.privada && activo) {
+                hoja.interruptor("Bloqueo en este sitio", "Quítalo si el sitio no funciona bien", g.estado(p) != EstadoEscudo.PAUSADO) {
+                    g.alternarPausa(p)
+                    repintar()
+                }
+            }
+            if (!p.privada && host.isNotEmpty()) {
+                hoja.fila("Ventanas emergentes", null, NombresSitio.EMERGENTES[ajustes.emergentesEn(host) + 1]) {
+                    g.elegirEmergentes(p, host) { repintar() }
+                }
+            }
+            val nb = p.bloqueados.get()
+            if (nb > 0) hoja.fila("Ver lo bloqueado en esta página", "Dominios y cuántas veces", nb.toString()) {
+                hoja.cerrar()
+                g.verBloqueados(p, host)
+            }
+            hoja.fila("Quitar capa que tapa la página", "Avisos, muros anti-bloqueador, ventanas modales") {
+                hoja.cerrar()
+                g.quitarCapa(p)
+            }
+            hoja.fila("Bloquear un anuncio o elemento", "Toca lo que quieres ocultar o bloquear") {
+                hoja.cerrar()
+                g.elegirElemento(p)
+            }
+        }
+
+        // ---- reglas y listas
+        hoja.seccion("Reglas y listas")
         hoja.fila("Listas de bloqueo", "OISD, HaGeZi, EasyList… y las tuyas") { ir(Destino.LISTAS) }
         hoja.fila("Técnicas contra anuncios", "Scripts sustitutos, vídeo vacío, rutas, huecos") { ir(Destino.TECNICAS) }
-        hoja.fila("Reglas de sitios y anuncios", null, ReglasUsuario.total.toString()) { ir(Destino.REGLAS) }
+        hoja.fila("Reglas de sitios y anuncios", "Ocultar elementos, estilos y excepciones", ReglasUsuario.total.toString()) { ir(Destino.REGLAS) }
         hoja.fila("Mis dominios bloqueados", null, ReglasUsuario.listaDominios().size.toString()) { ir(Destino.DOMINIOS) }
         hoja.fila("Sitios con el bloqueo pausado", null, ajustes.sitiosPausados().size.toString()) { ir(Destino.PAUSADOS) }
 
@@ -278,13 +315,13 @@ class CentroProteccion(
             repintar()
         }
 
-        // ---- datos
+        // ---- privacidad
         hoja.seccion("Privacidad y datos")
         hoja.fila("Privacidad y datos", "Historial, datos por sitio, permisos, borrado al salir") { ir(Destino.PRIVACIDAD) }
         hoja.fila("Ajustes propios de cada sitio", null, ajustes.sitiosConAjustes().size.toString()) { ir(Destino.POR_SITIO) }
 
-        // ---- estadísticas: ajustes
-        hoja.seccion("Estadísticas y barra")
+        // ---- estadísticas
+        hoja.seccion("Estadísticas")
         hoja.interruptor("Guardar estadísticas de bloqueo", "Solo en este dispositivo, cifradas", EstadisticasBloqueo.activas) { v ->
             EstadisticasBloqueo.fijarActivas(v)
             repintar()
@@ -298,6 +335,15 @@ class CentroProteccion(
                 }
             }
         }
-        hoja.fila("Barra de direcciones", "Qué botones se ven, su orden y su tamaño") { ir(Destino.BARRA) }
+    }
+
+    /** Lista larga (hasta 50) de los dominios bloqueados o de los sitios con más bloqueos. */
+    private fun verTop(dominios: Boolean) {
+        val h = Hoja(act, paleta, privada)
+        h.encabezado(if (dominios) "Dominios más bloqueados" else "Sitios con más bloqueos")
+        val lista = if (dominios) EstadisticasBloqueo.topDominios(50) else EstadisticasBloqueo.topSitios(50)
+        for ((d, n) in lista) h.dato(d, num(n))
+        h.boton("Cerrar") { h.cerrar() }
+        h.mostrar()
     }
 }
