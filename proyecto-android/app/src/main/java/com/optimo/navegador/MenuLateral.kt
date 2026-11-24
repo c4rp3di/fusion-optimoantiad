@@ -7,7 +7,7 @@ import android.os.Looper
 /** Acciones del menú que ejecuta MainActivity. [cierra] indica si el panel se cierra antes (las que solo cambian un ajuste lo dejan abierto). */
 enum class AccionMenu(val cierra: Boolean = true) {
     NUEVA, PRIVADA, MARCADORES, HISTORIAL, DESCARGAS, COMPARTIR, COPIAR_DIRECCION, IR_INICIO,
-    PROTECCION_PAGINA, CENTRO,
+    PROTECCION_PAGINA, CENTRO, PRIVACIDAD,
     BUSCAR_PAGINA, LEER, ESCRITORIO(false), PANTALLA, GUARDAR_SIN_CONEXION, BUSCAR_ENLACES, RASTREAR, VER_RASTREO,
     CARGAR_IMAGENES, PERSONALIZAR, HERRAMIENTAS, REPRODUCIR_MEDIO, ABRIR_MEGA,
     PAGINAS_GUARDADAS, LISTAS_ENLACES, REABRIR, CERRAR_TODAS,
@@ -150,11 +150,12 @@ class MenuLateral(
 
         val hoy = EstadisticasBloqueo.hoy()
         val nHoy = hoy[0] + hoy[1] + hoy[2] + hoy[3]
-        hoja.tarjeta("🛡", "Protección y privacidad",
+        hoja.tarjeta("🛡", "Protección",
             if (ajustes.bloquearAnuncios) "Bloqueo activo · " + nHoy + " bloqueos hoy" else "Bloqueo desactivado"
         ) { hacer(AccionMenu.CENTRO) }
+        hoja.tarjeta("🔒", "Privacidad y datos", "Historial, datos por sitio, permisos, borrado al salir") { hacer(AccionMenu.PRIVACIDAD) }
         hoja.tarjeta("📄", "Esta página", "Buscar, leer, escritorio, pantalla completa, guardar…") { ir(PAGINA) }
-        hoja.tarjeta("🔖", "Marcadores y datos", "Historial, páginas guardadas, listas, descargas") { ir(DATOS) }
+        hoja.tarjeta("🔖", "Marcadores y guardados", "Marcadores, historial, páginas guardadas, descargas") { ir(DATOS) }
         hoja.tarjeta("🎬", "Multimedia", "Enlaces de vídeo, segundo plano, lectura y voz") { ir(MULTIMEDIA) }
         hoja.tarjeta("🎨", "Aspecto", "Barra de direcciones, inicio, oscurecer páginas") { ir(ASPECTO) }
         hoja.tarjeta("⚙", "General", "Buscador, arranque, copia de seguridad, acerca de") { ir(GENERAL) }
@@ -208,15 +209,13 @@ class MenuLateral(
     // ---------------------------------------------------------------- marcadores y datos
 
     private fun pintarDatos() {
-        sub("Marcadores y datos")
+        sub("Marcadores y guardados")
         hoja.fila("Marcadores", icono = "🔖") { hacer(AccionMenu.MARCADORES) }
         hoja.fila("Historial", icono = "🕘") { hacer(AccionMenu.HISTORIAL) }
         hoja.fila("Descargas", icono = "⬇") { hacer(AccionMenu.DESCARGAS) }
         hoja.fila("Páginas guardadas", "Para leer sin conexión", g.paginasGuardadas().toString(), icono = "💾") { hacer(AccionMenu.PAGINAS_GUARDADAS) }
         hoja.fila("Listas de enlaces", "Enlaces encontrados y guardados", g.listasEnlaces().toString(), icono = "📋") { hacer(AccionMenu.LISTAS_ENLACES) }
         if (g.cerradas() > 0) hoja.fila("Reabrir pestaña cerrada", null, g.cerradas().toString(), icono = "↺") { hacer(AccionMenu.REABRIR) }
-        hoja.seccion("Privacidad")
-        hoja.fila("Privacidad y datos…", "Borrar historial, cookies, caché; borrado al salir", icono = "🛡") { hacer(AccionMenu.CENTRO) }
     }
 
     // ---------------------------------------------------------------- multimedia
