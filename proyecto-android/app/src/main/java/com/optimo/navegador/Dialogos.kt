@@ -35,4 +35,41 @@ object Dialogos {
         }
         h.mostrar()
     }
+
+    /** Pide un texto (nombre, dirección…). Vacío solo se acepta con [permitirVacio]. */
+    fun texto(
+        act: Activity, paleta: Paleta, privada: Boolean,
+        titulo: String, inicial: String, permitirVacio: Boolean = false, alAceptar: (String) -> Unit
+    ) {
+        val h = Hoja(act, paleta, privada)
+        h.teclado(true)
+        h.encabezado(titulo)
+        val c = h.campo("", inicial)
+        c.setSelectAllOnFocus(true)
+        h.boton("Aceptar") {
+            val t = c.text.toString().trim()
+            if (t.isEmpty() && !permitirVacio) {
+                c.error = "Escribe algo"
+            } else {
+                h.cerrar()
+                alAceptar(t)
+            }
+        }
+        h.boton("Cancelar") { h.cerrar() }
+        h.mostrar()
+        c.requestFocus()
+    }
+
+    /** Lista de acciones (nombre, en rojo si destructiva, acción). Cada una cierra la hoja antes de ejecutarse. */
+    fun acciones(act: Activity, paleta: Paleta, privada: Boolean, titulo: String?, items: List<Triple<String, Boolean, () -> Unit>>) {
+        val h = Hoja(act, paleta, privada)
+        if (titulo != null) h.titulo(titulo)
+        for (a in items) {
+            h.fila(a.first, null, null, a.second) {
+                h.cerrar()
+                a.third()
+            }
+        }
+        h.mostrar()
+    }
 }
