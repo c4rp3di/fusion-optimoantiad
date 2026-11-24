@@ -17,6 +17,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.text.Editable
+import android.text.InputType
+import android.text.TextWatcher
+import android.widget.EditText
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -58,6 +62,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     private val dialogo = Dialog(act)
     private val contenido = LinearLayout(act)
     private var cuandoCierra: (() -> Unit)? = null
+    private var destino: LinearLayout = contenido
 
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -151,7 +156,183 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     fun agregar(v: View, lp: LinearLayout.LayoutParams? = null) {
-        if (lp == null) contenido.addView(v) else contenido.addView(v, lp)
+        if (lp == null) destino.addView(v) else destino.addView(v, lp)
+    }
+
+    /** Zona de la hoja que se puede rellenar y vaciar sola (para listas que se filtran sin repintar el resto). */
+    fun zona(): LinearLayout {
+        val z = LinearLayout(act)
+        z.orientation = LinearLayout.VERTICAL
+        contenido.addView(z, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        return z
+    }
+
+    /** Vacía [z] y ejecuta [bloque] con todo lo que se añada yendo a esa zona. */
+    fun llenar(z: LinearLayout, bloque: () -> Unit) {
+        z.removeAllViews()
+        val previo = destino
+        destino = z
+        try {
+            bloque()
+        } finally {
+            destino = previo
+        }
+    }
+
+    /** Teclado: [visible] lo abre al mostrar la hoja (formularios); si no, la hoja se ajusta cuando salga por otro motivo. */
+    fun teclado(visible: Boolean) {
+        val w = dialogo.window ?: return
+        w.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE or
+                (if (visible) WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE else WindowManager.LayoutParams.SOFT_INPUT_STATE_HIDDEN)
+        )
+    }
+
+    /** Campo de texto de una línea con el estilo de Optimo. [alCambiar] se llama a cada pulsación. */
+    fun campo(pista: String, inicial: String, uri: Boolean = false, alCambiar: ((String) -> Unit)? = null): EditText {
+        val c = EditText(act)
+        c.setSingleLine(true)
+        c.hint = pista
+        c.setText(inicial)
+        c.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15f)
+        c.setTextColor(paleta.texto)
+        c.setHintTextColor(paleta.tenue)
+        c.setPadding(dp(14), dp(10), dp(14), dp(10))
+        c.inputType = if (uri) InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI else InputType.TYPE_CLASS_TEXT
+        val f = GradientDrawable()
+        f.setColor(paleta.campo)
+        f.cornerRadius = dp(12).toFloat()
+        c.background = f
+        if (alCambiar != null) {
+            c.addTextChangedListener(object : TextWatcher {
+                override fun beforeTextChanged(t: CharSequence?, a: Int, b: Int, d: Int) {}
+                override fun onTextChanged(t: CharSequence?, a: Int, b: Int, d: Int) {}
+                override fun afterTextChanged(e: Editable?) {
+                    alCambiar(e?.toString() ?: "")
+                }
+            })
+        }
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(4)
+        lp.bottomMargin = dp(8)
+        agregar(c, lp)
+        return c
+    }
+
+    /** Etiqueta pequeña sobre un campo. */
+    fun etiqueta(t: String) {
+        val v = texto(t, 12f, paleta.tenue)
+        v.setPadding(dp(4), dp(6), 0, 0)
+        agregar(v)
+    }
+
+    /**
+     * Fila de lista con círculo (letra del sitio o ✓ si está marcada), título, detalle, «⋮» opcional y pulsación larga.
+     * [marcado] null = sin selección en curso.
+     */
+    fun filaLista(
+        letra: String, tono: Int, titulo: String, detalle: String?, marcado: Boolean?,
+        alTocar: () -> Unit, alMantener: (() -> Unit)?, alMenu: (() -> Unit)?
+    ) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.minimumHeight = dp(56)
+        fila.setPadding(dp(2), dp(6), dp(2), dp(6))
+        val sel = marcado == true
+        val c = texto(if (sel) "✓" else letra, 14f, if (sel) Color.WHITE else paleta.texto, true)
+        c.gravity = Gravity.CENTER
+        val fc = GradientDrawable()
+        fc.shape = GradientDrawable.OVAL
+        fc.setColor(if (sel) paleta.acento else Color.argb(60, Color.red(tono), Color.green(tono), Color.blue(tono)))
+        c.background = fc
+        fila.addView(c, LinearLayout.LayoutParams(dp(38), dp(38)))
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+        val t = texto(titulo, 14.5f, paleta.texto)
+        t.setSingleLine(true)
+        t.ellipsize = android.text.TextUtils.TruncateAt.END
+        col.addView(t)
+        if (!detalle.isNullOrEmpty()) {
+            val d = texto(detalle, 12f, paleta.tenue)
+            d.setSingleLine(true)
+            d.ellipsize = android.text.TextUtils.TruncateAt.END
+            col.addView(d)
+        }
+        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        lp.leftMargin = dp(12)
+        fila.addView(col, lp)
+        if (alMenu != null) fila.addView(botonIcono("⋮") { alMenu() }, LinearLayout.LayoutParams(dp(40), dp(40)))
+        fila.isClickable = true
+        conRipple(fila)
+        fila.setOnClickListener { alTocar() }
+        if (alMantener != null) {
+            fila.setOnLongClickListener {
+                alMantener()
+                true
+            }
+        }
+        agregar(fila)
+    }
+
+    /** Barra de acciones en «píldoras»: [texto] a la izquierda (puede ir vacío) y acciones (nombre, en rojo, acción). */
+    fun barraAcciones(izquierda: String, acciones: List<Triple<String, Boolean, () -> Unit>>) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(0, dp(8), 0, dp(4))
+        val t = texto(izquierda, 12f, paleta.tenue)
+        t.setSingleLine(true)
+        t.ellipsize = android.text.TextUtils.TruncateAt.END
+        fila.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        for (a in acciones) {
+            val p = texto(a.first, 12f, if (a.second) paleta.advertencia else paleta.texto, true)
+            p.gravity = Gravity.CENTER
+            p.setPadding(dp(12), dp(8), dp(12), dp(8))
+            val f = GradientDrawable()
+            f.cornerRadius = dp(16).toFloat()
+            f.setColor(paleta.campo)
+            p.background = f
+            p.isClickable = true
+            p.setOnClickListener { a.third() }
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            lp.leftMargin = dp(6)
+            fila.addView(p, lp)
+        }
+        agregar(fila)
+    }
+
+    /** Tarjeta de estado con icono, título, subtítulo e interruptor (la protección general, por ejemplo). */
+    fun tarjetaEstado(icono: View, titulo: String, sub: String, color: Int, activo: Boolean, alCambiar: (Boolean) -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(dp(14), dp(12), dp(14), dp(12))
+        val f = GradientDrawable()
+        f.setColor(Color.argb(45, Color.red(color), Color.green(color), Color.blue(color)))
+        f.cornerRadius = dp(16).toFloat()
+        fila.background = f
+        fila.addView(icono, LinearLayout.LayoutParams(dp(40), dp(40)))
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+        col.addView(texto(titulo, 15f, paleta.texto, true))
+        col.addView(texto(sub, 12f, paleta.tenue))
+        val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        lp.leftMargin = dp(12)
+        fila.addView(col, lp)
+        val sw = Switch(act)
+        val estados = arrayOf(intArrayOf(android.R.attr.state_checked), intArrayOf())
+        sw.thumbTintList = ColorStateList(estados, intArrayOf(color, paleta.tenue))
+        sw.trackTintList = ColorStateList(
+            estados,
+            intArrayOf(Color.argb(110, Color.red(color), Color.green(color), Color.blue(color)), Color.argb(70, Color.red(paleta.tenue), Color.green(paleta.tenue), Color.blue(paleta.tenue)))
+        )
+        sw.isChecked = activo
+        sw.setOnCheckedChangeListener { _, v -> alCambiar(v) }
+        fila.addView(sw)
+        val lpf = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lpf.bottomMargin = dp(6)
+        agregar(fila, lpf)
     }
 
     /** Cabecera: [icono] (una vista), título grande, subtítulo y, opcional, un botón a la derecha. */
