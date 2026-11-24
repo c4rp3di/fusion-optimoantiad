@@ -256,7 +256,6 @@ class CentroProteccion(
         hoja.fila("Reglas de sitios y anuncios", null, ReglasUsuario.total.toString()) { ir(Destino.REGLAS) }
         hoja.fila("Mis dominios bloqueados", null, ReglasUsuario.listaDominios().size.toString()) { ir(Destino.DOMINIOS) }
         hoja.fila("Sitios con el bloqueo pausado", null, ajustes.sitiosPausados().size.toString()) { ir(Destino.PAUSADOS) }
-        hoja.fila("Ajustes por sitio", "Emergentes, cookies, imágenes, escritorio…", ajustes.sitiosConAjustes().size.toString()) { ir(Destino.POR_SITIO) }
 
         // ---- emergentes
         hoja.seccion("Ventanas emergentes y redirecciones")
@@ -278,13 +277,11 @@ class CentroProteccion(
             ajustes.httpsPrimero = v
             repintar()
         }
-        hoja.fila("Excepciones de certificado", null, ExcepcionesSsl.todas().size.toString()) { ir(Destino.CERTIFICADOS) }
 
         // ---- datos
-        hoja.seccion("Datos")
-        hoja.fila("Privacidad y datos", "Historial, cookies, caché, borrado al salir…") { ir(Destino.PRIVACIDAD) }
-        hoja.fila("Permisos concedidos a sitios", null, ajustes.totalPermisos().toString()) { ir(Destino.PERMISOS) }
-        hoja.fila("Copia de seguridad") { ir(Destino.COPIA) }
+        hoja.seccion("Privacidad y datos")
+        hoja.fila("Privacidad y datos", "Historial, datos por sitio, permisos, borrado al salir") { ir(Destino.PRIVACIDAD) }
+        hoja.fila("Ajustes propios de cada sitio", null, ajustes.sitiosConAjustes().size.toString()) { ir(Destino.POR_SITIO) }
 
         // ---- estadísticas: ajustes
         hoja.seccion("Estadísticas y barra")
