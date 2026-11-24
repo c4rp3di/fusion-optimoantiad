@@ -554,3 +554,18 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
   - «Ajustes por sitio», «Permisos concedidos» y «Excepciones de certificado» desaparecen como pantallas sueltas: están dentro de Datos por sitio y del Resumen. No se pierde ninguna función.
 - **Código movido fuera de `MainActivity` (–509 líneas):** `LimpiezaDatos.kt` (borrados, caché, cookies, borrado al salir, retención, certificados; sin interfaz) y las utilidades `dominioBase`, `tamanoDir`, `formatoTamano`, `etiquetaPermiso`, `textoRestante` como funciones de paquete.
 - **`Dialogos.kt`:** confirmar y elegir con el diseño de las hojas (los usa el centro de privacidad). `Hoja` gana chips, encabezado y párrafo.
+
+## 1.28.0 — Guardados, Protección en el panel y hojas para escribir
+
+- **Guardados** (`Guardados.kt`): un solo panel con pestañas Marcadores · Historial · Páginas guardadas · Listas de enlaces · Descargas (esta última abre tu gestor de archivos). Sustituye al gestor de marcadores, a la lista del historial y a las listas de páginas y enlaces, conservando todo lo anterior (carpetas anidadas, abrir, abrir en pestaña nueva, editar, mover, eliminar, renombrar y mover carpetas, borrar por rango, borrar todo) y añadiendo:
+  - **Búsqueda** en cada pestaña (en marcadores busca en todas las carpetas).
+  - **Selección múltiple** (mantén pulsado) en marcadores e historial: abrir en pestañas, mover, añadir a marcadores o eliminar de una vez.
+  - **Orden** de marcadores: como los guardaste, A–Z o más recientes.
+  - **Abrir una carpeta entera** en pestañas (pide confirmación si son más de 8).
+  - **Copiar dirección y compartir** desde cualquier marcador o página del historial; **copiar todos los enlaces** de una lista.
+  - **Historial** agrupado por días, con «añadir a marcadores», «borrar todo lo de este sitio» y acceso a las pestañas cerradas recientes y a los ajustes del historial.
+  - Círculo con la inicial y un color propio por sitio.
+- **Protección** (`CentroProteccion`) pasa a ser una página del panel lateral con el interruptor general y las estadísticas arriba, **acciones de la página abierta** (bloqueo del sitio, emergentes, ver lo bloqueado en la página, quitar capa, bloquear un anuncio) y debajo reglas y listas, emergentes y rastreo. Nuevo: lista de los 50 dominios y de los 50 sitios con más bloqueos.
+- **Hojas para escribir** (`Dialogos.texto`): todos los diálogos de texto (nombre de carpeta, colores de inicio, filtros de enlaces, rastreo, número…) usan ahora la hoja inferior; el formulario de marcador (nombre, dirección, carpeta) también, con selector de carpeta en árbol. `Dialogos.acciones` para menús de elementos.
+- `Hoja` gana campo de texto, zonas rellenables (la búsqueda filtra sin repintar), filas de lista con selección y pulsación larga, barra de acciones y tarjeta de estado.
+- `MainActivity` baja a 5.824 líneas (–366 en esta versión).
