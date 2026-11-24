@@ -17,6 +17,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.Window
 import android.view.WindowManager
+import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
@@ -301,6 +302,46 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         fila.addView(texto(nombre, 14f, paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
         fila.addView(texto(valor, 14f, paleta.tenue))
         agregar(fila)
+    }
+
+    /** Encabezado grande de un diálogo (confirmar, elegir). */
+    fun encabezado(t: String) {
+        val v = texto(t, 18f, paleta.texto, true)
+        v.setPadding(dp(4), dp(12), dp(4), dp(6))
+        agregar(v)
+    }
+
+    /** Párrafo de texto normal (mensaje de un diálogo). */
+    fun parrafo(t: String) {
+        val v = texto(t, 14f, paleta.texto)
+        v.setPadding(dp(4), dp(4), dp(4), dp(10))
+        agregar(v)
+    }
+
+    /** Fila de «chips» para filtrar (se desplaza en horizontal si no cabe). */
+    fun chips(etiquetas: List<String>, seleccion: Int, alElegir: (Int) -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.setPadding(0, dp(8), 0, dp(8))
+        for ((i, e) in etiquetas.withIndex()) {
+            val marcado = i == seleccion
+            val t = texto(e, 12f, if (marcado) Color.WHITE else paleta.texto, marcado)
+            t.gravity = Gravity.CENTER
+            t.setPadding(dp(12), dp(8), dp(12), dp(8))
+            val f = GradientDrawable()
+            f.cornerRadius = dp(16).toFloat()
+            f.setColor(if (marcado) paleta.acento else paleta.campo)
+            t.background = f
+            t.isClickable = true
+            t.setOnClickListener { alElegir(i) }
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (i > 0) lp.leftMargin = dp(6)
+            fila.addView(t, lp)
+        }
+        val desplazable = HorizontalScrollView(act)
+        desplazable.isHorizontalScrollBarEnabled = false
+        desplazable.addView(fila)
+        agregar(desplazable)
     }
 
     /** Título de una lista sencilla (varias líneas si hace falta). */
