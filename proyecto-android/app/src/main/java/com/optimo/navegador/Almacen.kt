@@ -193,6 +193,41 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("oscuro", v).apply()
         }
 
+    /** Tamaño del texto de las páginas (%), para todos los sitios salvo los que tengan el suyo. */
+    var textoZoom: Int
+        get() = sp.getInt("texto_zoom", 100).coerceIn(50, 200)
+        set(v) {
+            sp.edit().putInt("texto_zoom", v.coerceIn(50, 200)).apply()
+        }
+
+    /** Permitir el zoom con los dedos aunque la página lo prohíba. */
+    var forzarZoom: Boolean
+        get() = sp.getBoolean("forzar_zoom", false)
+        set(v) {
+            sp.edit().putBoolean("forzar_zoom", v).apply()
+        }
+
+    /** Alto contraste en las páginas web. */
+    var altoContraste: Boolean
+        get() = sp.getBoolean("alto_contraste", false)
+        set(v) {
+            sp.edit().putBoolean("alto_contraste", v).apply()
+        }
+
+    /** Quitar animaciones y transiciones de las páginas. */
+    var reducirAnimaciones: Boolean
+        get() = sp.getBoolean("reducir_anim", false)
+        set(v) {
+            sp.edit().putBoolean("reducir_anim", v).apply()
+        }
+
+    /** Accesos rápidos del menú: acciones separadas por comas, en orden. Vacío = los de por defecto. */
+    var accesosMenu: String
+        get() = sp.getString("menu_rapidos", "") ?: ""
+        set(v) {
+            sp.edit().putString("menu_rapidos", v).apply()
+        }
+
     /** Al abrir o cambiar de pestaña con audio sonando: 0 preguntar, 1 seguir sonando, 2 pausar. */
     var audioPestanas: Int
         get() = sp.getInt("audio_pestanas", 0).coerceIn(0, 2)
@@ -420,6 +455,40 @@ class Ajustes(contexto: Context) {
         if (v) ponerEnConjunto("no_suspender", host)
     }
 
+    /** Tamaño del texto propio de un sitio (%), o 0 si usa el general. Vale también para sus subdominios. */
+    fun textoZoomEn(host: String): Int {
+        val s = conjunto("texto_zoom_sitios")
+        if (s.isEmpty()) return 0
+        var h = claveSitio(host)
+        while (h.isNotEmpty()) {
+            for (e in s) {
+                if (e.startsWith(h + "|")) return (e.substringAfter('|').toIntOrNull() ?: 0).coerceIn(0, 200)
+            }
+            val i = h.indexOf('.')
+            if (i < 0) break
+            h = h.substring(i + 1)
+        }
+        return 0
+    }
+
+    /** Tamaño del texto que se aplica en [host]: el del sitio o, si no tiene, el general. */
+    fun textoZoomEfectivo(host: String): Int {
+        val z = textoZoomEn(host)
+        return if (z > 0) z else textoZoom
+    }
+
+    /** Fija el tamaño del texto de un sitio ([v] = 0 lo quita y vuelve al general). */
+    fun fijarTextoZoomEn(host: String, v: Int) {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return
+        val s = HashSet(conjunto("texto_zoom_sitios"))
+        s.removeAll { it.startsWith(h + "|") }
+        if (v > 0 && s.size < 500) s.add(h + "|" + v.coerceIn(50, 200))
+        sp.edit().putStringSet("texto_zoom_sitios", s).apply()
+    }
+
+    private fun sitiosConTextoZoom(): List<String> = conjunto("texto_zoom_sitios").map { it.substringBefore('|') }
+
     private val CLAVES_SITIO = listOf(
         "escritorio_sitios", "oscuro_si", "oscuro_no", "emergentes_ok", "emergentes_est", "emergentes_rec",
         "cookies3_si", "cookies3_no", "imagenes_si", "imagenes_no", "no_suspender"
@@ -430,6 +499,7 @@ class Ajustes(contexto: Context) {
         val r = HashSet<String>()
         for (k in CLAVES_SITIO) r.addAll(conjunto(k))
         r.addAll(pausados())
+        r.addAll(sitiosConTextoZoom())
         return r.sorted()
     }
 
@@ -449,6 +519,7 @@ class Ajustes(contexto: Context) {
         if (en("imagenes_no")) l.add("Imágenes: sin imágenes")
         if (en("no_suspender")) l.add("No se suspende por inactividad")
         if (pausados().contains(h)) l.add("Bloqueo de anuncios pausado")
+        if (sitiosConTextoZoom().contains(h)) l.add("Tamaño del texto: " + textoZoomEn(h) + " %")
         return l
     }
 
@@ -460,6 +531,7 @@ class Ajustes(contexto: Context) {
             if (s.remove(h)) ed.putStringSet(k, s)
         }
         ed.apply()
+        fijarTextoZoomEn(h, 0)
         pausarBloqueoEn(h, false)
     }
 
@@ -495,7 +567,8 @@ class Ajustes(contexto: Context) {
         "bloqueo_pausado" to "ss", "emergentes_ok" to "ss", "listas_activas" to "ss",
         "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss",
         "emergentes_est" to "ss", "emergentes_rec" to "ss", "cookies3_si" to "ss", "cookies3_no" to "ss",
-        "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss"
+        "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss",
+        "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "texto_zoom_sitios" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
