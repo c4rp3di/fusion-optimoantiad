@@ -149,3 +149,10 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Pantallas con diseño propio pendiente: Reglas de usuario, Dominios propios, Ajustes de medios, Lectura y voz, Pantalla de inicio (con vista previa), Descargas (propias, si se deja el gestor del sistema).
 - Guardados: arrastrar para reordenar marcadores, exportar/importar una carpeta, detectar enlaces rotos o duplicados, favicon real.
 - Protección: pausa temporal del bloqueo en todos los sitios (1 h), registro de lo bloqueado por página, exportar estadísticas.
+
+## Apuntado en 1.29.0
+- **Miniaturas de pestañas** en el gestor (vista de cuadrícula): guardar una miniatura de cada pestaña al salir de ella. Hacerlo cuando se acaben los menús y confirmaciones nativos.
+- Flujo de ocultar con un toque: hoja con alcance (siempre en este sitio / solo esta vez / todos los sitios), «Ver y editar el selector» y bloquear el origen desde la propia hoja.
+- Quedan unos 30 usos de `nuevoDialogo()` por pasar a hojas; Reglas de usuario, Dominios propios, Ajustes de medios y Lectura y voz con diseño propio.
+- `BarraConfig` y las estadísticas de bloqueo aún no entran en la copia de seguridad.
+- Gestor de pestañas: arrastrar para reordenar, fijar pestañas, grupos con nombre y color.
