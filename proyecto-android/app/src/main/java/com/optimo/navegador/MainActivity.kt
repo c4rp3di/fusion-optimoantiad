@@ -240,8 +240,8 @@ class MainActivity : Activity() {
         marcadores = Marcadores(File(filesDir, "marcadores.json"), 500)
         limpiarLocalesHuerfanos()
         historial = ListaPersistente(File(filesDir, "historial.json"), 1000)
-        aplicarRetencionHistorial()
-        if (ajustes.salidaPendiente) limpiarAlSalir()
+        limpieza.aplicarRetencion()
+        if (ajustes.salidaPendiente) limpieza.limpiarAlSalir()
         uaEscritorio = calcularUaEscritorio()
         construirUi()
         configurarVentana()
@@ -276,8 +276,8 @@ class MainActivity : Activity() {
         super.onStart()
         enPantalla = true
         if (ajustes.salidaPendiente) ajustes.salidaPendiente = false
-        aplicarRetencionHistorial()
-        if (ExcepcionesSsl.limpiarCaducadas()) olvidarSslWebView()
+        limpieza.aplicarRetencion()
+        if (ExcepcionesSsl.limpiarCaducadas()) limpieza.olvidarSsl()
     }
 
     override fun onStop() {
@@ -564,9 +564,9 @@ class MainActivity : Activity() {
     override fun onDestroy() {
         rastreador?.parar("descartado")
         if (isFinishing) {
-            limpiarAlSalir()
+            limpieza.limpiarAlSalir()
             ExcepcionesSsl.olvidarSesion()
-            olvidarSslWebView()
+            limpieza.olvidarSsl()
         }
         lector.cerrar()
         ServicioSegundoPlano.manejador = null
@@ -1143,7 +1143,7 @@ class MainActivity : Activity() {
         override fun elegirElemento(p: Pestana) = iniciarSeleccion(p)
         override fun bloquearSitio(p: Pestana) = this@MainActivity.bloquearSitio(p)
         override fun desbloquearSitio(p: Pestana) = this@MainActivity.desbloquearSitio(p)
-        override fun datosDelSitio(host: String) = mostrarPrivacidadSitio(host)
+        override fun datosDelSitio(host: String) = abrirPrivacidad(CentroPrivacidad.SITIO, host)
         override fun personalizar(p: Pestana) = mostrarPersonalizarSitio(p)
         override fun conexion() = mostrarInfoSitio()
         override fun verBloqueados(p: Pestana, host: String) = mostrarBloqueadosPagina(p, host)
@@ -1171,13 +1171,13 @@ class MainActivity : Activity() {
                 Destino.REGLAS -> mostrarReglasUsuario()
                 Destino.DOMINIOS -> mostrarDominiosPropios()
                 Destino.PAUSADOS -> mostrarSitiosPausados()
-                Destino.POR_SITIO -> mostrarAjustesPorSitio()
+                Destino.POR_SITIO -> abrirPrivacidad(CentroPrivacidad.SITIOS, "", CentroPrivacidad.F_AJUSTES)
                 Destino.EMERGENTES_MODO -> elegirModoEmergentes()
                 Destino.EMERGENTES_SITIOS -> editarSitiosEmergentes()
-                Destino.PRIVACIDAD -> mostrarPrivacidad()
+                Destino.PRIVACIDAD -> abrirPrivacidad()
                 Destino.COPIA -> mostrarCopiaSeguridad()
-                Destino.CERTIFICADOS -> mostrarExcepcionesSsl()
-                Destino.PERMISOS -> mostrarPermisosSitios()
+                Destino.CERTIFICADOS -> abrirPrivacidad(CentroPrivacidad.CERTIFICADOS)
+                Destino.PERMISOS -> abrirPrivacidad(CentroPrivacidad.SITIOS, "", CentroPrivacidad.F_PERMISOS)
                 Destino.BARRA -> mostrarAjustesBarra()
             }
         }
@@ -1243,7 +1243,7 @@ class MainActivity : Activity() {
             items.add(Pair("🔒 Certificado de la conexión…") { mostrarCertificado(p) })
         }
         if (!p.privada && !p.inicio && !p.appWeb && p.url.startsWith("http")) {
-            items.add(Pair("🛡 Privacidad de este sitio…") { mostrarPrivacidadSitio(Omnibox.hostDe(p.url)) })
+            items.add(Pair("🛡 Privacidad de este sitio…") { abrirPrivacidad(CentroPrivacidad.SITIO, ReglasUsuario.clave(Omnibox.hostDe(p.url))) })
         }
         if (!p.privada && !p.inicio && !p.sinConexion && !p.appWeb && p.url.startsWith("http")) {
             if (ReglasUsuario.bloqueaDominio(Omnibox.hostDe(p.url).lowercase())) {
@@ -2007,6 +2007,43 @@ class MainActivity : Activity() {
         override fun devCaptura(): Boolean = ajustes.devCaptura
     }
 
+    // ---------------------------------------------------------------- privacidad y datos (CentroPrivacidad.kt)
+
+    private val limpieza by lazy {
+        LimpiezaDatos(this, ajustes, historial, { pestanas.mapNotNull { q -> q.web } }, { cerradas.clear() })
+    }
+
+    private fun nuevoCentroPrivacidad(
+        pagina: String = CentroPrivacidad.RESUMEN, sitio: String = "", filtro: Int = 0
+    ): CentroPrivacidad = CentroPrivacidad(this, paleta, ajustes, historial, limpieza, anfitrionPrivacidad, pagina, sitio, filtro)
+
+    private fun abrirPrivacidad(pagina: String = CentroPrivacidad.RESUMEN, sitio: String = "", filtro: Int = 0) {
+        nuevoCentroPrivacidad(pagina, sitio, filtro).mostrar()
+    }
+
+    private val anfitrionPrivacidad = object : AnfitrionPrivacidad {
+        override fun pestana(): Pestana? = actual
+        override fun avisar(texto: String) = toast(texto)
+        override fun copiar(texto: String) = this@MainActivity.copiar(texto)
+        override fun volverAlMenu() = abrirMenuLateral()
+        override fun paginasGuardadas() = mostrarPaginasGuardadas()
+        override fun listasEnlaces() = mostrarListasEnlaces()
+        override fun reglasDe(sitio: String) = mostrarReglasUsuario(sitio)
+        override fun almacenamientoDe(p: Pestana) = inspeccionarAlmacenamiento(p)
+        override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
+        override fun borrarSesionGuardada() = this@MainActivity.borrarSesionGuardada()
+
+        override fun hostsAbiertos(): List<String> =
+            pestanas.filter { q -> !q.privada && !q.inicio && q.url.startsWith("http") }
+                .map { q -> ReglasUsuario.clave(Omnibox.hostDe(q.url)) }
+
+        override fun paginaAbiertaEn(host: String): Pestana? =
+            pestanas.firstOrNull { q ->
+                !q.privada && !q.inicio && q.web != null && q.url.startsWith("http") &&
+                    dominioBase(Omnibox.hostDe(q.url)) == dominioBase(host)
+            }
+    }
+
     private fun ejecutarMenu(a: AccionMenu) {
         val p = actual
         when (a) {
@@ -2020,6 +2057,7 @@ class MainActivity : Activity() {
             AccionMenu.IR_INICIO -> if (p != null) mostrarInicio(p)
             AccionMenu.PROTECCION_PAGINA -> alPulsarEscudo()
             AccionMenu.CENTRO -> abrirCentro()
+            AccionMenu.PRIVACIDAD -> abrirPrivacidad()
             AccionMenu.BUSCAR_PAGINA -> mostrarBusqueda()
             AccionMenu.LEER -> if (p != null) abrirModoLectura(p)
             AccionMenu.ESCRITORIO -> alternarEscritorio()
@@ -2082,17 +2120,6 @@ class MainActivity : Activity() {
     }
 
     // ---------------------------------------------------------------- ventanas emergentes y redirecciones
-
-    /** Dominio «base» aproximado (sin lista de sufijos públicos): example.com, example.co.uk. Las IP se comparan enteras. */
-    private fun dominioBase(host: String): String {
-        val h = host.lowercase().trimEnd('.')
-        val partes = h.split('.')
-        if (partes.size <= 2 || partes.all { x -> x.isNotEmpty() && x.all { c -> c.isDigit() } }) return h
-        val ult = partes[partes.size - 1]
-        val pen = partes[partes.size - 2]
-        val n = if (ult.length == 2 && pen.length <= 3) 3 else 2
-        return partes.takeLast(n).joinToString(".")
-    }
 
     private fun mismoSitio(a: String, b: String): Boolean = dominioBase(a) == dominioBase(b)
 
@@ -2536,7 +2563,10 @@ class MainActivity : Activity() {
         nuevoDialogo()
             .setTitle("Borrar datos de navegación")
             .setMessage("Se borrarán el historial, la caché y las cookies (se cerrarán tus sesiones en los sitios web). Los marcadores se conservan.")
-            .setPositiveButton("Borrar") { _, _ -> borrarDatos() }
+            .setPositiveButton("Borrar") { _, _ ->
+                limpieza.borrarDatosNavegacion()
+                toast("Datos de navegación borrados")
+            }
             .setNegativeButton("Cancelar", null)
             .show()
     }
@@ -3040,120 +3070,9 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- borrar datos al salir
 
-    private fun alternarBorrarAlSalir(bit: Int) {
-        ajustes.borrarAlSalir = ajustes.borrarAlSalir xor bit
-        if ((ajustes.borrarAlSalir and bit) != 0) {
-            toast("Se borrará al cerrar Optimo (o al reabrirla, si Android la cierra antes)")
-        }
-        mostrarPrivacidad()
-    }
-
     // ---------------------------------------------------------------- retención y borrado del historial por rango
 
-    private val etiquetasRetencion = arrayOf("Siempre (sin límite)", "7 días", "30 días", "90 días")
-    private val diasRetencion = intArrayOf(0, 7, 30, 90)
 
-    private fun etiquetaRetencion(d: Int): String {
-        val i = diasRetencion.indexOf(d)
-        return if (i >= 0) etiquetasRetencion[i] else d.toString() + " días"
-    }
-
-    /** Borra del historial lo anterior al plazo elegido en «Conservar historial». Se llama al abrir y al volver a Optimo. */
-    private fun aplicarRetencionHistorial() {
-        val d = ajustes.retencionHistorial
-        if (d <= 0) return
-        historial.quitarAnterioresA(System.currentTimeMillis() - d * 86400000L)
-    }
-
-    private fun elegirRetencionHistorial() {
-        val actual = maxOf(diasRetencion.indexOf(ajustes.retencionHistorial), 0)
-        nuevoDialogo()
-            .setTitle("Conservar historial")
-            .setSingleChoiceItems(etiquetasRetencion, actual) { d, i ->
-                d.dismiss()
-                cambiarRetencion(diasRetencion[i])
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
-            .setOnCancelListener { mostrarPrivacidad() }
-            .show()
-    }
-
-    private fun cambiarRetencion(dias: Int) {
-        if (dias <= 0) {
-            ajustes.retencionHistorial = 0
-            mostrarPrivacidad()
-            return
-        }
-        val n = historial.contarAnterioresA(System.currentTimeMillis() - dias * 86400000L)
-        if (n == 0) {
-            ajustes.retencionHistorial = dias
-            mostrarPrivacidad()
-            return
-        }
-        nuevoDialogo()
-            .setTitle("Conservar " + etiquetaRetencion(dias))
-            .setMessage("Se borrarán ahora " + n + " páginas más antiguas, y a partir de ahora se irán borrando las que superen ese plazo. Los marcadores se conservan.")
-            .setPositiveButton("Aplicar") { _, _ ->
-                ajustes.retencionHistorial = dias
-                aplicarRetencionHistorial()
-                toast("Historial limpiado")
-                mostrarPrivacidad()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
-            .setOnCancelListener { mostrarPrivacidad() }
-            .show()
-    }
-
-    private val etiquetasRango = arrayOf("Última hora", "Hoy", "Últimos 7 días", "Últimos 30 días", "Todo")
-
-    /** Instante (ms) desde el que se borra para cada opción de [etiquetasRango]; 0 = todo. */
-    private fun inicioRango(i: Int): Long {
-        val ahora = System.currentTimeMillis()
-        return when (i) {
-            0 -> ahora - 3600000L
-            1 -> {
-                val c = java.util.Calendar.getInstance()
-                c.set(java.util.Calendar.HOUR_OF_DAY, 0)
-                c.set(java.util.Calendar.MINUTE, 0)
-                c.set(java.util.Calendar.SECOND, 0)
-                c.set(java.util.Calendar.MILLISECOND, 0)
-                c.timeInMillis
-            }
-            2 -> ahora - 7 * 86400000L
-            3 -> ahora - 30 * 86400000L
-            else -> 0L
-        }
-    }
-
-    /** Borrar del historial lo visitado en la última hora, hoy, 7 o 30 días, o todo. [volver] se ejecuta al terminar o cancelar. */
-    private fun elegirRangoBorrado(volver: () -> Unit) {
-        nuevoDialogo()
-            .setTitle("Borrar historial")
-            .setItems(etiquetasRango) { _, i ->
-                val desde = inicioRango(i)
-                val n = historial.contarDesde(desde)
-                if (n == 0) {
-                    toast("No hay páginas en ese rango")
-                    volver()
-                } else {
-                    nuevoDialogo()
-                        .setTitle(etiquetasRango[i])
-                        .setMessage("Se borrarán " + n + " páginas del historial. Los marcadores se conservan.")
-                        .setPositiveButton("Borrar") { _, _ ->
-                            historial.quitarDesde(desde)
-                            cerradas.clear()
-                            toast("Historial borrado")
-                            volver()
-                        }
-                        .setNegativeButton("Cancelar") { _, _ -> volver() }
-                        .setOnCancelListener { volver() }
-                        .show()
-                }
-            }
-            .setNegativeButton("Cancelar") { _, _ -> volver() }
-            .setOnCancelListener { volver() }
-            .show()
-    }
 
     // ---------------------------------------------------------------- qué se muestra al abrir Optimo
 
@@ -3198,56 +3117,6 @@ class MainActivity : Activity() {
         modo(1, "Estricto: solo se abren si tocas un enlace y la pestaña va a ese mismo sitio")
         modo(2, "Permitir todas en este sitio (también las redirecciones)")
         opciones("Ventanas emergentes en " + sitio, items)
-    }
-
-    /** Ajustes › «Ajustes por sitio»: los sitios con algo personalizado, para ver qué tienen y restablecerlos. */
-    private fun mostrarAjustesPorSitio() {
-        val sitios = ajustes.sitiosConAjustes()
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (h in sitios) {
-            val n = ajustes.resumenSitio(h).size
-            items.add(Pair<String, () -> Unit>(h + " — " + n + (if (n == 1) " ajuste" else " ajustes"), { detalleAjustesSitio(h) }))
-        }
-        if (sitios.isNotEmpty()) items.add(Pair<String, () -> Unit>("Restablecer todos…", { confirmarRestablecerSitios() }))
-        items.add(Pair<String, () -> Unit>("Listo", { abrirCentro() }))
-        val titulo = if (sitios.isEmpty()) {
-            "Ningún sitio tiene ajustes propios\n(se crean en ⋮ › Personalizar este sitio)"
-        } else {
-            "Ajustes por sitio\nToca uno para ver o restablecerlo"
-        }
-        opciones(titulo, items)
-    }
-
-    private fun detalleAjustesSitio(h: String) {
-        val lineas = ajustes.resumenSitio(h)
-        nuevoDialogo()
-            .setTitle(h)
-            .setMessage(lineas.joinToString("\n") { l -> "• " + l } + "\n\nLos permisos, las reglas de ocultar elementos y el CSS no se tocan.")
-            .setPositiveButton("Restablecer") { _, _ ->
-                ajustes.restablecerSitio(h)
-                reinstalarAnuncios()
-                toast("Ajustes de " + h + " restablecidos. Recarga sus páginas")
-                mostrarAjustesPorSitio()
-            }
-            .setNegativeButton("Cerrar") { _, _ -> mostrarAjustesPorSitio() }
-            .setOnCancelListener { mostrarAjustesPorSitio() }
-            .show()
-    }
-
-    private fun confirmarRestablecerSitios() {
-        val n = ajustes.sitiosConAjustes().size
-        nuevoDialogo()
-            .setTitle("Restablecer todos")
-            .setMessage("Se quitarán los ajustes propios de " + n + " sitios (escritorio, modo oscuro, emergentes, cookies de terceros, imágenes, suspensión y pausa del bloqueo). Los permisos, las reglas y el CSS no se tocan.")
-            .setPositiveButton("Restablecer") { _, _ ->
-                for (h in ajustes.sitiosConAjustes()) ajustes.restablecerSitio(h)
-                reinstalarAnuncios()
-                toast("Ajustes por sitio restablecidos. Recarga las páginas")
-                mostrarAjustesPorSitio()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesPorSitio() }
-            .setOnCancelListener { mostrarAjustesPorSitio() }
-            .show()
     }
 
     // ---------------------------------------------------------------- bloquear un sitio a mano (candado) y «Mis dominios bloqueados»
@@ -3393,101 +3262,6 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- excepciones de certificado
 
-    /** El WebView recuerda en memoria los certificados con los que se continuó; al revocar o vencer hay que hacérselo olvidar. */
-    private fun olvidarSslWebView() {
-        for (q in pestanas) {
-            try {
-                q.web?.clearSslPreferences()
-            } catch (e: Exception) {
-                // Sin WebView o ya destruido.
-            }
-        }
-    }
-
-    private fun mostrarExcepcionesSsl() {
-        val lista = ExcepcionesSsl.todas()
-        if (lista.isEmpty()) {
-            toast("No hay excepciones de certificado")
-            mostrarPrivacidad()
-            return
-        }
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (e in lista) {
-            val texto = e.sitio.substringBeforeLast(':') + " — " + Certificados.etiqueta(e.motivos) + "\n" +
-                Certificados.vigencia(e) + " · " + Certificados.huellaCorta(e.huella)
-            items.add(Pair<String, () -> Unit>(texto, { detalleExcepcionSsl(e) }))
-        }
-        items.add(Pair<String, () -> Unit>("Revocar todas…", { confirmarRevocarTodasSsl() }))
-        opciones("Excepciones de certificado", items)
-    }
-
-    private fun detalleExcepcionSsl(e: ExcepcionSsl) {
-        val fmt = java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.getDefault())
-        val msg = e.sitio.substringBeforeLast(':') + "\n\n" +
-            "Autorizado a pesar de: " + Certificados.etiqueta(e.motivos) + "\n" +
-            "Concedida: " + fmt.format(java.util.Date(e.concedida)) + "\n" +
-            "Vigencia: " + Certificados.vigencia(e) + "\n\n" +
-            "Huella SHA-256:\n" + e.huella + "\n\n" +
-            "Solo vale para este certificado exacto. Si el equipo presenta otro, Optimo volverá a preguntar."
-        nuevoDialogo()
-            .setTitle("Excepción de certificado")
-            .setMessage(msg)
-            .setPositiveButton("Revocar") { _, _ ->
-                ExcepcionesSsl.quitar(e)
-                olvidarSslWebView()
-                toast("Excepción revocada. Recarga la página")
-                mostrarExcepcionesSsl()
-            }
-            .setNeutralButton("Copiar huella") { _, _ ->
-                copiar(e.huella)
-                mostrarExcepcionesSsl()
-            }
-            .setNegativeButton("Cerrar") { _, _ -> mostrarExcepcionesSsl() }
-            .setOnCancelListener { mostrarExcepcionesSsl() }
-            .show()
-    }
-
-    private fun confirmarRevocarTodasSsl() {
-        nuevoDialogo()
-            .setTitle("Revocar todas")
-            .setMessage("Se olvidarán todas las excepciones de certificado. Los equipos con certificado no válido volverán a preguntar.")
-            .setPositiveButton("Revocar") { _, _ ->
-                ExcepcionesSsl.quitarTodas()
-                olvidarSslWebView()
-                toast("Excepciones revocadas. Recarga las páginas")
-                mostrarPrivacidad()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarExcepcionesSsl() }
-            .setOnCancelListener { mostrarExcepcionesSsl() }
-            .show()
-    }
-
-    /**
-     * Limpieza de «Al salir, borrar…». Se llama al cerrar la app (onDestroy con la actividad terminando) y, si el proceso murió
-     * antes de poder hacerlo (quitarla de recientes, Android que la cierra), al abrirla de nuevo. La marca [Ajustes.salidaPendiente]
-     * solo se quita cuando el borrado de cookies termina de verdad.
-     */
-    private fun limpiarAlSalir() {
-        val m = ajustes.borrarAlSalir
-        if (m == 0) {
-            ajustes.salidaPendiente = false
-            return
-        }
-        if ((m and 2) != 0) {
-            historial.vaciar()
-            cerradas.clear()
-        }
-        if ((m and 4) != 0) borrarCache()
-        if ((m and 1) != 0) {
-            val cm = CookieManager.getInstance()
-            cm.removeAllCookies { _ -> ajustes.salidaPendiente = false }
-            cm.flush()
-            WebStorage.getInstance().deleteAllData()
-        } else {
-            ajustes.salidaPendiente = false
-        }
-    }
-
     // ---------------------------------------------------------------- copia de seguridad
 
     private fun mostrarCopiaSeguridad() {
@@ -3598,204 +3372,8 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun borrarDatos() {
-        historial.vaciar()
-        cerradas.clear()
-        ExcepcionesSsl.quitarTodas()
-        olvidarSslWebView()
-        CookieManager.getInstance().removeAllCookies(null)
-        CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
-        actual?.web?.clearCache(true)
-        toast("Datos de navegación borrados")
-    }
-
     // ---------------------------------------------------------------- privacidad y datos guardados
 
-    private fun tamanoDir(d: File): Long {
-        var t = 0L
-        try {
-            val hijos = d.listFiles() ?: return d.length()
-            for (h in hijos) t += if (h.isDirectory) tamanoDir(h) else h.length()
-        } catch (e: Exception) {
-        }
-        return t
-    }
-
-    private fun formatoTamano(b: Long): String =
-        if (b < 1024L * 1024L) (b / 1024L).toString() + " KB" else String.format(java.util.Locale.getDefault(), "%.1f MB", b / 1048576.0)
-
-    private fun etiquetaPermiso(t: String): String = when (t) {
-        "camara" -> "cámara"
-        "microfono" -> "micrófono"
-        "ubicacion" -> "ubicación"
-        else -> t
-    }
-
-    private fun borrarCache() {
-        var hecho = false
-        for (q in pestanas) {
-            val w = q.web
-            if (w != null) {
-                w.clearCache(true)
-                hecho = true
-                break
-            }
-        }
-        if (!hecho) {
-            try {
-                File(cacheDir, "WebView").deleteRecursively()
-            } catch (e: Exception) {
-            }
-        }
-    }
-
-    private fun confirmarAccionPrivacidad(titulo: String, mensaje: String, boton: String, accion: () -> Unit) {
-        nuevoDialogo()
-            .setTitle(titulo)
-            .setMessage(mensaje)
-            .setPositiveButton(boton) { _, _ ->
-                accion()
-                toast("Hecho")
-                mostrarPrivacidad()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarPrivacidad() }
-            .setOnCancelListener { mostrarPrivacidad() }
-            .show()
-    }
-
-    /** Ajustes › Privacidad y datos: qué guarda Optimo, cuánto, y cómo controlarlo o borrarlo. */
-    private fun mostrarPrivacidad() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Guardar historial: " + si(ajustes.guardarHistorial)) {
-            ajustes.guardarHistorial = !ajustes.guardarHistorial
-            if (!ajustes.guardarHistorial && historial.todos().isNotEmpty()) {
-                nuevoDialogo()
-                    .setTitle("Historial desactivado")
-                    .setMessage("¿Quieres borrar también el historial que ya está guardado (" + historial.todos().size + " páginas)?")
-                    .setPositiveButton("Borrar") { _, _ ->
-                        historial.vaciar()
-                        cerradas.clear()
-                        toast("Historial borrado")
-                        mostrarPrivacidad()
-                    }
-                    .setNegativeButton("Conservar") { _, _ -> mostrarPrivacidad() }
-                    .setOnCancelListener { mostrarPrivacidad() }
-                    .show()
-            } else {
-                mostrarPrivacidad()
-            }
-        }
-        add("Conservar historial: " + etiquetaRetencion(ajustes.retencionHistorial)) { elegirRetencionHistorial() }
-        add("Borrar historial por rango…") { elegirRangoBorrado { mostrarPrivacidad() } }
-        add("Guardar pestañas abiertas al cerrar: " + si(ajustes.guardarSesion)) {
-            ajustes.guardarSesion = !ajustes.guardarSesion
-            if (!ajustes.guardarSesion) borrarSesionGuardada()
-            mostrarPrivacidad()
-        }
-        add("Páginas guardadas sin conexión (" + PaginasGuardadas.todas().size + ", " + formatoTamano(PaginasGuardadas.totalBytes()) + ")…") {
-            mostrarPaginasGuardadas()
-        }
-        add("Listas de enlaces guardadas (" + ListasEnlaces.todas().size + ")…") { mostrarListasEnlaces() }
-        add("Al salir, borrar cookies y datos de sitios: " + si((ajustes.borrarAlSalir and 1) != 0)) { alternarBorrarAlSalir(1) }
-        add("Al salir, borrar historial: " + si((ajustes.borrarAlSalir and 2) != 0)) { alternarBorrarAlSalir(2) }
-        add("Al salir, borrar caché: " + si((ajustes.borrarAlSalir and 4) != 0)) { alternarBorrarAlSalir(4) }
-        add("Borrar historial (" + historial.todos().size + " páginas)") {
-            confirmarAccionPrivacidad("Borrar historial", "Se borrará el historial de navegación. Los marcadores se conservan.", "Borrar") {
-                historial.vaciar()
-                cerradas.clear()
-            }
-        }
-        add("Borrar caché (" + formatoTamano(tamanoDir(cacheDir)) + ")") {
-            confirmarAccionPrivacidad("Borrar caché", "Las páginas se volverán a descargar la próxima vez que las abras.", "Borrar") {
-                borrarCache()
-            }
-        }
-        add("Borrar cookies y datos de sitios") {
-            confirmarAccionPrivacidad("Borrar cookies y datos de sitios", "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local, incluidos los datos de las aplicaciones web locales (por ejemplo, los proyectos de un editor abierto como archivo).", "Borrar") {
-                CookieManager.getInstance().removeAllCookies(null)
-                CookieManager.getInstance().flush()
-                WebStorage.getInstance().deleteAllData()
-            }
-        }
-        add("Permisos concedidos a sitios (" + ajustes.totalPermisos() + ")…") { mostrarPermisosSitios() }
-        add("Excepciones de certificado (" + ExcepcionesSsl.todas().size + ")…") { mostrarExcepcionesSsl() }
-        add("Sitios con el bloqueo de anuncios pausado (" + ajustes.sitiosPausados().size + ")…") { mostrarSitiosPausados() }
-        add("Reglas de sitios y anuncios (" + ReglasUsuario.total + ")…") { mostrarReglasUsuario() }
-        add("Borrar todo: historial, caché, cookies y permisos") {
-            confirmarAccionPrivacidad(
-                "Borrar todo",
-                "Se borrarán el historial, la caché, las cookies, el almacenamiento de los sitios y los permisos concedidos. Los marcadores y las reglas se conservan.",
-                "Borrar todo"
-            ) {
-                borrarDatos()
-                borrarCache()
-                ajustes.quitarTodosPermisos()
-                EstadisticasBloqueo.reiniciar()
-            }
-        }
-        opciones("Privacidad y datos", items)
-    }
-
-    private fun mostrarPermisosSitios() {
-        val sitios = ajustes.sitiosConPermisos()
-        if (sitios.isEmpty()) {
-            toast("Ningún sitio tiene permisos guardados")
-            mostrarPrivacidad()
-            return
-        }
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (sitio in sitios) {
-            val texto = sitio + " — " + ajustes.permisosDe(sitio).joinToString(", ") { t -> etiquetaPermiso(t) }
-            items.add(Pair<String, () -> Unit>(texto, { mostrarPrivacidadSitio(sitio) }))
-        }
-        opciones("Permisos concedidos", items)
-    }
-
-    /** Datos y permisos de un sitio concreto (menú ⋮ › Privacidad de este sitio, o desde la lista de permisos). */
-    private fun mostrarPrivacidadSitio(host: String) {
-        val h = host.lowercase().removePrefix("www.")
-        if (h.isEmpty()) return
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        val permisos = ajustes.permisosDe(h)
-        for (t in permisos) {
-            add("Revocar permiso de " + etiquetaPermiso(t) + textoRestante(ajustes.restantePermiso(h, t))) {
-                ajustes.quitarPermiso(h, t)
-                toast("Permiso revocado: " + etiquetaPermiso(t))
-                mostrarPrivacidadSitio(h)
-            }
-        }
-        if (permisos.isEmpty()) add("Sin permisos guardados (te preguntará cada vez)") { mostrarPrivacidadSitio(h) }
-        add("Reglas de ocultar elementos en este sitio: " + ReglasUsuario.selectoresPara(h).size) { mostrarReglasUsuario() }
-        add("Cookies de este sitio (" + cookiesDeSitio(h).size + ")…") { mostrarCookiesSitio(h) }
-        val pa = actual
-        val enPagina = pa != null && !pa.privada && !pa.inicio && pa.web != null &&
-            dominioBase(Omnibox.hostDe(pa.url)) == dominioBase(h)
-        if (enPagina && pa != null) {
-            add("Almacenamiento de la página abierta…") { inspeccionarAlmacenamiento(pa) }
-            if (pa.bloqueados.get() > 0) {
-                add("Rastreadores bloqueados en esta página: " + pa.bloqueados.get() + "…") { mostrarBloqueadosPagina(pa, h) }
-            }
-        }
-        add("Borrar cookies y almacenamiento de este sitio") {
-            nuevoDialogo()
-                .setTitle("Borrar datos de " + h)
-                .setMessage("Se cerrará tu sesión en este sitio y se borrará su almacenamiento local. Los demás sitios no se tocan.")
-                .setPositiveButton("Borrar") { _, _ ->
-                    borrarDatosSitio(h)
-                    toast("Datos de " + h + " borrados. Recarga la página")
-                }
-                .setNegativeButton("Cancelar", null)
-                .show()
-        }
-        opciones(h, items)
-    }
 
     /** «Recordar…» en un permiso: 1 hora, 24 horas o siempre. Si se cierra sin elegir, se deniega (la petición no puede quedar colgada). */
     private fun elegirDuracionPermiso(sitio: String, tipos: List<String>, conceder: () -> Unit, denegar: () -> Unit) {
@@ -3821,66 +3399,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun textoRestante(ms: Long): String {
-        if (ms <= 0L) return ""
-        val min = (ms / 60000L).toInt()
-        return if (min >= 60) " (caduca en " + (min / 60) + " h)" else " (caduca en " + maxOf(min, 1) + " min)"
-    }
-
-    /** Dominios con los que se prueban las cookies de un sitio: él mismo, su dominio base y «www.». */
-    private fun hostsCookies(host: String): List<String> {
-        val base = dominioBase(host)
-        val hosts = LinkedHashSet<String>()
-        hosts.add(host)
-        hosts.add(base)
-        hosts.add("www." + base)
-        return ArrayList(hosts)
-    }
-
-    /** Nombre y tamaño del valor de cada cookie del sitio (el valor no se muestra). Solo el perfil normal. */
-    private fun cookiesDeSitio(host: String): List<Pair<String, Int>> {
-        val cm = CookieManager.getInstance()
-        val res = LinkedHashMap<String, Int>()
-        for (x in hostsCookies(host)) {
-            val cookies = cm.getCookie("https://" + x + "/") ?: continue
-            for (par in cookies.split(";")) {
-                val nombre = par.substringBefore('=').trim()
-                if (nombre.isEmpty() || res.containsKey(nombre)) continue
-                res[nombre] = par.substringAfter('=', "").length
-            }
-        }
-        return res.entries.map { Pair(it.key, it.value) }
-    }
-
-    private fun borrarCookie(host: String, nombre: String) {
-        val cm = CookieManager.getInstance()
-        for (x in hostsCookies(host)) {
-            val url = "https://" + x + "/"
-            for (dom in listOf("", "; Domain=" + x, "; Domain=." + x)) {
-                cm.setCookie(url, nombre + "=; Max-Age=0; Path=/" + dom)
-            }
-        }
-        cm.flush()
-    }
-
-    private fun mostrarCookiesSitio(h: String) {
-        val lista = cookiesDeSitio(h)
-        if (lista.isEmpty()) {
-            toast("Sin cookies guardadas para " + h)
-            mostrarPrivacidadSitio(h)
-            return
-        }
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for ((nombre, largo) in lista.take(60)) {
-            items.add(Pair<String, () -> Unit>(nombre + "  (" + largo + " car.)", {
-                borrarCookie(h, nombre)
-                toast("Cookie borrada: " + nombre)
-                mostrarCookiesSitio(h)
-            }))
-        }
-        opciones("Cookies de " + h + " (toca una para borrarla)", items)
-    }
-
     /** Dominios bloqueados en la página (solo lectura; el registro guarda los últimos 500 bloqueos). */
     private fun mostrarBloqueadosPagina(p: Pestana, h: String) {
         val lista = p.dev.bloqueadosPorHost()
@@ -3890,7 +3408,7 @@ class MainActivity : Activity() {
         }
         val items = ArrayList<Pair<String, () -> Unit>>()
         for ((dominio, n) in lista.take(40)) {
-            items.add(Pair<String, () -> Unit>(dominio + " — " + n, { mostrarPrivacidadSitio(h) }))
+            items.add(Pair<String, () -> Unit>(dominio + " — " + n, { abrirPrivacidad(CentroPrivacidad.SITIO, h) }))
         }
         opciones("Bloqueados en esta página: " + p.bloqueados.get(), items)
     }
@@ -3928,33 +3446,6 @@ class MainActivity : Activity() {
         }
         p.web?.evaluateJavascript(js, null)
         toast("Borrado. Recarga la página")
-    }
-
-    /** Cookies (del sitio y de su dominio base) y almacenamiento local de un sitio. Solo el perfil normal. */
-    private fun borrarDatosSitio(host: String) {
-        val cm = CookieManager.getInstance()
-        val base = dominioBase(host)
-        val hosts = LinkedHashSet<String>()
-        hosts.add(host)
-        hosts.add(base)
-        hosts.add("www." + base)
-        for (x in hosts) {
-            val url = "https://" + x + "/"
-            val cookies = cm.getCookie(url) ?: continue
-            for (par in cookies.split(";")) {
-                val nombre = par.substringBefore('=').trim()
-                if (nombre.isEmpty()) continue
-                for (dom in listOf("", "; Domain=" + x, "; Domain=." + x)) {
-                    cm.setCookie(url, nombre + "=; Max-Age=0; Path=/" + dom)
-                }
-            }
-        }
-        cm.flush()
-        try {
-            WebStorage.getInstance().deleteOrigin("https://" + host)
-            WebStorage.getInstance().deleteOrigin("http://" + host)
-        } catch (e: Exception) {
-        }
     }
 
     /** Versión de la app tal como está instalada (la de build.gradle), para no escribirla a mano en cada entrega. */
@@ -4067,7 +3558,7 @@ class MainActivity : Activity() {
         }
         val b = nuevoDialogo().setTitle(titulo).setView(vista).setNegativeButton("Cerrar", null)
         if (conBorrarTodo) {
-            b.setNeutralButton("Borrar…") { _, _ -> elegirRangoBorrado { } }
+            b.setNeutralButton("Borrar…") { _, _ -> nuevoCentroPrivacidad().elegirRangoBorrado { } }
         }
         val d = b.create()
         dialogo = d
@@ -5163,7 +4654,7 @@ class MainActivity : Activity() {
         val sitios = ajustes.sitiosPausados()
         if (sitios.isEmpty()) {
             toast("No hay sitios con el bloqueo pausado")
-            mostrarPrivacidad()
+            abrirCentro()
             return
         }
         val items = ArrayList<Pair<String, () -> Unit>>()
