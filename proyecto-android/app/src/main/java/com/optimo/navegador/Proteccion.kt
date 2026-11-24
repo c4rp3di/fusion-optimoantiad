@@ -55,6 +55,8 @@ interface AnfitrionProteccion {
     /** Pregunta si permitir [dominio] solo en el sitio de [p] o en todos, y recarga. */
     fun permitirDominio(p: Pestana, dominio: String)
     fun abrirCentro()
+    fun volverAlMenu()
+    fun pestanaActual(): Pestana?
     fun abrir(destino: Destino)
     fun avisar(texto: String)
     fun confirmar(titulo: String, mensaje: String, boton: String, accion: () -> Unit)
