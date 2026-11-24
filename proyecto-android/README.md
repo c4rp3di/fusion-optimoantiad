@@ -542,3 +542,15 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - **Todas las listas nativas** (`opciones()`, unas 46 pantallas) se dibujan ahora como hojas inferiores con el mismo estilo, así que ya no queda ninguna lista del sistema; los diálogos de confirmar, escribir y elegir (`nuevoDialogo()`) siguen siendo nativos y son el siguiente paso.
 - `Hoja` gana modo lateral, tarjetas de categoría, accesos rápidos, barra de título con «‹» y filas con icono. Animación de entrada y salida del panel en `res/anim`.
 - `MainActivity` solo conserva `ejecutarMenu()` y el objeto `anfitrionMenu`; los textos y el orden del menú viven en `MenuLateral.kt` (interfaz `AnfitrionMenu` + enum `AccionMenu`).
+
+## 1.27.0 — Privacidad y datos como categoría propia, con datos por sitio
+
+- **Nueva categoría 🔒 Privacidad y datos** en el menú lateral, separada de 🛡 Protección (que queda solo para el bloqueo). «Marcadores y datos» pasa a llamarse **Marcadores y guardados**.
+- **Centro de privacidad** (`CentroPrivacidad.kt`), organizado por temas en lugar de una lista plana:
+  - **Resumen:** cifras (páginas del historial, sitios con cookies, caché) y secciones Navegación, Sitios web, Guardado en el dispositivo, Conexión segura, Borrar al salir y Limpieza total.
+  - **Historial:** guardar, conservar (7/30/90 días o siempre) y borrar por rango con el número de páginas de cada rango a la vista.
+  - **Datos por sitio (nuevo):** lista de sitios (abiertos, del historial, con permisos, ajustes o reglas) con filtros Todos / Con cookies / Con permisos / Con ajustes. Cada sitio muestra cookies, permisos (revocables uno a uno), cookies una a una, almacenamiento de la página abierta, protección y ajustes propios (anuncios, emergentes, cookies de terceros, imágenes), reglas, historial del sitio y «Borrar todo de este sitio». Abajo, acciones para todos los sitios.
+  - **Excepciones de certificado** con detalle, copiar huella y revocar.
+  - «Ajustes por sitio», «Permisos concedidos» y «Excepciones de certificado» desaparecen como pantallas sueltas: están dentro de Datos por sitio y del Resumen. No se pierde ninguna función.
+- **Código movido fuera de `MainActivity` (–509 líneas):** `LimpiezaDatos.kt` (borrados, caché, cookies, borrado al salir, retención, certificados; sin interfaz) y las utilidades `dominioBase`, `tamanoDir`, `formatoTamano`, `etiquetaPermiso`, `textoRestante` como funciones de paquete.
+- **`Dialogos.kt`:** confirmar y elegir con el diseño de las hojas (los usa el centro de privacidad). `Hoja` gana chips, encabezado y párrafo.
