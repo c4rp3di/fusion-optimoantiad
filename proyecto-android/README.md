@@ -569,3 +569,15 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - **Hojas para escribir** (`Dialogos.texto`): todos los diálogos de texto (nombre de carpeta, colores de inicio, filtros de enlaces, rastreo, número…) usan ahora la hoja inferior; el formulario de marcador (nombre, dirección, carpeta) también, con selector de carpeta en árbol. `Dialogos.acciones` para menús de elementos.
 - `Hoja` gana campo de texto, zonas rellenables (la búsqueda filtra sin repintar), filas de lista con selección y pulsación larga, barra de acciones y tarjeta de estado.
 - `MainActivity` baja a 5.824 líneas (–366 en esta versión).
+
+## 1.29.0 — Gestor de pestañas, Aspecto y su interfaz en el panel lateral
+
+- **Gestor de pestañas** (`GestorPestanas.kt`), pensado para muchas pestañas: filtros (Todas, Sonando, Dormidas, Privadas, Duplicadas) con su cuenta, búsqueda, lista **agrupada por sitio** (plegable, con «Cerrar grupo») o plana, y vista de **cuadrícula**. Cada fila muestra sitio, tiempo desde el último uso y si suena, está dormida o es privada. Mantén pulsado para elegir varias: marcar, dormir, cerrar, elegir todas. Menú por pestaña: silenciar, marcadores, copiar, compartir, dormir, cerrar las demás del sitio. «Cerrar repetidas», «Cerrar las dormidas» y «Cerrar todas» en «⋯». Conserva nueva, privada y pestañas cerradas.
+- **Aspecto** (`Aspecto.kt`), ahora un panel con lo que más se usa arriba:
+  - **Ocultar un elemento** a un toque (y como primer botón de los accesos rápidos del menú), más «Quitar capa», «Oscuro aquí» y «Ocultos (N)» del sitio.
+  - **Texto y zoom:** deslizador del tamaño del texto con vista previa, para «Solo este sitio» (gana al general) o «Todos los sitios», con «Restablecer»; zoom con los dedos forzado.
+  - **Visibilidad:** oscurecer páginas, **alto contraste** y **reducir animaciones** (nuevos), ahorro de datos.
+  - **Accesos rápidos del menú** editables (hasta 8, 14 posibles, en el orden que quieras).
+- **Barra de direcciones y Pantalla de inicio dentro del mismo panel** (adiós a los diálogos): la pantalla de inicio tiene **vista previa en vivo**, selector de colores, título, subtítulo, buscador, accesos propios, escudo y enlace al pie.
+- Nuevos ajustes (incluidos en la copia de seguridad): tamaño del texto general y por sitio, zoom forzado, alto contraste, reducir animaciones y accesos del menú. El tamaño por sitio cuenta como ajuste propio (se ve en Datos por sitio y se restablece con él).
+- `MainActivity` baja a unas 5.600 líneas.
