@@ -143,3 +143,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Datos por sitio: contar el almacenamiento (localStorage, IndexedDB) cuando el sitio esté abierto y mostrar su tamaño en la lista; búsqueda por nombre.
 - Copia de seguridad: incluir `BarraConfig` y las estadísticas.
 - Siguiente categoría a aligerar de `MainActivity`: Protección (pausa, muros, bloquear sitio, dominios propios, listas y técnicas).
+
+## Apuntado en 1.28.0
+- Quedan unos 35 usos de `nuevoDialogo()` (confirmaciones y mensajes sueltos) por pasar a `Dialogos.confirmar` / hojas propias.
+- Pantallas con diseño propio pendiente: Reglas de usuario, Dominios propios, Ajustes de medios, Lectura y voz, Pantalla de inicio (con vista previa), Descargas (propias, si se deja el gestor del sistema).
+- Guardados: arrastrar para reordenar marcadores, exportar/importar una carpeta, detectar enlaces rotos o duplicados, favicon real.
+- Protección: pausa temporal del bloqueo en todos los sitios (1 h), registro de lo bloqueado por página, exportar estadísticas.
