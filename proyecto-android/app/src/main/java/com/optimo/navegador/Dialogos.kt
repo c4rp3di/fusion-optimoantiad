@@ -72,4 +72,29 @@ object Dialogos {
         }
         h.mostrar()
     }
+
+    /**
+     * Lista de opciones para algo elegido en la página: se coloca arriba si [arriba] y apenas oscurece la página; [alCancelar]
+     * se llama si se cierra sin elegir.
+     */
+    fun elegirEnPagina(
+        act: Activity, paleta: Paleta, privada: Boolean, titulo: String, opciones: List<String>, arriba: Boolean,
+        alCancelar: () -> Unit, alElegir: (Int) -> Unit
+    ) {
+        val h = Hoja(act, paleta, privada)
+        h.atenuar(0.12f)
+        if (arriba) h.anclarArriba()
+        var elegido = false
+        h.encabezado(titulo)
+        for ((i, o) in opciones.withIndex()) {
+            h.fila(o) {
+                elegido = true
+                h.cerrar()
+                alElegir(i)
+            }
+        }
+        h.boton("Cancelar") { h.cerrar() }
+        h.alCerrar { if (!elegido) alCancelar() }
+        h.mostrar()
+    }
 }
