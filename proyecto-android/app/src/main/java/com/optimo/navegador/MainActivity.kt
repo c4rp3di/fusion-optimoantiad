@@ -3635,6 +3635,9 @@ class MainActivity : Activity() {
         b.show()
     }
 
+    /** Cambios de apariencia listos para usar sobre el elemento elegido; «§» se sustituye por su selector. */
+)
+
     // ---------------------------------------------------------------- ajustes de lectura y voz
 
     private fun factor(v: Int): String = String.format(java.util.Locale.getDefault(), "%.1f×", v / 100.0)
