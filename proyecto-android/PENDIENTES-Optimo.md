@@ -156,3 +156,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Quedan unos 30 usos de `nuevoDialogo()` por pasar a hojas; Reglas de usuario, Dominios propios, Ajustes de medios y Lectura y voz con diseño propio.
 - `BarraConfig` y las estadísticas de bloqueo aún no entran en la copia de seguridad.
 - Gestor de pestañas: arrastrar para reordenar, fijar pestañas, grupos con nombre y color.
+
+## Apuntado en 1.30.0
+- **Miniaturas de pestañas** (ya apuntado): ahora que los menús y confirmaciones son propios, es el siguiente paso.
+- Pasar la lista de enlaces encontrados (`mostrarEnlaces`, con `ListView`) y las herramientas de desarrollo (`PanelDev`, `VistaAuditoria`) a paneles propios; después `nuevoDialogoNativo` desaparece.
+- Flujo de ocultar con un toque: hoja de alcance (siempre / solo esta vez / todos los sitios) y «Ver y editar el selector».
+- Ajustes de «Pantalla completa» y atajos de gestos en un panel propio, si hacen falta.
