@@ -30,7 +30,7 @@ class PanelProteccion(
     private val g: AnfitrionProteccion,
     private val p: Pestana
 ) {
-    private val hoja = Hoja(act, paleta, p.privada)
+    private val hoja = Hoja(act, paleta, p.privada, true)
     private val host = ReglasUsuario.clave(Omnibox.hostDe(p.url))
 
     fun mostrar() {
@@ -55,11 +55,8 @@ class PanelProteccion(
             EstadoEscudo.NO_APLICA -> "Nada que bloquear en esta página"
         }
         val colorSub = if (estado == EstadoEscudo.ACTIVO) paleta.seguro else if (estado == EstadoEscudo.NO_APLICA) paleta.tenue else paleta.advertencia
-        val ajustesBtn = hoja.botonIcono("⚙") {
-            hoja.cerrar()
-            g.abrirCentro()
-        }
-        hoja.cabecera(icono, if (host.isEmpty()) "Esta página" else host, sub, colorSub, ajustesBtn)
+        val cerrarBtn = hoja.botonIcono("✕") { hoja.cerrar() }
+        hoja.cabecera(icono, if (host.isEmpty()) "Esta página" else host, sub, colorSub, cerrarBtn)
 
         if (!p.privada) {
             hoja.interruptor(
