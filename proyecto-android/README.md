@@ -581,3 +581,11 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - **Barra de direcciones y Pantalla de inicio dentro del mismo panel** (adiós a los diálogos): la pantalla de inicio tiene **vista previa en vivo**, selector de colores, título, subtítulo, buscador, accesos propios, escudo y enlace al pie.
 - Nuevos ajustes (incluidos en la copia de seguridad): tamaño del texto general y por sitio, zoom forzado, alto contraste, reducir animaciones y accesos del menú. El tamaño por sitio cuenta como ajuste propio (se ve en Datos por sitio y se restablece con él).
 - `MainActivity` baja a unas 5.600 líneas.
+
+## 1.30.0 — Ajustes en el panel lateral y sin diálogos nativos
+
+- **Ajustes y pantallas de gestión, en el panel lateral** (no en la hoja inferior): el panel del escudo, las listas de opciones (`opciones()`), las listas de casillas y de elección de los antiguos diálogos, y las pantallas nuevas de abajo. La hoja inferior queda solo para avisos breves: confirmar, escribir un texto y elegir una acción de un elemento.
+- **Ya no queda ningún `AlertDialog` propio** salvo dos: la lista de enlaces encontrados (lleva un `ListView` con adaptador) y las herramientas de desarrollo. `nuevoDialogo()` devuelve ahora `DialogoHoja`, un sustituto con los mismos métodos que se dibuja con el diseño de las hojas (listas y casillas en el panel lateral; confirmar y escribir en hoja inferior).
+- **Bloqueo** (`PanelBloqueo.kt`): listas de bloqueo con interruptores por lista, «Aplicar cambios y actualizar», listas propias, actualizar solo con Wi-Fi; técnicas contra anuncios con interruptores que se aplican al momento; **reglas** con búsqueda, agrupadas en ocultar elementos, estilos y dominios permitidos, y quitar con confirmación; dominios bloqueados a mano con añadir, desbloquear uno o todos.
+- **Multimedia** (`PanelMultimedia.kt`): enlaces multimedia y magnets, reproducción en segundo plano y suspensión de pestañas, y lectura y voz (voz, tono, tamaño, fondo, tipo de letra e interlineado) con listas de elección en lugar de ciclar valores.
+- `MainActivity` baja a unas 5.400 líneas.
