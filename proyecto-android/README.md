@@ -609,3 +609,7 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - Al ocultar, el aviso dice dónde deshacerlo (Personalizar este sitio › Reglas). El flujo de tocar un anuncio (menú del escudo) usa la misma hoja.
 - La lista de apariencias también se coloca arriba y apenas oscurece la página; cancelar siempre quita el resaltado.
 - `Hoja` gana `atenuar` y `anclarArriba`; `Dialogos.elegirEnPagina`.
+
+## 1.32.1 — Corrección de compilación
+
+- Quitado un resto en `MainActivity.kt` (un comentario y un `)` sueltos que quedaron al sacar la lista de apariencias a `ElementosPagina`) que impedía compilar con «Expecting member declaration».
