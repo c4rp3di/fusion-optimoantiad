@@ -3497,7 +3497,7 @@ class MainActivity : Activity() {
                 p.eligiendo = false
                 if (p.eligiendoElemento) {
                     p.eligiendoElemento = false
-                    elegirElemento(v, p, ev.x, ev.y, 0)
+                    elementos.elegir(v, p, ev.x, ev.y, 0)
                 } else {
                     bloquearAnuncio(v, p, null, ev.x, ev.y)
                 }
@@ -3543,46 +3543,8 @@ class MainActivity : Activity() {
                 toast("No he encontrado un anuncio ahí. Prueba «Bloquear un anuncio (tocar)» en el menú")
                 return@evaluateJavascript
             }
-            ofrecerReglas(web, p, imagen, datos)
+            elementos.ofrecerAnuncio(web, p, imagen, datos, x, y)
         }
-    }
-
-    private fun ofrecerReglas(web: WebView, p: Pestana, imagen: String?, d: org.json.JSONObject) {
-        val paginaHost = (try { Uri.parse(web.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
-        val sel = d.optString("sel")
-        if (paginaHost.isEmpty() || sel.isEmpty()) {
-            toast("No se pudo crear la regla para esta página")
-            return
-        }
-        var dom = d.optString("dom").lowercase().removePrefix("www.")
-        if (dom.isEmpty() && imagen != null) {
-            dom = (try { Uri.parse(imagen).host } catch (e: Exception) { null } ?: "").lowercase().removePrefix("www.")
-        }
-        // Nunca se ofrece bloquear el propio dominio de la página (o uno emparentado): rompería el sitio entero.
-        val propio = dom.isEmpty() || dom == paginaHost || paginaHost.endsWith(".$dom") || dom.endsWith(".$paginaHost") ||
-            UtilDominio.normalizar(dom) == null
-        val sitio = ReglasUsuario.clave(paginaHost)
-        val n = d.optInt("n", 1)
-        val etiquetas = ArrayList<String>()
-        etiquetas.add("Ocultar en $sitio (" + d.optString("tag") + " " + d.optInt("w") + "×" + d.optInt("h") +
-            (if (n > 1) ", $n elementos" else "") + ")\n" + sel)
-        if (!propio) etiquetas.add("Bloquear el dominio $dom en todas partes")
-        val marcadas = BooleanArray(etiquetas.size) { i -> i == 0 }
-        nuevoDialogo()
-            .setTitle("Bloquear este anuncio")
-            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
-            .setPositiveButton("Añadir") { _, _ ->
-                var hecho = false
-                if (marcadas[0] && ReglasUsuario.agregarOcultar(sitio, sel)) {
-                    hecho = true
-                    reinstalarAnuncios()
-                    anuncios.aplicarAhora(web, paginaHost)
-                }
-                if (marcadas.size > 1 && marcadas[1] && ReglasUsuario.agregarDominio(dom)) hecho = true
-                toast(if (hecho) "Regla añadida. Recarga la página para ver el efecto completo" else "No se añadió nada")
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
     }
 
     // ---------------------------------------------------------------- personalizar un sitio: elegir elementos y estilos
@@ -3604,6 +3566,24 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private val anfitrionElementos = object : AnfitrionElementos {
+        override fun scriptElemento(x: Float, y: Float, nivel: Int): String = anuncios.scriptElemento(x, y, nivel)
+
+        @Suppress("DEPRECATION")
+        override fun escala(web: WebView): Float = if (web.scale > 0f) web.scale else resources.displayMetrics.density
+
+        override fun aplicarReglas(web: WebView, host: String) = anuncios.aplicarAhora(web, host)
+        override fun aplicarCss(web: WebView, css: String) = anuncios.aplicarCssAhora(web, css)
+        override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
+
+        override fun editarCss(titulo: String, inicial: String, pista: String, conAyuda: Boolean, alGuardar: (String) -> Unit) =
+            this@MainActivity.editarCss(titulo, inicial, pista, conAyuda, alGuardar)
+
+        override fun avisar(texto: String) = toast(texto)
+    }
+
+    private val elementos by lazy { ElementosPagina(this, paleta, anfitrionElementos) }
 
     private val anfitrionSitio = object : AnfitrionSitio {
         override fun recargar(p: Pestana, sitio: String) {
@@ -3655,114 +3635,8 @@ class MainActivity : Activity() {
         b.show()
     }
 
-    private fun quitarMarca(web: WebView) {
-        web.evaluateJavascript(
-            "(function(){var m=window.__optimoMarca;if(m){try{m.el.style.outline=m.o;m.el.style.outlineOffset=m.oo;}catch(e){}window.__optimoMarca=null;}})()",
-            null
-        )
-    }
-
-    /** Identifica el elemento en (x, y) —píxeles de pantalla—, subiendo [nivel] contenedores, y ofrece qué hacer con él. */
-    @Suppress("DEPRECATION")
-    private fun elegirElemento(web: WebView, p: Pestana, x: Float, y: Float, nivel: Int) {
-        val escala = if (web.scale > 0f) web.scale else resources.displayMetrics.density
-        web.evaluateJavascript(anuncios.scriptElemento(x / escala, y / escala, nivel)) { crudo ->
-            var datos: org.json.JSONObject? = null
-            try {
-                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
-                if (v is String) datos = org.json.JSONObject(v)
-            } catch (e: Exception) {
-                datos = null
-            }
-            if (datos == null) {
-                toast("No he podido seleccionar nada ahí")
-            } else {
-                mostrarElemento(web, p, x, y, nivel, datos)
-            }
-        }
-    }
-
-    private fun mostrarElemento(web: WebView, p: Pestana, x: Float, y: Float, nivel: Int, d: org.json.JSONObject) {
-        val paginaHost = (try { Uri.parse(web.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
-        val sel = d.optString("sel")
-        if (paginaHost.isEmpty() || sel.isEmpty()) {
-            quitarMarca(web)
-            toast("No se pudo crear la regla para esta página")
-            return
-        }
-        val sitio = ReglasUsuario.clave(paginaHost)
-        val n = d.optInt("n", 1)
-        val texto = d.optString("texto")
-        val cabecera = d.optString("tag") + " " + d.optInt("w") + "×" + d.optInt("h") +
-            (if (n > 1) " · coincide con $n elementos" else "") + (if (texto.isNotEmpty()) "\n«" + texto + "»" else "")
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Ocultar este elemento") {
-            quitarMarca(web)
-            if (ReglasUsuario.agregarOcultar(sitio, sel)) {
-                reinstalarAnuncios()
-                anuncios.aplicarAhora(web, paginaHost)
-                toast("Elemento oculto en $sitio")
-            } else {
-                toast("Ya estaba oculto")
-            }
-        }
-        add("Cambiar su apariencia…") { mostrarApariencia(web, sitio, sel) }
-        if (d.optBoolean("hayPadre")) add("Elegir el contenedor ▲") { elegirElemento(web, p, x, y, nivel + 1) }
-        if (nivel > 0) add("Elegir uno más pequeño ▼") { elegirElemento(web, p, x, y, nivel - 1) }
-        val b = nuevoDialogo()
-            .setTitle(cabecera)
-            .setItems(Array(items.size) { i -> items[i].first }) { _, i -> items[i].second() }
-            .setNegativeButton("Cancelar") { _, _ -> quitarMarca(web) }
-            .setOnCancelListener { quitarMarca(web) }
-        b.show()
-    }
-
     /** Cambios de apariencia listos para usar sobre el elemento elegido; «§» se sustituye por su selector. */
-    private val APARIENCIAS = listOf(
-        Pair("Ampliar un 25 %", "§{zoom:1.25!important}"),
-        Pair("Reducir al 80 %", "§{zoom:.8!important}"),
-        Pair("Texto más grande", "§{font-size:130%!important}"),
-        Pair("Fondo oscuro, texto claro", "§,§ *{background:#121212!important;color:#e8e8e8!important;border-color:#444!important}"),
-        Pair("Fondo claro, texto oscuro", "§,§ *{background:#ffffff!important;color:#202124!important}"),
-        Pair("Quitar fondos e imágenes de fondo", "§,§ *{background:none!important}"),
-        Pair("Ancho completo", "§{width:100%!important;max-width:100%!important;margin-left:0!important;margin-right:0!important}"),
-        Pair("Semitransparente (30 %)", "§{opacity:.3!important}"),
-        Pair("Soltarlo de la pantalla (barras fijas)", "§{position:static!important}"),
-        Pair("Quitar sombras y bordes", "§{box-shadow:none!important;border:none!important;text-shadow:none!important}")
-    )
-
-    private fun mostrarApariencia(web: WebView, sitio: String, sel: String) {
-        val nombres = ArrayList<String>()
-        for (a in APARIENCIAS) nombres.add(a.first)
-        nombres.add("Escribir CSS propio…")
-        fun guardar(nombre: String, css: String) {
-            quitarMarca(web)
-            if (ReglasUsuario.agregarCss(sitio, nombre + ": " + sel, css)) {
-                reinstalarAnuncios()
-                anuncios.aplicarCssAhora(web, css)
-                toast("Aplicado en $sitio. Se mantendrá en tus visitas")
-            } else {
-                toast("No se añadió (ya existía o es demasiado largo)")
-            }
-        }
-        nuevoDialogo()
-            .setTitle("Apariencia del elemento")
-            .setItems(nombres.toTypedArray()) { _, i ->
-                if (i < APARIENCIAS.size) {
-                    guardar(APARIENCIAS[i].first, APARIENCIAS[i].second.replace("§", sel))
-                } else {
-                    editarCss("CSS del elemento", sel + " {\n  \n}", "propiedad: valor !important;", false) { css ->
-                        guardar("CSS propio", css)
-                    }
-                }
-            }
-            .setNegativeButton("Cancelar") { _, _ -> quitarMarca(web) }
-            .setOnCancelListener { quitarMarca(web) }
-            .show()
-    }
+)
 
     // ---------------------------------------------------------------- ajustes de lectura y voz
 
