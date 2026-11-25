@@ -600,3 +600,12 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
   - **Cambios pendientes:** los ajustes que necesitan recargar ya no recargan la página a cada toque; se acumulan en un único aviso «Recargar».
   - **Pie:** datos del sitio y «Restablecer ajustes de este sitio» (conserva reglas, CSS y permisos).
 - `Hoja` gana control segmentado, insignias y aviso de cambios pendientes.
+
+## 1.32.0 — Elegir un elemento de la página, rediseñado
+
+- **Selector de elementos** (`ElementosPagina.kt`) sale de `MainActivity` (–126 líneas). Al tocar un elemento, la página **sigue a la vista** con el elemento resaltado en naranja y una hoja pequeña —que se coloca **arriba si el elemento está en la mitad baja** para no taparlo— muestra qué es (etiqueta, tamaño y el principio de su texto) y avisa si el selector coincide con varios elementos o con ninguno.
+- Opciones en orden de uso: **Ocultar siempre en el sitio**, **Ocultar solo ahora** (nuevo, hasta recargar), **Cambiar su apariencia…**, **Bloquear su origen** (si es un recurso de otro dominio) y **Ver y editar el selector** (nuevo: se puede retocar a mano y comprueba cuántos elementos coincide).
+- **Más grande / Más pequeño**: botones para subir al contenedor o bajar al elemento, con la hoja actualizándose en el sitio (antes había que repetir el toque).
+- Al ocultar, el aviso dice dónde deshacerlo (Personalizar este sitio › Reglas). El flujo de tocar un anuncio (menú del escudo) usa la misma hoja.
+- La lista de apariencias también se coloca arriba y apenas oscurece la página; cancelar siempre quita el resaltado.
+- `Hoja` gana `atenuar` y `anclarArriba`; `Dialogos.elegirEnPagina`.
