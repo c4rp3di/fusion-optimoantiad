@@ -589,3 +589,14 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - **Bloqueo** (`PanelBloqueo.kt`): listas de bloqueo con interruptores por lista, «Aplicar cambios y actualizar», listas propias, actualizar solo con Wi-Fi; técnicas contra anuncios con interruptores que se aplican al momento; **reglas** con búsqueda, agrupadas en ocultar elementos, estilos y dominios permitidos, y quitar con confirmación; dominios bloqueados a mano con añadir, desbloquear uno o todos.
 - **Multimedia** (`PanelMultimedia.kt`): enlaces multimedia y magnets, reproducción en segundo plano y suspensión de pestañas, y lectura y voz (voz, tono, tamaño, fondo, tipo de letra e interlineado) con listas de elección en lugar de ciclar valores.
 - `MainActivity` baja a unas 5.400 líneas.
+
+## 1.31.0 — Personalizar este sitio como panel
+
+- **Personalizar este sitio** (`PersonalizarSitio.kt`) sale de `MainActivity` y pasa a ser un panel lateral. Cada ajuste se elige directamente, sin ciclar valores a ciegas:
+  - **Ver la página:** versión de escritorio (interruptor), modo oscuro (Auto · Siempre · Nunca), imágenes (Según ajustes · Siempre · Nunca) y tamaño del texto del sitio con deslizador y «Usar el tamaño general».
+  - **Qué se permite:** bloqueo de anuncios, ventanas emergentes (Ajustes · Normal · Estricto · Todas), cookies de terceros (Ajustes · Permitir · Bloquear) y no suspender por inactividad.
+  - **Elementos:** ocultar o cambiar un elemento tocándolo, quitar capa, las reglas del sitio (con las tres primeras para quitarlas ahí mismo) y CSS propio (con su número de líneas).
+  - **Resumen arriba:** insignias con los ajustes propios, las reglas y si hay CSS propio.
+  - **Cambios pendientes:** los ajustes que necesitan recargar ya no recargan la página a cada toque; se acumulan en un único aviso «Recargar».
+  - **Pie:** datos del sitio y «Restablecer ajustes de este sitio» (conserva reglas, CSS y permisos).
+- `Hoja` gana control segmentado, insignias y aviso de cambios pendientes.
