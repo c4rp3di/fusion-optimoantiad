@@ -876,7 +876,7 @@ class MainActivity : Activity() {
         // Herramientas de desarrollo: panel acoplado bajo la página (oculto hasta abrirlo desde el menú)
         herramientas = PanelDev(
             this, paleta, ajustes, agenteDev, contenedor,
-            { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogo() },
+            { actual?.web }, { actual }, { w -> gestorCookies(w) }, { nuevoDialogoNativo() },
             { t -> toast(t) }, { t -> copiar(t) }, { reinstalarDev() },
             { modo, a, b -> reglaDevTools(modo, a, b) },
             { actual?.let { abrirModoLectura(it) } },
@@ -1341,7 +1341,10 @@ class MainActivity : Activity() {
     }
 
     /** Los diálogos son ventanas aparte: si hay pestañas privadas abiertas (p. ej. el selector de pestañas) también son seguros. */
-    private fun nuevoDialogo(): AlertDialog.Builder {
+    private fun nuevoDialogo(): DialogoHoja = DialogoHoja(this, paleta, hayPrivadas())
+
+    /** El diálogo nativo del sistema: solo para los que llevan listas con adaptador o los que reciben otras clases. */
+    private fun nuevoDialogoNativo(): AlertDialog.Builder {
         val tema = if (paleta.oscuro) android.R.style.Theme_Material_Dialog_Alert
         else android.R.style.Theme_Material_Light_Dialog_Alert
         return object : AlertDialog.Builder(this@MainActivity, tema) {
@@ -1354,8 +1357,8 @@ class MainActivity : Activity() {
     }
 
     private fun opciones(titulo: String?, items: List<Pair<String, () -> Unit>>) {
-        val h = Hoja(this, paleta, actual?.privada == true)
-        if (titulo != null) h.titulo(titulo)
+        val h = Hoja(this, paleta, actual?.privada == true, true)
+        h.barraTitulo(titulo ?: "Opciones", null) { h.cerrar() }
         for (par in items) {
             h.fila(par.first) {
                 h.cerrar()
@@ -2417,38 +2420,49 @@ class MainActivity : Activity() {
         Dialogos.texto(this, paleta, actual?.privada == true, titulo, inicial, true) { t -> alAceptar(t.take(80)) }
     }
 
-    private fun mostrarSegundoPlano() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Al cambiar de pestaña con audio: " + NOMBRES_AUDIO_PESTANAS[ajustes.audioPestanas]) {
-            ajustes.audioPestanas = (ajustes.audioPestanas + 1) % 3
-            mostrarSegundoPlano()
-        }
-        add("Suspender pestañas inactivas: " + nombreSuspension(ajustes.suspenderMin)) {
-            ajustes.suspenderMin = when (ajustes.suspenderMin) {
-                0 -> 15
-                15 -> 30
-                30 -> 60
-                else -> 0
-            }
-            mostrarSegundoPlano()
-        }
-        add("Seguir sonando con la pantalla bloqueada: " + si(ajustes.segundoPlano)) {
-            ajustes.segundoPlano = !ajustes.segundoPlano
+    private fun abrirMultimedia(pagina: String) {
+        PanelMultimedia(this, paleta, ajustes, anfitrionMultimedia, pagina).mostrar()
+    }
+
+    private fun mostrarAjustesMedia() = abrirMultimedia(PanelMultimedia.MEDIA)
+    private fun mostrarSegundoPlano() = abrirMultimedia(PanelMultimedia.SEGUNDO_PLANO)
+    private fun mostrarAjustesLectura() = abrirMultimedia(PanelMultimedia.LECTURA)
+
+    private val anfitrionMultimedia = object : AnfitrionMultimedia {
+        override fun descripcionMedia(magnet: Boolean): String = descripcionModoMedia(magnet)
+        override fun elegirModoMedia(magnet: Boolean) = this@MainActivity.elegirModoMedia(magnet)
+        override fun nombresAudioPestanas(): List<String> = NOMBRES_AUDIO_PESTANAS
+        override fun nombreSuspension(min: Int): String = this@MainActivity.nombreSuspension(min)
+
+        override fun fijarSegundoPlano(activo: Boolean) {
+            ajustes.segundoPlano = activo
             for (q in pestanas) q.web?.let { aplicarFondo(it) }
-            if (ajustes.segundoPlano) pedirPermisoNotificaciones()
+            if (activo) pedirPermisoNotificaciones()
             reinstalarAnuncios()
             toast("Recarga la página de YouTube para aplicarlo")
-            mostrarSegundoPlano()
         }
-        add("Imagen en imagen al salir (vídeo a pantalla completa): " + si(ajustes.pip)) {
-            ajustes.pip = !ajustes.pip
-            mostrarSegundoPlano()
+
+        override fun abrirBateria() = abrirAjustesBateria()
+
+        override fun probarVoz() {
+            configurarVoz()
+            lector.alTerminar = { }
+            lector.leer("Hola. Así suena la lectura en voz alta de Optimo.", "")
         }
-        add("Batería de Optimo («Sin restricciones»)…") { abrirAjustesBateria() }
-        opciones("Reproducción en segundo plano", items)
+
+        override fun abrirAjustesVoz() {
+            try {
+                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
+            } catch (e: Exception) {
+                try {
+                    startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
+                } catch (e2: Exception) {
+                    toast("No se pudieron abrir los ajustes de voz")
+                }
+            }
+        }
+
+        override fun volverAlMenu() = abrirMenuLateral()
     }
 
     private fun abrirAjustesBateria() {
@@ -2462,73 +2476,31 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun mostrarListas() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
+    private fun abrirBloqueo(pagina: String, sitio: String? = null) {
+        PanelBloqueo(this, paleta, ajustes, anfitrionBloqueo, pagina, sitio).mostrar()
+    }
+
+    private fun mostrarListas() = abrirBloqueo(PanelBloqueo.LISTAS)
+    private fun elegirTecnicasAnuncios() = abrirBloqueo(PanelBloqueo.TECNICAS)
+    private fun mostrarDominiosPropios() = abrirBloqueo(PanelBloqueo.DOMINIOS)
+    private fun mostrarReglasUsuario(sitio: String? = null) = abrirBloqueo(PanelBloqueo.REGLAS, sitio)
+
+    private val anfitrionBloqueo = object : AnfitrionBloqueo {
+        override fun actualizarListas(forzarCompilar: Boolean) = this@MainActivity.actualizarListas(forzarCompilar)
+
+        override fun aplicarTecnicas() {
+            reinstalarAnuncios()
+            toast("Recarga la página para aplicar los cambios")
         }
-        add("Mis dominios bloqueados (" + ReglasUsuario.listaDominios().size + ")…") { mostrarDominiosPropios() }
-        add("Elegir listas…") { elegirListas() }
-        add("Añadir lista por URL (https)…") { anadirLista() }
-        add("Actualizar ahora") { actualizarListas(false) }
-        add("Actualizar solo con Wi-Fi: " + si(ajustes.soloWifi)) {
-            ajustes.soloWifi = !ajustes.soloWifi
-            mostrarListas()
-        }
-        if (ajustes.propias().isNotEmpty()) add("Quitar una lista añadida…") { quitarLista() }
-        opciones(ListasManager.resumen(), items)
+
+        override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
+        override fun avisar(texto: String) = toast(texto)
+        override fun volverAProteccion() = abrirCentro()
     }
 
     private fun actualizarListas(forzarCompilar: Boolean) {
         toast("Actualizando listas…")
         ListasManager.actualizarAsync(forzarCompilar) { mensaje -> toast(mensaje) }
-    }
-
-    private fun elegirListas() {
-        val todas = ListasManager.todas()
-        val nombres = Array(todas.size) { i -> todas[i].nombre + " · " + todas[i].tam }
-        val activas = ajustes.listasActivas()
-        val marcadas = BooleanArray(todas.size) { i -> activas.contains(todas[i].id) }
-        nuevoDialogo()
-            .setTitle("Listas de bloqueo")
-            .setMultiChoiceItems(nombres, marcadas) { _, i, v -> marcadas[i] = v }
-            .setPositiveButton("Aplicar") { _, _ ->
-                val nuevas = HashSet<String>()
-                for (i in todas.indices) if (marcadas[i]) nuevas.add(todas[i].id)
-                ajustes.ponerListasActivas(nuevas)
-                actualizarListas(true)
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun anadirLista() {
-        val campo = android.widget.EditText(this)
-        campo.hint = "https://…"
-        campo.setSingleLine(true)
-        nuevoDialogo()
-            .setTitle("Añadir lista por URL")
-            .setView(campo)
-            .setPositiveButton("Añadir") { _, _ ->
-                val lista = ajustes.agregarPropia(campo.text.toString())
-                if (lista == null) toast("URL no válida: debe empezar por https://")
-                else actualizarListas(true)
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun quitarLista() {
-        val propias = ajustes.propias()
-        val nombres = Array(propias.size) { i -> propias[i].nombre }
-        nuevoDialogo()
-            .setTitle("Quitar lista")
-            .setItems(nombres) { _, i ->
-                ajustes.quitarPropia(propias[i].id)
-                actualizarListas(true)
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
     }
 
     private fun reinstalarDev() {
@@ -2543,22 +2515,6 @@ class MainActivity : Activity() {
             val w = q.web
             if (w != null) anuncios.instalar(w)
         }
-    }
-
-    private fun elegirTecnicasAnuncios() {
-        val tecnicas = MotorAnuncios.TECNICAS
-        val nombres = Array(tecnicas.size) { i -> tecnicas[i].nombre }
-        val marcadas = BooleanArray(tecnicas.size) { i -> ajustes.tecnica(tecnicas[i].id) }
-        nuevoDialogo()
-            .setTitle("Técnicas contra anuncios")
-            .setMultiChoiceItems(nombres, marcadas) { _, i, v -> marcadas[i] = v }
-            .setPositiveButton("Aplicar") { _, _ ->
-                for (i in tecnicas.indices) ajustes.ponerTecnica(tecnicas[i].id, marcadas[i])
-                reinstalarAnuncios()
-                toast("Recarga la página para aplicar los cambios")
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
     }
 
     private fun elegirMotor() {
@@ -2597,7 +2553,7 @@ class MainActivity : Activity() {
     private var enlacesDeRastreo = false
     private var rastreador: Rastreador? = null
     private var ultimoRastreo: ResultadoRastreo? = null
-    private var dialogoRastreo: AlertDialog? = null
+    private var dialogoRastreo: DialogoHoja? = null
 
     /** Extrae los enlaces de la página abierta con `assets/enlaces/extraer.js` y los muestra clasificados. Solo mira esta página. */
     private fun buscarEnlaces(p: Pestana) {
@@ -2723,7 +2679,7 @@ class MainActivity : Activity() {
         val cabecera = (if (filtro != null) filtro.etiqueta + ": " else "") + visibles.size + " enlaces" +
             (if (ocultos > 0) " (" + ocultos + " de otros sitios ocultos)" else "")
         vista.setOnItemClickListener { _, _, i, _ -> menuEnlace(p, visibles[i]) }
-        nuevoDialogo()
+        nuevoDialogoNativo()
             .setTitle(cabecera)
             .setView(vista)
             .setPositiveButton("Más") { _, _ ->
@@ -3139,66 +3095,6 @@ class MainActivity : Activity() {
             }))
         }
         opciones("Desbloquear este sitio", items)
-    }
-
-    /** Listas de bloqueo › «Mis dominios bloqueados»: los que has bloqueado tú, para desbloquearlos o añadir más. */
-    private fun mostrarDominiosPropios() {
-        val lista = ReglasUsuario.listaDominios()
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        for (d in lista) {
-            items.add(Pair<String, () -> Unit>("🚫 " + d, { confirmarDesbloqueo(d) }))
-        }
-        items.add(Pair<String, () -> Unit>("➕ Añadir dominio…", { anadirDominioPropio() }))
-        if (lista.isNotEmpty()) items.add(Pair<String, () -> Unit>("Desbloquear todos…", { confirmarDesbloquearTodos() }))
-        val pie = if (lista.isEmpty()) "\nAún no has bloqueado ninguno" else "\nToca uno para desbloquearlo"
-        opciones("Mis dominios bloqueados (" + lista.size + ")" + pie, items)
-    }
-
-    private fun confirmarDesbloqueo(d: String) {
-        nuevoDialogo()
-            .setTitle("Desbloquear " + d)
-            .setMessage("Volverá a poder cargarse, salvo que lo bloquee una de las listas activas.")
-            .setPositiveButton("Desbloquear") { _, _ ->
-                ReglasUsuario.quitarDominio(d)
-                toast("Desbloqueado: " + d)
-                mostrarDominiosPropios()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
-            .setOnCancelListener { mostrarDominiosPropios() }
-            .show()
-    }
-
-    private fun anadirDominioPropio() {
-        val campo = android.widget.EditText(this)
-        campo.hint = "ejemplo.com"
-        campo.setSingleLine(true)
-        nuevoDialogo()
-            .setTitle("Bloquear un dominio")
-            .setView(campo)
-            .setPositiveButton("Bloquear") { _, _ ->
-                val n = UtilDominio.normalizar(campo.text.toString())?.removePrefix("www.")
-                if (n != null && ReglasUsuario.agregarDominio(n)) toast("Bloqueado: " + n)
-                else toast("Dominio no válido o ya estaba bloqueado")
-                mostrarDominiosPropios()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
-            .setOnCancelListener { mostrarDominiosPropios() }
-            .show()
-    }
-
-    private fun confirmarDesbloquearTodos() {
-        val n = ReglasUsuario.listaDominios().size
-        nuevoDialogo()
-            .setTitle("Desbloquear todos")
-            .setMessage("Se quitarán tus " + n + " dominios bloqueados. Las reglas de ocultar elementos y de estilo no cambian.")
-            .setPositiveButton("Desbloquear") { _, _ ->
-                for (d in ReglasUsuario.listaDominios()) ReglasUsuario.quitarDominio(d)
-                toast("Dominios desbloqueados")
-                mostrarDominiosPropios()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarDominiosPropios() }
-            .setOnCancelListener { mostrarDominiosPropios() }
-            .show()
     }
 
     // ---------------------------------------------------------------- excepciones de certificado
@@ -3689,39 +3585,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    private fun mostrarReglasUsuario(sitio: String? = null) {
-        val ocultar = ReglasUsuario.listaOcultar().filter { sitio == null || it.host == sitio }
-        val estilos = ReglasUsuario.listaCss().filter { sitio == null || it.host == sitio }
-        val dominios = if (sitio == null) ReglasUsuario.listaDominios() else emptyList()
-        val permisos = ReglasUsuario.listaPermisos().filter { sitio == null || it.sitio == sitio }
-        if (ocultar.isEmpty() && estilos.isEmpty() && dominios.isEmpty() && permisos.isEmpty()) {
-            toast("Aún no has añadido reglas")
-            return
-        }
-        val etiquetas = ArrayList<String>()
-        for (r in ocultar) etiquetas.add("Ocultar en " + r.host + ": " + r.sel)
-        for (r in estilos) etiquetas.add("Estilo en " + r.host + ": " + r.nombre)
-        for (dd in dominios) etiquetas.add("Bloquear dominio: $dd")
-        for (r in permisos) etiquetas.add("Permitir " + r.dominio + (if (r.sitio == ReglasUsuario.TODOS) " en todos los sitios" else " en " + r.sitio))
-        val marcadas = BooleanArray(etiquetas.size)
-        nuevoDialogo()
-            .setTitle(if (sitio == null) "Reglas añadidas (marca para borrar)" else "Reglas de $sitio (marca para borrar)")
-            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
-            .setPositiveButton("Borrar marcadas") { _, _ ->
-                var borradas = 0
-                for (i in ocultar.indices) if (marcadas[i]) { ReglasUsuario.quitarOcultar(ocultar[i]); borradas++ }
-                for (j in estilos.indices) if (marcadas[ocultar.size + j]) { ReglasUsuario.quitarCss(estilos[j]); borradas++ }
-                for (k in dominios.indices) if (marcadas[ocultar.size + estilos.size + k]) { ReglasUsuario.quitarDominio(dominios[k]); borradas++ }
-                for (m in permisos.indices) if (marcadas[ocultar.size + estilos.size + dominios.size + m]) { ReglasUsuario.quitarPermiso(permisos[m]); borradas++ }
-                if (borradas > 0) {
-                    reinstalarAnuncios()
-                    toast("$borradas regla(s) borradas. Recarga las páginas abiertas")
-                }
-            }
-            .setNegativeButton("Cerrar", null)
-            .show()
-    }
-
     // ---------------------------------------------------------------- personalizar un sitio: elegir elementos y estilos
 
     private fun mostrarPersonalizarSitio(p: Pestana) {
@@ -3935,81 +3798,6 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- ajustes de lectura y voz
 
     private fun factor(v: Int): String = String.format(java.util.Locale.getDefault(), "%.1f×", v / 100.0)
-
-    private fun elegirNumero(titulo: String, nombres: Array<String>, valores: IntArray, alElegir: (Int) -> Unit) {
-        nuevoDialogo()
-            .setTitle(titulo)
-            .setItems(nombres) { _, i ->
-                alElegir(valores[i])
-                mostrarAjustesLectura()
-            }
-            .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesLectura() }
-            .setOnCancelListener { mostrarAjustesLectura() }
-            .show()
-    }
-
-    /** Ajustes › Lectura y voz: voz del modo lectura y aspecto por defecto de la vista de lectura. */
-    private fun mostrarAjustesLectura() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Velocidad de la voz: " + factor(ajustes.vozVelocidad)) {
-            elegirNumero("Velocidad de la voz", arrayOf("0,6×", "0,8×", "1,0× (normal)", "1,2×", "1,5×", "2,0×"), intArrayOf(60, 80, 100, 120, 150, 200)) {
-                ajustes.vozVelocidad = it
-            }
-        }
-        add("Tono de la voz: " + factor(ajustes.vozTono)) {
-            elegirNumero("Tono de la voz", arrayOf("Grave (0,8×)", "Normal (1,0×)", "Agudo (1,2×)"), intArrayOf(80, 100, 120)) {
-                ajustes.vozTono = it
-            }
-        }
-        add("Probar la voz") {
-            configurarVoz()
-            lector.alTerminar = { }
-            lector.leer("Hola. Así suena la lectura en voz alta de Optimo.", "")
-            mostrarAjustesLectura()
-        }
-        add("Voz e idioma: ajustes de Android…") {
-            try {
-                startActivity(Intent("com.android.settings.TTS_SETTINGS"))
-            } catch (e: Exception) {
-                try {
-                    startActivity(Intent(android.provider.Settings.ACTION_SETTINGS))
-                } catch (e2: Exception) {
-                    toast("No se pudieron abrir los ajustes de voz")
-                }
-            }
-        }
-        add("Tamaño de letra del modo lectura: " + ajustes.lecturaTam) {
-            elegirNumero("Tamaño de letra", arrayOf("Pequeña (16)", "Normal (19)", "Grande (24)", "Muy grande (30)"), intArrayOf(16, 19, 24, 30)) {
-                ajustes.lecturaTam = it
-            }
-        }
-        val temas = arrayOf("Automático (según el modo del sistema)", "Claro", "Sepia", "Oscuro", "Negro")
-        val claves = arrayOf("", "claro", "sepia", "oscuro", "negro")
-        val temaActual = claves.indexOf(ajustes.lecturaTema).coerceAtLeast(0)
-        add("Fondo del modo lectura: " + temas[temaActual].substringBefore(" (")) {
-            nuevoDialogo()
-                .setTitle("Fondo del modo lectura")
-                .setItems(temas) { _, i ->
-                    ajustes.lecturaTema = claves[i]
-                    mostrarAjustesLectura()
-                }
-                .setNegativeButton("Cancelar") { _, _ -> mostrarAjustesLectura() }
-                .setOnCancelListener { mostrarAjustesLectura() }
-                .show()
-        }
-        add("Tipo de letra: " + (if (ajustes.lecturaFuente == "sans") "sin serifas" else "con serifas")) {
-            ajustes.lecturaFuente = if (ajustes.lecturaFuente == "sans") "serif" else "sans"
-            mostrarAjustesLectura()
-        }
-        add("Interlineado: " + arrayOf("compacto", "normal", "amplio")[ajustes.lecturaInter]) {
-            ajustes.lecturaInter = (ajustes.lecturaInter + 1) % 3
-            mostrarAjustesLectura()
-        }
-        opciones("Lectura y voz", items)
-    }
 
     // ---------------------------------------------------------------- excepciones de bloqueo (permitir dominios)
 
@@ -4375,7 +4163,7 @@ class MainActivity : Activity() {
 
     /** Diálogo con una fila por app (icono y nombre) y, opcionalmente, la casilla «Recordar mi elección». */
     private fun dialogoApps(titulo: String, filas: List<FilaApp>, conRecordar: Boolean) {
-        var dialogo: AlertDialog? = null
+        var dialogo: DialogoHoja? = null
         val casilla = CheckBox(this)
         casilla.text = "Recordar mi elección (se cambia en Ajustes)"
         casilla.textSize = 13f
@@ -4437,13 +4225,6 @@ class MainActivity : Activity() {
             1 -> if (magnet) "automático (Optimo Play si está instalada)" else "en el navegador"
             else -> "siempre en " + (AppsMedia.etiquetaDe(this, paquete) ?: "una app (no instalada: se preguntará)")
         }
-    }
-
-    private fun mostrarAjustesMedia() {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair("Vídeo, audio y torrents: " + descripcionModoMedia(false)) { elegirModoMedia(false) })
-        items.add(Pair("Enlaces magnet: " + descripcionModoMedia(true)) { elegirModoMedia(true) })
-        opciones("Enlaces multimedia, magnets y Mega", items)
     }
 
     private fun elegirModoMedia(magnet: Boolean) {
