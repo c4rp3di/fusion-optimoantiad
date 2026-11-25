@@ -63,6 +63,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     private val contenido = LinearLayout(act)
     private var cuandoCierra: (() -> Unit)? = null
     private var destino: LinearLayout = contenido
+    private val fondo = GradientDrawable()
 
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -72,7 +73,6 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         contenido.setPadding(dp(16), dp(if (lateral) 20 else 8), dp(16), dp(20))
         val raiz = LinearLayout(act)
         raiz.orientation = LinearLayout.VERTICAL
-        val fondo = GradientDrawable()
         fondo.setColor(paleta.barra)
         val r = dp(20).toFloat()
         fondo.cornerRadii = if (lateral) floatArrayOf(r, r, 0f, 0f, 0f, 0f, r, r) else floatArrayOf(r, r, r, r, 0f, 0f, 0f, 0f)
@@ -121,6 +121,18 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
 
     fun mostrar() {
         if (!act.isFinishing) dialogo.show()
+    }
+
+    /** Cuánto se oscurece la página detrás (0 = nada). Para ver lo que se está eligiendo en la página. */
+    fun atenuar(cantidad: Float) {
+        dialogo.window?.setDimAmount(cantidad)
+    }
+
+    /** Coloca la hoja arriba en vez de abajo (para no tapar un elemento elegido en la parte baja de la página). */
+    fun anclarArriba() {
+        val r = dp(20).toFloat()
+        fondo.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
+        dialogo.window?.setGravity(Gravity.TOP)
     }
 
     fun cerrar() {
