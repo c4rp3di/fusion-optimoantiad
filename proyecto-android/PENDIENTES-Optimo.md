@@ -162,3 +162,7 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Pasar la lista de enlaces encontrados (`mostrarEnlaces`, con `ListView`) y las herramientas de desarrollo (`PanelDev`, `VistaAuditoria`) a paneles propios; después `nuevoDialogoNativo` desaparece.
 - Flujo de ocultar con un toque: hoja de alcance (siempre / solo esta vez / todos los sitios) y «Ver y editar el selector».
 - Ajustes de «Pantalla completa» y atajos de gestos en un panel propio, si hacen falta.
+
+## Apuntado en 1.31.0
+- El flujo de elegir elementos (`ofrecerReglas`, `mostrarElemento`, `mostrarApariencia`, `mostrarMuros`, `quitarMuros`, ~250 líneas) sigue en `MainActivity`: sacarlo a `ElementosPagina.kt` con la hoja de alcance (siempre / solo esta vez / todos los sitios) y «Ver y editar el selector».
+- Las herramientas de desarrollo se quedan como están (decisión del usuario).
