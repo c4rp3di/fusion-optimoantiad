@@ -3590,76 +3590,45 @@ class MainActivity : Activity() {
     private fun mostrarPersonalizarSitio(p: Pestana) {
         val sitio = ReglasUsuario.clave(Omnibox.hostDe(p.url))
         if (sitio.isEmpty()) return
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
+        PanelSitio(this, paleta, ajustes, anfitrionSitio, p, sitio).mostrar()
+    }
+
+    private fun editarCssSitio(p: Pestana, sitio: String) {
+        editarCss("CSS de $sitio", ReglasUsuario.cssPropio(sitio), ".ejemplo { display: none !important }", true) { css ->
+            if (ReglasUsuario.fijarCssPropio(sitio, css)) {
+                reinstalarAnuncios()
+                if (css.isNotBlank()) p.web?.let { anuncios.aplicarCssAhora(it, css) }
+                toast(if (css.isBlank()) "CSS borrado. Recarga la página" else "Guardado. Recarga la página para quitar lo anterior")
+            } else {
+                toast("El CSS es demasiado largo (máximo 20 000 caracteres)")
+            }
         }
-        add("Versión de escritorio en este sitio: " + si(ajustes.escritorioEn(sitio))) {
-            ajustes.fijarEscritorioEn(sitio, !ajustes.escritorioEn(sitio))
+    }
+
+    private val anfitrionSitio = object : AnfitrionSitio {
+        override fun recargar(p: Pestana, sitio: String) {
             val w = p.web
             if (w != null) {
                 prepararNavegacion(p, w, sitio)
                 w.reload()
             }
-            mostrarPersonalizarSitio(p)
+            actualizarUi()
         }
-        add("Modo oscuro en este sitio: " + NOMBRES_OSCURO_SITIO[ajustes.modoOscuroEn(sitio)]) {
-            ajustes.fijarModoOscuroEn(sitio, (ajustes.modoOscuroEn(sitio) + 1) % 3)
-            val w = p.web
-            if (w != null) {
-                prepararNavegacion(p, w, sitio)
-                w.reload()
-            }
-            mostrarPersonalizarSitio(p)
-        }
-        add("Ventanas emergentes en este sitio: " + NOMBRES_EMERGENTES_SITIO[ajustes.emergentesEn(sitio) + 1]) {
-            elegirEmergentesSitio(p, sitio)
-        }
-        add("Cookies de terceros en este sitio: " + NOMBRES_COOKIES_SITIO[ajustes.cookiesTercerosModoEn(sitio)]) {
-            ajustes.fijarCookiesTercerosEn(sitio, (ajustes.cookiesTercerosModoEn(sitio) + 1) % 3)
-            val w = p.web
-            if (w != null) {
-                prepararNavegacion(p, w, sitio)
-                w.reload()
-            }
-            mostrarPersonalizarSitio(p)
-        }
-        add("Imágenes en este sitio: " + NOMBRES_IMAGENES_SITIO[ajustes.imagenesEn(sitio)]) {
-            ajustes.fijarImagenesEn(sitio, (ajustes.imagenesEn(sitio) + 1) % 3)
-            val w = p.web
-            if (w != null) {
-                prepararNavegacion(p, w, sitio)
-                w.reload()
-            }
-            mostrarPersonalizarSitio(p)
-        }
-        if (ajustes.suspenderMin > 0 || ajustes.noSuspenderEn(sitio)) {
-            add("No suspender este sitio por inactividad: " + si(ajustes.noSuspenderEn(sitio))) {
-                ajustes.fijarNoSuspenderEn(sitio, !ajustes.noSuspenderEn(sitio))
-                mostrarPersonalizarSitio(p)
-            }
-        }
-        if (ajustes.bloquearAnuncios || bloqueoPausadoEnPagina(p.url)) {
-            add("Bloqueo de anuncios en este sitio: " + (if (bloqueoPausadoEnPagina(p.url)) "pausado" else "activo")) { alternarPausaBloqueo(p) }
-        }
-        add("Elegir un elemento de la página (tocar)") {
+
+        override fun aplicarTexto() = anfitrionAspecto.aplicarTexto()
+        override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
+
+        override fun elegirElemento(p: Pestana) {
             p.eligiendo = true
             p.eligiendoElemento = true
             toast("Toca el elemento que quieres ocultar o cambiar")
         }
-        add("CSS propio de este sitio…") {
-            editarCss("CSS de $sitio", ReglasUsuario.cssPropio(sitio), ".ejemplo { display: none !important }", true) { css ->
-                if (ReglasUsuario.fijarCssPropio(sitio, css)) {
-                    reinstalarAnuncios()
-                    if (css.isNotBlank()) p.web?.let { anuncios.aplicarCssAhora(it, css) }
-                    toast(if (css.isBlank()) "CSS borrado. Recarga la página" else "Guardado. Recarga la página para quitar lo anterior")
-                } else {
-                    toast("El CSS es demasiado largo (máximo 20 000 caracteres)")
-                }
-            }
-        }
-        add("Reglas de este sitio (" + ReglasUsuario.totalDe(sitio) + ")…") { mostrarReglasUsuario(sitio) }
-        opciones("Personalizar " + sitio, items)
+
+        override fun quitarCapa(p: Pestana) = quitarMuros(p)
+        override fun reglasDe(sitio: String) = mostrarReglasUsuario(sitio)
+        override fun editarCss(p: Pestana, sitio: String) = editarCssSitio(p, sitio)
+        override fun datosDelSitio(sitio: String) = abrirPrivacidad(CentroPrivacidad.SITIO, sitio)
+        override fun avisar(texto: String) = toast(texto)
     }
 
     /** Editor de texto multilínea para CSS. [alGuardar] recibe el texto (vacío = borrar, si [puedeBorrar]). */
