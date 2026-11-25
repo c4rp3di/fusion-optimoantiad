@@ -494,10 +494,17 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     /** Párrafo de texto normal (mensaje de un diálogo). */
-    fun parrafo(t: String) {
+    fun parrafo(t: String): TextView {
         val v = texto(t, 14f, paleta.texto)
         v.setPadding(dp(4), dp(4), dp(4), dp(10))
         agregar(v)
+        return v
+    }
+
+    /** Si la hoja se puede cerrar tocando fuera o con «atrás». */
+    fun fijarCancelable(b: Boolean) {
+        dialogo.setCancelable(b)
+        dialogo.setCanceledOnTouchOutside(b)
     }
 
     /** Fila de «chips» para filtrar (se desplaza en horizontal si no cabe). */
