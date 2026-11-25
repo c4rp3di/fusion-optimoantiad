@@ -166,3 +166,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 ## Apuntado en 1.31.0
 - El flujo de elegir elementos (`ofrecerReglas`, `mostrarElemento`, `mostrarApariencia`, `mostrarMuros`, `quitarMuros`, ~250 líneas) sigue en `MainActivity`: sacarlo a `ElementosPagina.kt` con la hoja de alcance (siempre / solo esta vez / todos los sitios) y «Ver y editar el selector».
 - Las herramientas de desarrollo se quedan como están (decisión del usuario).
+
+## Apuntado en 1.32.0
+- «Ocultar en todos los sitios» (mismo selector en cualquier página): hoy las reglas de ocultar son por sitio y los scripts de inicio se instalan por origen; haría falta un guion global de reglas.
+- Deshacer inmediato tras ocultar (botón «Deshacer» en el aviso) en lugar de remitir a Reglas.
+- Miniaturas de pestañas (ya apuntado).
+- Quedan en `MainActivity` los flujos de capas (`mostrarMuros`, `quitarMuros`) y `editarCss`; candidatos a `CapasPagina.kt`.
