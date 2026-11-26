@@ -788,6 +788,95 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         return marco
     }
 
+    /** Rótulo de un ajuste (encima de sus segmentos). */
+    fun rotulo(t: String) {
+        val v = texto(t, 15f, paleta.texto)
+        v.setPadding(dp(4), dp(10), dp(4), dp(2))
+        agregar(v)
+    }
+
+    /** Control segmentado: una fila de opciones excluyentes con la elegida resaltada. */
+    fun segmentos(etiquetas: List<String>, seleccion: Int, alElegir: (Int) -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.setPadding(dp(3), dp(3), dp(3), dp(3))
+        val f = GradientDrawable()
+        f.setColor(paleta.campo)
+        f.cornerRadius = dp(12).toFloat()
+        fila.background = f
+        for ((i, e) in etiquetas.withIndex()) {
+            val marcado = i == seleccion
+            val t = texto(e, 12.5f, if (marcado) paleta.texto else paleta.tenue, marcado)
+            t.gravity = Gravity.CENTER
+            t.setSingleLine(true)
+            t.ellipsize = android.text.TextUtils.TruncateAt.END
+            t.setPadding(dp(4), dp(9), dp(4), dp(9))
+            if (marcado) {
+                val fs = GradientDrawable()
+                fs.setColor(paleta.barra)
+                fs.setStroke(dp(1), paleta.tenue)
+                fs.cornerRadius = dp(10).toFloat()
+                t.background = fs
+            }
+            t.isClickable = true
+            t.setOnClickListener { if (!marcado) alElegir(i) }
+            fila.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        }
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(4)
+        lp.bottomMargin = dp(4)
+        agregar(fila, lp)
+    }
+
+    /** Fila de insignias informativas (no se pulsan). */
+    fun insignias(textos: List<String>) {
+        if (textos.isEmpty()) return
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.setPadding(0, dp(6), 0, dp(2))
+        val desplazable = HorizontalScrollView(act)
+        desplazable.isHorizontalScrollBarEnabled = false
+        for ((i, t) in textos.withIndex()) {
+            val v = texto(t, 12f, paleta.acento, true)
+            v.setPadding(dp(10), dp(6), dp(10), dp(6))
+            val f = GradientDrawable()
+            f.setColor(Color.argb(40, Color.red(paleta.acento), Color.green(paleta.acento), Color.blue(paleta.acento)))
+            f.cornerRadius = dp(14).toFloat()
+            v.background = f
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (i > 0) lp.leftMargin = dp(6)
+            fila.addView(v, lp)
+        }
+        desplazable.addView(fila)
+        agregar(desplazable)
+    }
+
+    /** Aviso de «cambios pendientes» con un botón (recargar la página, por ejemplo). */
+    fun avisoPendiente(mensaje: String, boton: String, alPulsar: () -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        fila.setPadding(dp(14), dp(10), dp(10), dp(10))
+        val f = GradientDrawable()
+        f.setColor(Color.argb(60, Color.red(paleta.advertencia), Color.green(paleta.advertencia), Color.blue(paleta.advertencia)))
+        f.cornerRadius = dp(12).toFloat()
+        fila.background = f
+        fila.addView(texto(mensaje, 13.5f, paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        val b = texto(boton, 13f, Color.WHITE, true)
+        b.gravity = Gravity.CENTER
+        b.setPadding(dp(14), dp(8), dp(14), dp(8))
+        val fb = GradientDrawable()
+        fb.setColor(paleta.advertencia)
+        fb.cornerRadius = dp(14).toFloat()
+        b.background = fb
+        b.isClickable = true
+        b.setOnClickListener { alPulsar() }
+        fila.addView(b)
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(8)
+        agregar(fila, lp)
+    }
+
     /** Botón grande de acción principal (color de acento) con icono, título y subtítulo. */
     fun botonGrande(icono: String, titulo: String, sub: String, activo: Boolean = true, accion: () -> Unit) {
         val fila = LinearLayout(act)
