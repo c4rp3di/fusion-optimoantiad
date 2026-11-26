@@ -13,6 +13,8 @@ import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.RippleDrawable
 import android.util.TypedValue
 import android.view.Gravity
+import android.view.MotionEvent
+import android.view.ViewConfiguration
 import android.view.View
 import android.view.ViewGroup
 import android.view.Window
@@ -26,6 +28,72 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Switch
 import android.widget.TextView
+import kotlin.math.abs
+
+/**
+ * Raíz de un panel lateral que se cierra arrastrándola hacia el borde por el que entra (hacia la derecha). No roba el gesto a lo que
+ * se desplaza o se arrastra por dentro (listas de chips, deslizadores) ni al desplazamiento vertical.
+ */
+private class RaizPanelLateral(c: Context, private val alCerrar: () -> Unit) : LinearLayout(c) {
+    private var x0 = 0f
+    private var y0 = 0f
+    private var arrastrando = false
+    private var ignorar = false
+    private val margen = ViewConfiguration.get(c).scaledTouchSlop
+
+    private fun hayArrastrableDentro(v: View, x: Int, y: Int): Boolean {
+        if (v.visibility != View.VISIBLE) return false
+        val p = IntArray(2)
+        v.getLocationOnScreen(p)
+        if (x < p[0] || x > p[0] + v.width || y < p[1] || y > p[1] + v.height) return false
+        if (v is HorizontalScrollView || v is android.widget.SeekBar) return true
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) {
+                if (hayArrastrableDentro(v.getChildAt(i), x, y)) return true
+            }
+        }
+        return false
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                x0 = ev.rawX
+                y0 = ev.rawY
+                arrastrando = false
+                ignorar = hayArrastrableDentro(this, ev.rawX.toInt(), ev.rawY.toInt())
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dx = ev.rawX - x0
+                val dy = ev.rawY - y0
+                if (!ignorar && !arrastrando && dx > margen && dx > 1.5f * abs(dy)) {
+                    arrastrando = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+            }
+        }
+        return arrastrando
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                x0 = ev.rawX
+            }
+            MotionEvent.ACTION_MOVE -> translationX = (ev.rawX - x0).coerceAtLeast(0f)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val dx = ev.rawX - x0
+                arrastrando = false
+                if (ev.actionMasked == MotionEvent.ACTION_UP && dx > width * 0.3f) {
+                    animate().translationX(width.toFloat()).setDuration(130L).withEndAction { alCerrar() }
+                } else {
+                    animate().translationX(0f).setDuration(130L)
+                }
+            }
+        }
+        return true
+    }
+}
 
 /** ScrollView que no pasa de [maxAlto] píxeles (la hoja deja siempre ver un trozo de la página detrás). */
 private class ScrollLimitado(c: Context, private val maxAlto: Int) : ScrollView(c) {
@@ -71,7 +139,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         dialogo.requestWindowFeature(Window.FEATURE_NO_TITLE)
         contenido.orientation = LinearLayout.VERTICAL
         contenido.setPadding(dp(16), dp(if (lateral) 20 else 8), dp(16), dp(20))
-        val raiz = LinearLayout(act)
+        val raiz: LinearLayout = if (lateral) RaizPanelLateral(act) { if (dialogo.isShowing) dialogo.dismiss() } else LinearLayout(act)
         raiz.orientation = LinearLayout.VERTICAL
         fondo.setColor(paleta.barra)
         val r = dp(20).toFloat()
