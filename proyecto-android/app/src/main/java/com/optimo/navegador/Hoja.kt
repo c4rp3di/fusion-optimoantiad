@@ -642,7 +642,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     class Ficha(
         val letra: String, val tono: Int, val titulo: String, val detalle: String, val marcado: Boolean?, val activa: Boolean,
         val alTocar: () -> Unit, val alMantener: (() -> Unit)?, val alCerrar: (() -> Unit)?,
-        val miniatura: android.graphics.Bitmap? = null
+        val miniatura: android.graphics.Bitmap? = null, val nueva: Boolean = false
     )
 
     /** Cuadrícula de dos columnas de fichas. */
@@ -653,168 +653,139 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
             fila.orientation = LinearLayout.HORIZONTAL
             fila.setPadding(0, dp(4), 0, dp(4))
             for (j in 0..1) {
-                val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+                val lp = LinearLayout.LayoutParams(0, dp(150), 1f)
                 if (j == 1) lp.leftMargin = dp(8)
                 if (i + j >= items.size) {
                     fila.addView(View(act), lp)
                     continue
                 }
-                val it2 = items[i + j]
-                val tarjeta = LinearLayout(act)
-                tarjeta.orientation = LinearLayout.VERTICAL
-                tarjeta.setPadding(dp(10), dp(10), dp(10), dp(10))
-                val f = GradientDrawable()
-                f.setColor(paleta.campo)
-                f.cornerRadius = dp(14).toFloat()
-                val sel = it2.marcado == true
-                if (it2.activa || sel) f.setStroke(dp(2), paleta.acento)
-                tarjeta.background = f
-                val mini = it2.miniatura
-                if (mini != null) {
-                    // Miniatura de la página: ocupa todo el ancho de la tarjeta y se recorta por abajo (se ve la parte de arriba).
-                    val iv = android.widget.ImageView(act)
-                    iv.scaleType = android.widget.ImageView.ScaleType.MATRIX
-                    iv.setImageBitmap(mini)
-                    iv.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
-                        val ancho = r - l
-                        if (ancho > 0) {
-                            val m = android.graphics.Matrix()
-                            val e = ancho.toFloat() / mini.width
-                            m.setScale(e, e)
-                            (v as android.widget.ImageView).imageMatrix = m
-                        }
-                    }
-                    iv.clipToOutline = true
-                    iv.outlineProvider = object : android.view.ViewOutlineProvider() {
-                        override fun getOutline(view: View, outline: android.graphics.Outline) {
-                            outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
-                        }
-                    }
-                    tarjeta.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(96)))
-                } else {
-                    val cuadro = texto(if (sel) "✓" else it2.letra, 24f, if (sel) Color.WHITE else paleta.texto, true)
-                    cuadro.gravity = Gravity.CENTER
-                    val fc = GradientDrawable()
-                    fc.cornerRadius = dp(10).toFloat()
-                    fc.setColor(if (sel) paleta.acento else Color.argb(60, Color.red(it2.tono), Color.green(it2.tono), Color.blue(it2.tono)))
-                    cuadro.background = fc
-                    tarjeta.addView(cuadro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(96)))
-                }
-                val t = texto(it2.titulo, 13f, paleta.texto)
-                t.setSingleLine(true)
-                t.ellipsize = android.text.TextUtils.TruncateAt.END
-                t.setPadding(0, dp(6), 0, 0)
-                tarjeta.addView(t)
-                val d = texto(it2.detalle, 11f, paleta.tenue)
-                d.setSingleLine(true)
-                d.ellipsize = android.text.TextUtils.TruncateAt.END
-                tarjeta.addView(d)
-                if (it2.alCerrar != null) {
-                    val x = botonIcono("✕") { it2.alCerrar.invoke() }
-                    tarjeta.addView(x, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(36)))
-                }
-                tarjeta.isClickable = true
-                tarjeta.setOnClickListener { it2.alTocar() }
-                if (it2.alMantener != null) {
-                    tarjeta.setOnLongClickListener {
-                        it2.alMantener.invoke()
-                        true
-                    }
-                }
-                fila.addView(tarjeta, lp)
+                fila.addView(fichaVista(items[i + j]), lp)
             }
             agregar(fila)
             i += 2
         }
     }
 
-    /** Rótulo de un ajuste (encima de sus segmentos). */
-    fun rotulo(t: String) {
-        val v = texto(t, 15f, paleta.texto)
-        v.setPadding(dp(4), dp(10), dp(4), dp(2))
-        agregar(v)
-    }
-
-    /** Control segmentado: una fila de opciones excluyentes con la elegida resaltada. */
-    fun segmentos(etiquetas: List<String>, seleccion: Int, alElegir: (Int) -> Unit) {
-        val fila = LinearLayout(act)
-        fila.orientation = LinearLayout.HORIZONTAL
-        fila.setPadding(dp(3), dp(3), dp(3), dp(3))
-        val f = GradientDrawable()
-        f.setColor(paleta.campo)
-        f.cornerRadius = dp(12).toFloat()
-        fila.background = f
-        for ((i, e) in etiquetas.withIndex()) {
-            val marcado = i == seleccion
-            val t = texto(e, 12.5f, if (marcado) paleta.texto else paleta.tenue, marcado)
+    /**
+     * Una ficha: la miniatura ocupa toda la tarjeta, el título y el sitio van encima sobre un fondo semitransparente, y el cierre
+     * es un botón pequeño en la esquina. La página de «nueva pestaña» no lleva miniatura: es un panel con un «+» grande.
+     */
+    private fun fichaVista(f: Ficha): View {
+        val r = dp(14).toFloat()
+        val sel = f.marcado == true
+        val marco = android.widget.FrameLayout(act)
+        val fondoMarco = GradientDrawable()
+        fondoMarco.cornerRadius = r
+        fondoMarco.setColor(paleta.campo)
+        if (f.activa || sel) fondoMarco.setStroke(dp(2), paleta.acento)
+        marco.background = fondoMarco
+        marco.setPadding(dp(2), dp(2), dp(2), dp(2))
+        marco.clipToOutline = true
+        marco.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, r)
+            }
+        }
+        val llenar = android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        val mini = f.miniatura
+        if (f.nueva) {
+            val centro = LinearLayout(act)
+            centro.orientation = LinearLayout.VERTICAL
+            centro.gravity = Gravity.CENTER
+            val mas = texto("+", 36f, paleta.texto, true)
+            mas.gravity = Gravity.CENTER
+            val caja = GradientDrawable()
+            caja.cornerRadius = dp(14).toFloat()
+            caja.setColor(Color.TRANSPARENT)
+            caja.setStroke(dp(2), paleta.tenue)
+            mas.background = caja
+            centro.addView(mas, LinearLayout.LayoutParams(dp(64), dp(64)))
+            val t = texto("Nueva pestaña", 13f, paleta.texto)
             t.gravity = Gravity.CENTER
+            t.setPadding(0, dp(8), 0, 0)
+            centro.addView(t)
+            marco.addView(centro, llenar)
+        } else if (mini != null) {
+            // Se rellena el ancho y se recorta por abajo: se ve la parte de arriba de la página.
+            val iv = android.widget.ImageView(act)
+            iv.scaleType = android.widget.ImageView.ScaleType.MATRIX
+            iv.setImageBitmap(mini)
+            iv.addOnLayoutChangeListener { v, l, _, rr, _, _, _, _, _ ->
+                val ancho = rr - l
+                if (ancho > 0) {
+                    val m = android.graphics.Matrix()
+                    val e = ancho.toFloat() / mini.width
+                    m.setScale(e, e)
+                    (v as android.widget.ImageView).imageMatrix = m
+                }
+            }
+            marco.addView(iv, llenar)
+        } else {
+            val letra = texto(f.letra, 36f, paleta.texto, true)
+            letra.gravity = Gravity.CENTER
+            letra.setBackgroundColor(Color.argb(60, Color.red(f.tono), Color.green(f.tono), Color.blue(f.tono)))
+            marco.addView(letra, llenar)
+        }
+        if (!f.nueva) {
+            val velo = LinearLayout(act)
+            velo.orientation = LinearLayout.VERTICAL
+            velo.setBackgroundColor(Color.argb(165, 0, 0, 0))
+            velo.setPadding(dp(8), dp(5), dp(8), dp(6))
+            val t = texto(f.titulo, 12.5f, Color.WHITE, true)
             t.setSingleLine(true)
             t.ellipsize = android.text.TextUtils.TruncateAt.END
-            t.setPadding(dp(4), dp(9), dp(4), dp(9))
-            if (marcado) {
-                val fs = GradientDrawable()
-                fs.setColor(paleta.barra)
-                fs.setStroke(dp(1), paleta.tenue)
-                fs.cornerRadius = dp(10).toFloat()
-                t.background = fs
+            velo.addView(t)
+            val d = texto(f.detalle, 10.5f, Color.argb(215, 255, 255, 255))
+            d.setSingleLine(true)
+            d.ellipsize = android.text.TextUtils.TruncateAt.END
+            velo.addView(d)
+            marco.addView(
+                velo,
+                android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM)
+            )
+        }
+        // Marca de selección (arriba a la izquierda) mientras se eligen varias.
+        if (f.marcado != null) {
+            val b = texto(if (sel) "✓" else "", 13f, Color.WHITE, true)
+            b.gravity = Gravity.CENTER
+            val fb = GradientDrawable()
+            fb.shape = GradientDrawable.OVAL
+            if (sel) {
+                fb.setColor(paleta.acento)
+            } else {
+                fb.setColor(Color.argb(110, 0, 0, 0))
+                fb.setStroke(dp(2), Color.WHITE)
             }
-            t.isClickable = true
-            t.setOnClickListener { if (!marcado) alElegir(i) }
-            fila.addView(t, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+            b.background = fb
+            val lpb = android.widget.FrameLayout.LayoutParams(dp(24), dp(24), Gravity.TOP or Gravity.START)
+            lpb.setMargins(dp(6), dp(6), dp(6), dp(6))
+            marco.addView(b, lpb)
         }
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.topMargin = dp(4)
-        lp.bottomMargin = dp(4)
-        agregar(fila, lp)
-    }
-
-    /** Fila de insignias informativas (no se pulsan). */
-    fun insignias(textos: List<String>) {
-        if (textos.isEmpty()) return
-        val fila = LinearLayout(act)
-        fila.orientation = LinearLayout.HORIZONTAL
-        fila.setPadding(0, dp(6), 0, dp(2))
-        val desplazable = HorizontalScrollView(act)
-        desplazable.isHorizontalScrollBarEnabled = false
-        for ((i, t) in textos.withIndex()) {
-            val v = texto(t, 12f, paleta.acento, true)
-            v.setPadding(dp(10), dp(6), dp(10), dp(6))
-            val f = GradientDrawable()
-            f.setColor(Color.argb(40, Color.red(paleta.acento), Color.green(paleta.acento), Color.blue(paleta.acento)))
-            f.cornerRadius = dp(14).toFloat()
-            v.background = f
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            if (i > 0) lp.leftMargin = dp(6)
-            fila.addView(v, lp)
+        // Cierre pequeño (arriba a la derecha).
+        val cierre = f.alCerrar
+        if (cierre != null) {
+            val x = texto("✕", 12f, Color.WHITE, true)
+            x.gravity = Gravity.CENTER
+            val fx = GradientDrawable()
+            fx.shape = GradientDrawable.OVAL
+            fx.setColor(Color.argb(150, 0, 0, 0))
+            x.background = fx
+            x.isClickable = true
+            x.setOnClickListener { cierre() }
+            val lpx = android.widget.FrameLayout.LayoutParams(dp(28), dp(28), Gravity.TOP or Gravity.END)
+            lpx.setMargins(dp(6), dp(6), dp(6), dp(6))
+            marco.addView(x, lpx)
         }
-        desplazable.addView(fila)
-        agregar(desplazable)
-    }
-
-    /** Aviso de «cambios pendientes» con un botón (recargar la página, por ejemplo). */
-    fun avisoPendiente(mensaje: String, boton: String, alPulsar: () -> Unit) {
-        val fila = LinearLayout(act)
-        fila.orientation = LinearLayout.HORIZONTAL
-        fila.gravity = Gravity.CENTER_VERTICAL
-        fila.setPadding(dp(14), dp(10), dp(10), dp(10))
-        val f = GradientDrawable()
-        f.setColor(Color.argb(60, Color.red(paleta.advertencia), Color.green(paleta.advertencia), Color.blue(paleta.advertencia)))
-        f.cornerRadius = dp(12).toFloat()
-        fila.background = f
-        fila.addView(texto(mensaje, 13.5f, paleta.texto), LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-        val b = texto(boton, 13f, Color.WHITE, true)
-        b.gravity = Gravity.CENTER
-        b.setPadding(dp(14), dp(8), dp(14), dp(8))
-        val fb = GradientDrawable()
-        fb.setColor(paleta.advertencia)
-        fb.cornerRadius = dp(14).toFloat()
-        b.background = fb
-        b.isClickable = true
-        b.setOnClickListener { alPulsar() }
-        fila.addView(b)
-        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-        lp.topMargin = dp(8)
-        agregar(fila, lp)
+        marco.isClickable = true
+        marco.setOnClickListener { f.alTocar() }
+        val mantener = f.alMantener
+        if (mantener != null) {
+            marco.setOnLongClickListener {
+                mantener()
+                true
+            }
+        }
+        return marco
     }
 
     /** Botón grande de acción principal (color de acento) con icono, título y subtítulo. */
