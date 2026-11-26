@@ -648,3 +648,8 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - La pestaña de **nueva pestaña** no lleva miniatura: es un panel con un «+» grande encuadrado y el texto «Nueva pestaña».
 - Al elegir varias, cada ficha lleva arriba a la izquierda un círculo de selección (✓ en acento si está elegida); la ficha activa o elegida conserva el borde de acento. Sin miniatura (pestañas que aún no se han abandonado) se muestra la inicial de color a todo el tamaño de la ficha.
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.33.2 — Corrección de compilación
+
+- Restauradas en `Hoja.kt` las funciones `rotulo`, `segmentos`, `insignias` y `avisoPendiente` (las usa «Personalizar este sitio»), que se borraron por error al reescribir la cuadrícula de pestañas en la 1.33.1.
+- Comprobado que ya no hay ninguna función de `Hoja` usada y sin definir.
