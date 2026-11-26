@@ -30,6 +30,21 @@ import android.widget.Switch
 import android.widget.TextView
 import kotlin.math.abs
 
+/** ¿Hay bajo el punto (x, y) de la pantalla algo que se arrastra por sí mismo (fila de chips, deslizador)? Entonces el gesto de cerrar no se toma. */
+private fun hayArrastrableDentro(v: View, x: Int, y: Int): Boolean {
+    if (v.visibility != View.VISIBLE) return false
+    val p = IntArray(2)
+    v.getLocationOnScreen(p)
+    if (x < p[0] || x > p[0] + v.width || y < p[1] || y > p[1] + v.height) return false
+    if (v is HorizontalScrollView || v is android.widget.SeekBar) return true
+    if (v is ViewGroup) {
+        for (i in 0 until v.childCount) {
+            if (hayArrastrableDentro(v.getChildAt(i), x, y)) return true
+        }
+    }
+    return false
+}
+
 /**
  * Raíz de un panel lateral que se cierra arrastrándola hacia el borde por el que entra (hacia la derecha). No roba el gesto a lo que
  * se desplaza o se arrastra por dentro (listas de chips, deslizadores) ni al desplazamiento vertical.
@@ -41,21 +56,11 @@ private class RaizPanelLateral(c: Context, private val alCerrar: () -> Unit) : L
     private var ignorar = false
     private val margen = ViewConfiguration.get(c).scaledTouchSlop
 
-    private fun hayArrastrableDentro(v: View, x: Int, y: Int): Boolean {
-        if (v.visibility != View.VISIBLE) return false
-        val p = IntArray(2)
-        v.getLocationOnScreen(p)
-        if (x < p[0] || x > p[0] + v.width || y < p[1] || y > p[1] + v.height) return false
-        if (v is HorizontalScrollView || v is android.widget.SeekBar) return true
-        if (v is ViewGroup) {
-            for (i in 0 until v.childCount) {
-                if (hayArrastrableDentro(v.getChildAt(i), x, y)) return true
-            }
-        }
-        return false
-    }
-
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!Gestos.activos) {
+            arrastrando = false
+            return false
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 x0 = ev.rawX
@@ -88,6 +93,93 @@ private class RaizPanelLateral(c: Context, private val alCerrar: () -> Unit) : L
                     animate().translationX(width.toFloat()).setDuration(130L).withEndAction { alCerrar() }
                 } else {
                     animate().translationX(0f).setDuration(130L)
+                }
+            }
+        }
+        return true
+    }
+}
+
+/**
+ * Raíz de una hoja anclada abajo (o arriba): se arrastra hacia su borde, abajo si está abajo y arriba si está arriba. Una hoja que deja ver la
+ * página ([plegable]) se pliega a una tira, como las barras (hay que arrastrar el 40 % de su alto); las demás se cierran (30 %). Si se suelta
+ * antes, vuelve. No roba el gesto al desplazamiento de su contenido (solo arrastra cuando ya no puede desplazarse más en ese sentido, o si el
+ * dedo empieza en el tirador) ni a lo que se arrastra por dentro (chips, deslizadores).
+ */
+private class RaizHoja(
+    c: Context,
+    private val anclaArriba: () -> Boolean,
+    private val contenido: () -> View?,
+    private val plegable: () -> Boolean,
+    private val alPlegar: () -> Unit,
+    private val alCerrar: () -> Unit
+) : LinearLayout(c) {
+    private var x0 = 0f
+    private var y0 = 0f
+    private var enTirador = false
+    private var arrastrando = false
+    private var ignorar = false
+    private val margen = ViewConfiguration.get(c).scaledTouchSlop
+    private val zonaTirador = 36f * c.resources.displayMetrics.density
+
+    private fun sentidoValido(dy: Float): Boolean = if (anclaArriba()) dy < 0f else dy > 0f
+
+    /** ¿El contenido todavía puede desplazarse en el sentido del gesto? Entonces el gesto es suyo. */
+    private fun desplazaAun(): Boolean {
+        val v = contenido() ?: return false
+        if (v.visibility != View.VISIBLE) return false
+        return if (anclaArriba()) v.canScrollVertically(1) else v.canScrollVertically(-1)
+    }
+
+    override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!Gestos.activos) {
+            arrastrando = false
+            return false
+        }
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                x0 = ev.rawX
+                y0 = ev.rawY
+                arrastrando = false
+                ignorar = hayArrastrableDentro(this, ev.rawX.toInt(), ev.rawY.toInt())
+                enTirador = if (anclaArriba()) ev.y > height - zonaTirador else ev.y < zonaTirador
+            }
+            MotionEvent.ACTION_MOVE -> {
+                val dy = ev.rawY - y0
+                val dx = ev.rawX - x0
+                if (!ignorar && !arrastrando && abs(dy) > margen && abs(dy) > 1.5f * abs(dx) && sentidoValido(dy) &&
+                    (enTirador || !desplazaAun())
+                ) {
+                    arrastrando = true
+                    parent?.requestDisallowInterceptTouchEvent(true)
+                }
+            }
+        }
+        return arrastrando
+    }
+
+    override fun onTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN -> y0 = ev.rawY
+            MotionEvent.ACTION_MOVE -> {
+                val dy = ev.rawY - y0
+                translationY = if (sentidoValido(dy)) dy else 0f
+                alpha = (1f - abs(translationY) / height.coerceAtLeast(1)).coerceIn(0.3f, 1f)
+            }
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val dy = ev.rawY - y0
+                arrastrando = false
+                val umbral = if (plegable()) 0.4f else 0.3f
+                if (ev.actionMasked == MotionEvent.ACTION_UP && sentidoValido(dy) && abs(dy) > height * umbral) {
+                    val fuera = if (anclaArriba()) -height.toFloat() else height.toFloat()
+                    animate().translationY(fuera).alpha(0f).setDuration(130L).withEndAction {
+                        // La hoja vuelve a su sitio por si solo se pliega (la ventana sigue ahí con la tira).
+                        translationY = 0f
+                        alpha = 1f
+                        if (plegable()) alPlegar() else alCerrar()
+                    }
+                } else {
+                    animate().translationY(0f).alpha(1f).setDuration(130L)
                 }
             }
         }
@@ -133,13 +225,32 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     private var destino: LinearLayout = contenido
     private val fondo = GradientDrawable()
 
+    // Hoja inferior (o superior): gestos de arrastre y plegado a tira.
+    private var anclada = false
+    private var plegableActiva = false
+    private var plegada = false
+    private var dimActual = 0.45f
+    private var cancelableBase = true
+    private var raizVista: LinearLayout? = null
+    private var tirador: View? = null
+    private var scrollVista: ScrollView? = null
+    private var asa: AsaBarra? = null
+
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density + 0.5f).toInt()
 
     init {
         dialogo.requestWindowFeature(Window.FEATURE_NO_TITLE)
         contenido.orientation = LinearLayout.VERTICAL
         contenido.setPadding(dp(16), dp(if (lateral) 20 else 8), dp(16), dp(20))
-        val raiz: LinearLayout = if (lateral) RaizPanelLateral(act) { if (dialogo.isShowing) dialogo.dismiss() } else LinearLayout(act)
+        val raiz: LinearLayout = if (lateral) {
+            RaizPanelLateral(act) { if (dialogo.isShowing) dialogo.dismiss() }
+        } else {
+            RaizHoja(
+                act, { anclada }, { scrollVista }, { plegableActiva }, { plegar() },
+                { if (dialogo.isShowing) dialogo.dismiss() }
+            )
+        }
+        raizVista = raiz
         raiz.orientation = LinearLayout.VERTICAL
         fondo.setColor(paleta.barra)
         val r = dp(20).toFloat()
@@ -152,6 +263,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         } else {
             val maxAlto = (act.resources.displayMetrics.heightPixels * 0.86f).toInt()
             val scroll = ScrollLimitado(act, maxAlto)
+            scrollVista = scroll
             scroll.addView(contenido, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
             // Tirador
             val tirador = View(act)
@@ -160,6 +272,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
             formaTirador.cornerRadius = dp(2).toFloat()
             tirador.background = formaTirador
             tirador.alpha = 0.5f
+            this.tirador = tirador
             val lpT = LinearLayout.LayoutParams(dp(36), dp(4))
             lpT.gravity = Gravity.CENTER_HORIZONTAL
             lpT.topMargin = dp(8)
@@ -188,12 +301,54 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     fun mostrar() {
+        if (plegada) desplegar()
         if (!act.isFinishing) dialogo.show()
     }
 
     /** Cuánto se oscurece la página detrás (0 = nada). Para ver lo que se está eligiendo en la página. */
     fun atenuar(cantidad: Float) {
-        dialogo.window?.setDimAmount(cantidad)
+        dimActual = cantidad
+        // Una hoja que deja ver la página se puede plegar a una tira para verla entera; las que la oscurecen, no.
+        plegableActiva = !lateral && cantidad < 0.3f
+        if (!plegada) dialogo.window?.setDimAmount(cantidad)
+    }
+
+    /** Pliega la hoja a una tira del borde (la página queda a la vista y se puede tocar). Tocar la tira, o arrastrarla hacia dentro, la despliega. */
+    private fun plegar() {
+        val raiz = raizVista ?: return
+        if (plegada || lateral || !dialogo.isShowing) return
+        plegada = true
+        tirador?.visibility = View.GONE
+        scrollVista?.visibility = View.GONE
+        var t = asa
+        if (t == null) {
+            t = AsaBarra(act, paleta, anclada) { desplegar() }
+            t.contentDescription = "Mostrar el menú"
+            asa = t
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(20))
+            if (anclada) raiz.addView(t, lp) else raiz.addView(t, 0, lp)
+        }
+        t.visibility = View.VISIBLE
+        val w = dialogo.window
+        if (w != null) {
+            w.setDimAmount(0f)
+            w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        }
+        dialogo.setCanceledOnTouchOutside(false)
+    }
+
+    private fun desplegar() {
+        if (!plegada) return
+        plegada = false
+        asa?.visibility = View.GONE
+        tirador?.visibility = View.VISIBLE
+        scrollVista?.visibility = View.VISIBLE
+        val w = dialogo.window
+        if (w != null) {
+            w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+            w.setDimAmount(dimActual)
+        }
+        dialogo.setCanceledOnTouchOutside(cancelableBase)
     }
 
     /** Coloca la hoja arriba en vez de abajo (para no tapar un elemento elegido en la parte baja de la página). */
@@ -201,6 +356,17 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         val r = dp(20).toFloat()
         fondo.cornerRadii = floatArrayOf(0f, 0f, 0f, 0f, r, r, r, r)
         dialogo.window?.setGravity(Gravity.TOP)
+        anclada = true
+        // El tirador pasa al borde de abajo, que es por donde se agarra una hoja anclada arriba.
+        val raiz = raizVista
+        val t = tirador
+        if (raiz != null && t != null && !lateral) {
+            raiz.removeView(t)
+            val lp = LinearLayout.LayoutParams(dp(36), dp(4))
+            lp.gravity = Gravity.CENTER_HORIZONTAL
+            lp.bottomMargin = dp(8)
+            raiz.addView(t, lp)
+        }
     }
 
     fun cerrar() {
@@ -608,8 +774,9 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
 
     /** Si la hoja se puede cerrar tocando fuera o con «atrás». */
     fun fijarCancelable(b: Boolean) {
+        cancelableBase = b
         dialogo.setCancelable(b)
-        dialogo.setCanceledOnTouchOutside(b)
+        dialogo.setCanceledOnTouchOutside(b && !plegada)
     }
 
     /** Fila de «chips» para filtrar (se desplaza en horizontal si no cabe). */
