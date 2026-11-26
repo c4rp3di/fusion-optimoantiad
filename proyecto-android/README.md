@@ -653,3 +653,10 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 
 - Restauradas en `Hoja.kt` las funciones `rotulo`, `segmentos`, `insignias` y `avisoPendiente` (las usa «Personalizar este sitio»), que se borraron por error al reescribir la cuadrícula de pestañas en la 1.33.1.
 - Comprobado que ya no hay ninguna función de `Hoja` usada y sin definir.
+
+## 1.34.0 — Capas y editor de CSS fuera de MainActivity
+
+- **Quitar la capa que tapa la página** (`CapasPagina.kt`) sale de `MainActivity` (–95 líneas) y se rehace como una hoja que deja la página a la vista (apenas la oscurece). Lista las capas detectadas con las más probables ya marcadas (☑/☐), un interruptor «Desbloquear el desplazamiento» y las acciones «Ocultar siempre en el sitio», «Solo ahora» y «Cancelar». Si no hay capa pero el desplazamiento está bloqueado, ofrece desbloquearlo siempre o solo ahora.
+- **Editor de CSS** también en una hoja, con campo multilínea monoespaciado y teclado abierto: «Guardar», «Borrar el CSS» (si había algo guardado) y, nuevo, **«Probar sin guardar»** en el CSS propio del sitio, que lo aplica a la página abierta antes de guardarlo.
+- `Hoja` gana `campoMultilinea`.
+- El Kotlin, sin compilar ni probar en el móvil.
