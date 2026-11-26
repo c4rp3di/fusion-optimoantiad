@@ -630,6 +630,13 @@ class MainActivity : Activity() {
             w.goBack()
             return
         }
+        if (p != null && p.deFuera) {
+            // Vino de otra app y ya no tiene historial: se cierra y se vuelve a esa app (no hace falta ir pestaña por pestaña).
+            p.deFuera = false
+            cerrarPestana(p)
+            moveTaskToBack(true)
+            return
+        }
         if (p != null && pestanas.size > 1) {
             cerrarPestana(p)
             return
@@ -1596,6 +1603,7 @@ class MainActivity : Activity() {
         if (anterior != null) anterior.ultimoUsoMs = ahoraUso
         p.ultimoUsoMs = ahoraUso
         if (anterior != null && anterior !== p) {
+            anterior.deFuera = false
             Miniaturas.capturar(anterior)
             retirarAnterior(anterior)
         }
@@ -4575,8 +4583,9 @@ class MainActivity : Activity() {
         val p = actual
         if (p != null && p.inicio && pestanas.size == 1) {
             cargarEn(p, url)
+            p.deFuera = true
         } else {
-            nuevaPestana(url)
+            nuevaPestana(url)?.deFuera = true
         }
     }
 
