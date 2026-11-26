@@ -2274,6 +2274,7 @@ class MainActivity : Activity() {
             AccionMenu.LISTAS_ENLACES -> abrirGuardados(PantallaGuardados.LISTAS)
             AccionMenu.REABRIR -> mostrarCerradas()
             AccionMenu.CERRAR_TODAS -> cerrarTodas()
+            AccionMenu.SALIR -> cerrarOptimo()
             AccionMenu.MEDIA -> mostrarAjustesMedia()
             AccionMenu.SEGUNDO_PLANO -> mostrarSegundoPlano()
             AccionMenu.LECTURA_VOZ -> mostrarAjustesLectura()
@@ -3325,6 +3326,31 @@ class MainActivity : Activity() {
             )
             .setPositiveButton("Cerrar", null)
             .show()
+    }
+
+    /**
+     * Sale de Optimo de una vez (sin retroceder pestaña por pestaña): cierra las pestañas privadas, guarda la sesión, para el servicio de
+     * segundo plano y quita la app de recientes. Al terminar la actividad corre el «Al salir, borrar…». Si no se guardan las pestañas,
+     * avisa antes de que se pierdan.
+     */
+    private fun cerrarOptimo() {
+        if (!ajustes.guardarSesion && pestanas.size > 1) {
+            Dialogos.confirmar(
+                this, paleta, hayPrivadas(), "Cerrar Optimo",
+                "Se cerrarán las " + pestanas.size + " pestañas abiertas y no se guardarán (el guardado de pestañas está desactivado).", "Cerrar Optimo"
+            ) { salirDeOptimo() }
+        } else {
+            salirDeOptimo()
+        }
+    }
+
+    private fun salirDeOptimo() {
+        for (q in ArrayList(pestanas)) {
+            if (q.privada) cerrarPestana(q)
+        }
+        guardarSesion()
+        ServicioSegundoPlano.detener(this)
+        finishAndRemoveTask()
     }
 
     private fun cerrarTodas() {
