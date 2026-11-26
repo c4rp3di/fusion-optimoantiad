@@ -11,8 +11,8 @@ android {
         applicationId 'com.optimo.navegador'
         minSdk 26
         targetSdk 34
-        versionCode 67
-        versionName '1.34.0'
+        versionCode 68
+        versionName '1.34.1'
     }
 
     // Firma propia de Optimo: el workflow de Fusion genera apk-build/debug.keystore
