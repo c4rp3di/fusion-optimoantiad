@@ -95,6 +95,7 @@ class LimpiezaDatos(
     }
 
     fun vaciarHistorial() {
+        Miniaturas.vaciar()
         historial.vaciar()
         alVaciarHistorial()
     }
