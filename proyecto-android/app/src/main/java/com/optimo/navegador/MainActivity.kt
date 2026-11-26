@@ -214,6 +214,10 @@ class MainActivity : Activity() {
     private lateinit var barraSuperior: LinearLayout
     private lateinit var borrarTexto: TextView
     private lateinit var barraInferior: LinearLayout
+    private lateinit var asaSup: AsaBarra
+    private lateinit var asaInf: AsaBarra
+    private var barraSupPlegada = false
+    private var barraInfPlegada = false
 
     // Modo «página completa»: oculta barras de Optimo y del sistema; se sale con doble pulsación de atrás.
     private var paginaCompleta = false
@@ -743,7 +747,7 @@ class MainActivity : Activity() {
         principal.setOrientation(LinearLayout.VERTICAL)
 
         // Barra superior: indicador de seguridad + omnibox
-        val barraSup = LinearLayout(this)
+        val barraSup = BarraPlegable(this, true) { plegarBarra(true) }
         barraSup.setOrientation(LinearLayout.HORIZONTAL)
         barraSup.setGravity(Gravity.CENTER_VERTICAL)
         barraSup.setBackgroundColor(paleta.barra)
@@ -833,6 +837,9 @@ class MainActivity : Activity() {
             barraSup,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         )
+        asaSup = AsaBarra(this, paleta, true) { desplegarBarra(true) }
+        asaSup.visibility = View.GONE
+        principal.addView(asaSup, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 20.dp()))
 
         // Barra de progreso con alto fijo explicito (3 dp)
         progreso = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal)
@@ -904,7 +911,7 @@ class MainActivity : Activity() {
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
         // Barra inferior: atras, adelante, recargar/parar, marcador, pestañas, menu
-        val barraInf = LinearLayout(this)
+        val barraInf = BarraPlegable(this, false) { plegarBarra(false) }
         barraInf.setOrientation(LinearLayout.HORIZONTAL)
         barraInf.setGravity(Gravity.CENTER_VERTICAL)
         barraInf.setBackgroundColor(paleta.barra)
@@ -947,6 +954,9 @@ class MainActivity : Activity() {
         for (v in vistasInf) {
             barraInf.addView(v, LinearLayout.LayoutParams(0, 48.dp(), 1f))
         }
+        asaInf = AsaBarra(this, paleta, false) { desplegarBarra(false) }
+        asaInf.visibility = View.GONE
+        principal.addView(asaInf, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 20.dp()))
         principal.addView(
             barraInf,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -1610,6 +1620,12 @@ class MainActivity : Activity() {
             retirarAnterior(anterior)
         }
         actual = p
+        // La pantalla de inicio necesita la barra de direcciones: se despliegan las barras plegadas.
+        if (p.inicio && (barraSupPlegada || barraInfPlegada)) {
+            barraSupPlegada = false
+            barraInfPlegada = false
+            aplicarPlegado()
+        }
         if (p === sonando) {
             // Se vuelve a la pestaña que sonaba en segundo plano: recupera su tamaño normal.
             sonando = null
@@ -4873,6 +4889,34 @@ class MainActivity : Activity() {
         ajustarBarrasSistema(paginaCompleta)
     }
 
+    /** Pliega una barra (arrastrándola hacia fuera); su sitio lo ocupa una tira fina que la vuelve a desplegar. */
+    private fun plegarBarra(arriba: Boolean) {
+        if (arriba) {
+            omnibox.clearFocus()
+            ocultarTeclado(omnibox)
+            barraSupPlegada = true
+        } else {
+            barraInfPlegada = true
+        }
+        aplicarPlegado()
+    }
+
+    private fun desplegarBarra(arriba: Boolean) {
+        if (arriba) barraSupPlegada = false else barraInfPlegada = false
+        aplicarPlegado()
+    }
+
+    /** Muestra cada barra, o su tira si está plegada; en pantalla completa de la página no se ve nada. */
+    private fun aplicarPlegado() {
+        if (!::asaSup.isInitialized || !::asaInf.isInitialized) return
+        (barraSuperior as? BarraPlegable)?.restablecer()
+        (barraInferior as? BarraPlegable)?.restablecer()
+        barraSuperior.visibility = if (!paginaCompleta && !barraSupPlegada) View.VISIBLE else View.GONE
+        asaSup.visibility = if (!paginaCompleta && barraSupPlegada) View.VISIBLE else View.GONE
+        barraInferior.visibility = if (!paginaCompleta && !barraInfPlegada) View.VISIBLE else View.GONE
+        asaInf.visibility = if (!paginaCompleta && barraInfPlegada) View.VISIBLE else View.GONE
+    }
+
     private fun entrarPaginaCompleta() {
         if (paginaCompleta) return
         paginaCompleta = true
@@ -4880,8 +4924,7 @@ class MainActivity : Activity() {
         omnibox.clearFocus()
         ocultarTeclado(omnibox)
         cerrarBusqueda()
-        barraSuperior.visibility = View.GONE
-        barraInferior.visibility = View.GONE
+        aplicarPlegado()
         ajustarBarrasSistema(true)
         toast("Pantalla completa: pulsa atrás dos veces para salir")
     }
@@ -4889,8 +4932,7 @@ class MainActivity : Activity() {
     private fun salirPaginaCompleta() {
         if (!paginaCompleta) return
         paginaCompleta = false
-        barraSuperior.visibility = View.VISIBLE
-        barraInferior.visibility = View.VISIBLE
+        aplicarPlegado()
         if (vistaCompleta == null) ajustarBarrasSistema(false)
     }
 
