@@ -659,7 +659,7 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - **Quitar la capa que tapa la página** (`CapasPagina.kt`) sale de `MainActivity` (–95 líneas) y se rehace como una hoja que deja la página a la vista (apenas la oscurece). Lista las capas detectadas con las más probables ya marcadas (☑/☐), un interruptor «Desbloquear el desplazamiento» y las acciones «Ocultar siempre en el sitio», «Solo ahora» y «Cancelar». Si no hay capa pero el desplazamiento está bloqueado, ofrece desbloquearlo siempre o solo ahora.
 - **Editor de CSS** también en una hoja, con campo multilínea monoespaciado y teclado abierto: «Guardar», «Borrar el CSS» (si había algo guardado) y, nuevo, **«Probar sin guardar»** en el CSS propio del sitio, que lo aplica a la página abierta antes de guardarlo.
 - `Hoja` gana `campoMultilinea`.
-- El Kotlin, sin compilar ni probar en el móvil.
+- Compilado y probado en el móvil.
 
 ## 1.34.1 — «Atrás» vuelve a la app de la que viene un enlace
 
@@ -667,11 +667,11 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - La pestaña cerrada se puede recuperar en «Reabrir pestaña cerrada».
 - La marca se pierde en cuanto cambias a otra pestaña (entonces «atrás» vuelve a ser el de siempre), y solo cuenta la última pestaña abierta desde fuera.
 - Los archivos .html abiertos desde otra app no usan esto (se abren por otro camino).
-- El Kotlin, sin compilar ni probar en el móvil.
+- Compilado y probado en el móvil.
 
 ## 1.35.0 — Deshacer al ocultar, sin duplicar .html locales y lista de enlaces con búsqueda y selección
 
-El Kotlin de esta versión no está compilado ni probado en el móvil.
+Compilada y probada en el móvil.
 
 - **Deshacer al ocultar un elemento:** tras «Ocultar siempre en el sitio» sale un aviso sobre la barra inferior con el botón **Deshacer** (7 s; `AvisoConAccion.kt`). Deshacer quita la regla y recarga la página para que el elemento vuelva a verse (las hojas CSS inyectadas no se pueden retirar una a una). Antes el aviso solo remitía a «Personalizar este sitio › Reglas».
 - **Sin duplicados al marcar un `.html` local:** al pulsar ☆ se busca una copia permanente con el mismo contenido (primero por tamaño y luego por huella SHA-256) y se reutiliza en vez de guardar otra. Si ese mismo marcador ya existe avisa «Ya estaba en marcadores». Si dos marcadores comparten copia (p. ej. uno con JavaScript y otro sin él), la copia solo se borra cuando se quita el último.
@@ -684,14 +684,26 @@ El Kotlin de esta versión no está compilado ni probado en el móvil.
 ## 1.35.1 — El aviso «Deshacer» se descarta deslizándolo
 
 - El aviso con botón (`AvisoConAccion`) se puede quitar **arrastrándolo hacia un lado** (izquierda o derecha, a partir de un tercio de su ancho), sin esperar los 7 s. Si se suelta antes, vuelve a su sitio. Funciona también si el dedo empieza sobre el botón «Deshacer» (arrastrar no deshace; solo pulsar).
-- El Kotlin, sin compilar ni probar en el móvil.
+- Compilado y probado en el móvil.
 
 ## 1.36.0 — Gestos: cerrar paneles y plegar barras
 
-El Kotlin de esta versión no está compilado ni probado en el móvil.
+Compilada y probada en el móvil: funciona como debe.
 
 - **Paneles laterales** (menú, ajustes, escudo, listas…): se cierran **arrastrándolos hacia la derecha**, hacia el borde por el que entran (a partir del 30 % de su ancho; si se suelta antes, vuelven). No roban el gesto a las filas de chips (`HorizontalScrollView`) ni a los deslizadores (`SeekBar`), ni al desplazamiento vertical. Está en `Hoja.kt` (`RaizPanelLateral`).
 - **Barras superior e inferior plegables** (`Plegables.kt`): la de arriba se pliega **arrastrándola hacia arriba** y la de abajo **hacia abajo** (hay que arrastrar al menos el 40 % de su alto; si no, vuelve). Su sitio lo ocupa una **tira fina** con una pastilla; **pulsarla o arrastrarla hacia dentro** despliega la barra. Así la página gana espacio sin ir a pantalla completa.
 - El plegado no se guarda: al reiniciar Optimo las barras vuelven a verse. Una pestaña de inicio despliega las barras (hace falta la barra de direcciones). En pantalla completa de la página no se ve ni la tira.
-- No hay ajuste para desactivar los gestos; si molestan, se añade.
-- Pendiente de probar: que el gesto de las barras no choque con tocar los botones o el campo de direcciones, y que el redimensionado del WebView al plegar no parpadee.
+- Los gestos se pueden apagar desde 1.37.0 (Ajustes › Aspecto › «Gestos de arrastre»).
+- Probado: el gesto de las barras no choca con los botones ni con el campo de direcciones.
+
+## 1.37.0 — Interruptor de gestos y hojas que se pliegan
+
+Estado: 1.34.0 a 1.36.0 compiladas y probadas en el móvil (sin fallos). Esta versión, sin compilar ni probar todavía.
+
+- **Interruptor «Gestos de arrastre»** (Ajustes › Aspecto › Interfaz de Optimo; `Gestos` en `Plegables.kt`, preferencia `gestos_arrastre`, activado por defecto). Apagado, ni los paneles laterales, ni las barras, ni las hojas interceptan el arrastre. Las tiras que ya estuvieran plegadas se pueden desplegar igualmente tocándolas.
+- **Hojas arriba y abajo con el mismo plegado que las barras** (`RaizHoja` en `Hoja.kt`):
+  - Las hojas que **dejan ver la página** (ocultar un elemento y sus opciones, capas que tapan la página, elegir elemento: las que usan `atenuar` con poco oscurecimiento) se **pliegan a una tira fina** del mismo borde al arrastrarlas hacia fuera (la de abajo, hacia abajo; la anclada arriba, hacia arriba; hay que pasar el 40 % de su alto, si no vuelven). Plegadas, la página queda a la vista y **se puede tocar y desplazar** (la hoja no la bloquea); tocar la tira, o arrastrarla hacia dentro, despliega la hoja. «Atrás» la cierra igual que antes. Mientras está plegada no se puede escribir en campos de la página (la ventana de la hoja conserva el foco).
+  - **Todas las demás hojas inferiores** (confirmar, elegir, acciones, escribir un nombre…) se **cierran** arrastrándolas hacia abajo (a partir del 30 % de su alto), igual que los paneles laterales hacia la derecha. Cerrar así cuenta como cancelar.
+  - No roban el desplazamiento de su contenido: arrastran solo cuando la lista ya no puede desplazarse más en ese sentido, o si el dedo empieza en el **tirador** (en las hojas ancladas arriba, el tirador pasa al borde de abajo). Tampoco roban el gesto a las filas de chips ni a los deslizadores.
+- Refactor: `hayArrastrableDentro` pasa a una función común de `Hoja.kt`.
+- **A probar:** plegar y desplegar la hoja de «Ocultar» con el elemento arriba y abajo; tocar la página con la hoja plegada; que cerrar con «atrás» funcione plegada; arrastrar hojas con listas largas (que siga desplazando la lista); cerrar una confirmación arrastrándola y que cuente como cancelar (p. ej. al abrir un `.html` local, el archivo temporal se borra); que apagar el interruptor desactive los tres gestos.
