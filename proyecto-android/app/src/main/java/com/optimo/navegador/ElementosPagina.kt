@@ -15,6 +15,7 @@ interface AnfitrionElementos {
     fun reinstalarAnuncios()
     fun editarCss(titulo: String, inicial: String, pista: String, conAyuda: Boolean, alGuardar: (String) -> Unit)
     fun avisar(texto: String)
+    fun avisarConAccion(texto: String, boton: String, accion: () -> Unit)
 }
 
 /**
@@ -153,7 +154,17 @@ class ElementosPagina(
             if (ReglasUsuario.agregarOcultar(sitio, d.sel)) {
                 g.reinstalarAnuncios()
                 g.aplicarReglas(web, paginaHost)
-                g.avisar("Oculto en " + sitio + ". Para deshacerlo: Personalizar este sitio › Reglas")
+                g.avisarConAccion("Oculto en " + sitio, "Deshacer") {
+                    // Se quita la regla y se recarga para que el elemento vuelva a verse (las hojas inyectadas no se pueden retirar una a una).
+                    ReglasUsuario.quitarOcultar(sitio, d.sel)
+                    g.reinstalarAnuncios()
+                    try {
+                        web.reload()
+                    } catch (e: Exception) {
+                        // La pestaña ya se cerró.
+                    }
+                    g.avisar("Deshecho")
+                }
             } else {
                 g.avisar("Ya estaba oculto")
             }
