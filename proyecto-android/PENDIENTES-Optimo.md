@@ -190,3 +190,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - «Probar sin guardar» en el editor de CSS de un elemento (ahora solo está en el CSS propio del sitio).
 - Marcar visualmente en la página la capa elegida antes de ocultarla (hoy solo se ve la lista).
 - `MainActivity` sigue con ~5.200 líneas: lo más pesado que queda es la creación de WebView y sus clientes (`ClienteWeb`, `ClienteChrome`), descargas y el reproductor multimedia.
+
+## Apuntado en 1.35.0
+- **Probar:** Deshacer tras ocultar (el elemento reaparece y la regla desaparece de Reglas); ☆ dos veces en el mismo `.html` abierto desde el gestor (no debe crear una segunda copia en «locales») y quitar uno de dos marcadores que comparten copia; lista de enlaces con teclado abierto, selección larga y «Acciones».
+- **Pendiente:** enviar varios enlaces a Optimo Play (ver README 1.35.0). Hecho: búsqueda en la lista y selección múltiple de la fase 1 del rastreador.
+- **Idea:** que ☆ salga marcada al abrir de nuevo un `.html` ya marcado (hoy solo se evita la copia duplicada al pulsar, no se detecta al abrir).
