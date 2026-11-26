@@ -1,6 +1,7 @@
 package com.optimo.navegador
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.drawable.GradientDrawable
 import android.view.Gravity
 import android.view.MotionEvent
@@ -9,6 +10,24 @@ import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import kotlin.math.abs
+
+/**
+ * Gestos de arrastre de la interfaz (Ajustes › Aspecto › «Gestos de arrastre»): cerrar paneles laterales, plegar las barras y plegar o cerrar
+ * las hojas. Un único interruptor para todos. Si está apagado nada intercepta los toques (las tiras ya plegadas se pueden seguir desplegando).
+ */
+object Gestos {
+    private var sp: SharedPreferences? = null
+
+    fun iniciar(c: Context) {
+        sp = c.getSharedPreferences("optimo_ajustes", Context.MODE_PRIVATE)
+    }
+
+    var activos: Boolean
+        get() = sp?.getBoolean("gestos_arrastre", true) ?: true
+        set(v) {
+            sp?.edit()?.putBoolean("gestos_arrastre", v)?.apply()
+        }
+}
 
 /**
  * Barra (superior o inferior) que se pliega al arrastrarla hacia fuera de la pantalla: la superior hacia arriba, la inferior hacia
@@ -23,6 +42,10 @@ class BarraPlegable(c: Context, private val haciaArriba: Boolean, private val al
     private fun sentidoValido(dy: Float): Boolean = if (haciaArriba) dy < 0f else dy > 0f
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
+        if (!Gestos.activos) {
+            arrastrando = false
+            return false
+        }
         when (ev.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 x0 = ev.rawX
