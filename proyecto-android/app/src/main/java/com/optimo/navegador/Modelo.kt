@@ -31,7 +31,8 @@ class Pestana(val id: Int, val privada: Boolean) {
     var url: String = ""
     var titulo: String = ""
     var progreso: Int = 100
-    var escritorio: Boolean = false
+    /** Versión de escritorio elegida a mano en esta pestaña; null = según los ajustes del sitio. */
+    var escritorio: Boolean? = null
 
     /** Muestra la pagina de inicio propia (nueva pestaña). */
     var inicio: Boolean = false
