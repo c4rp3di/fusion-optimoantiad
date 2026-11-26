@@ -23,6 +23,12 @@ interface AnfitrionPestanas {
     fun cerrarTodas()
     fun marcar(p: Pestana): Boolean
 
+    /** Miniatura guardada de la pestaña (nunca de las privadas), o null. */
+    fun miniatura(p: Pestana): android.graphics.Bitmap?
+
+    /** Toma la miniatura de la pestaña activa (para que aparezca al abrir el gestor). */
+    fun capturarActual()
+
     /** Pregunta a las páginas si suenan y llama a [alCambiar] si algo cambió. */
     fun comprobarSonido(alCambiar: () -> Unit)
 
@@ -69,6 +75,7 @@ class GestorPestanas(
         }
 
     fun mostrar() {
+        g.capturarActual()
         pintarTodo()
         hoja.interceptarAtras {
             if (seleccion.isNotEmpty()) {
@@ -324,7 +331,8 @@ class GestorPestanas(
             }
         } else {
             null
-        }
+        },
+        g.miniatura(p)
     )
 
     /** Cabecera de un grupo de sitio con sus pestañas debajo (plegable); «Cerrar grupo» cierra todas. */
