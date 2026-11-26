@@ -3607,7 +3607,7 @@ class MainActivity : Activity() {
     }
 
     private fun editarCssSitio(p: Pestana, sitio: String) {
-        editarCss("CSS de $sitio", ReglasUsuario.cssPropio(sitio), ".ejemplo { display: none !important }", true) { css ->
+        capas.editarCss(p.privada, "CSS de $sitio", ReglasUsuario.cssPropio(sitio), ".ejemplo { display: none !important }", true, { css -> p.web?.let { anuncios.aplicarCssAhora(it, css) } }) { css ->
             if (ReglasUsuario.fijarCssPropio(sitio, css)) {
                 reinstalarAnuncios()
                 if (css.isNotBlank()) p.web?.let { anuncios.aplicarCssAhora(it, css) }
@@ -3617,6 +3617,20 @@ class MainActivity : Activity() {
             }
         }
     }
+
+    private val anfitrionCapas = object : AnfitrionCapas {
+        override fun scriptMuros(): String = anuncios.scriptMuros()
+        override fun aplicarCss(web: WebView, css: String) = anuncios.aplicarCssAhora(web, css)
+        override fun reinstalarAnuncios() = this@MainActivity.reinstalarAnuncios()
+        override fun avisar(texto: String) = toast(texto)
+    }
+
+    private val capas by lazy { CapasPagina(this, paleta, anfitrionCapas) }
+
+    private fun quitarMuros(p: Pestana) = capas.quitar(p)
+
+    private fun editarCss(titulo: String, inicial: String, pista: String, puedeBorrar: Boolean, alGuardar: (String) -> Unit) =
+        capas.editarCss(actual?.privada == true, titulo, inicial, pista, puedeBorrar, null, alGuardar)
 
     private val anfitrionElementos = object : AnfitrionElementos {
         override fun scriptElemento(x: Float, y: Float, nivel: Int): String = anuncios.scriptElemento(x, y, nivel)
@@ -3660,30 +3674,6 @@ class MainActivity : Activity() {
         override fun editarCss(p: Pestana, sitio: String) = editarCssSitio(p, sitio)
         override fun datosDelSitio(sitio: String) = abrirPrivacidad(CentroPrivacidad.SITIO, sitio)
         override fun avisar(texto: String) = toast(texto)
-    }
-
-    /** Editor de texto multilínea para CSS. [alGuardar] recibe el texto (vacío = borrar, si [puedeBorrar]). */
-    private fun editarCss(titulo: String, inicial: String, pista: String, puedeBorrar: Boolean, alGuardar: (String) -> Unit) {
-        val campo = EditText(this)
-        campo.setText(inicial)
-        campo.hint = pista
-        campo.minLines = 6
-        campo.gravity = android.view.Gravity.TOP or android.view.Gravity.START
-        campo.typeface = android.graphics.Typeface.MONOSPACE
-        campo.textSize = 13f
-        campo.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        campo.setHorizontallyScrolling(false)
-        val caja = FrameLayout(this)
-        val m = (16 * resources.displayMetrics.density).toInt()
-        caja.setPadding(m, m / 2, m, 0)
-        caja.addView(campo)
-        val b = nuevoDialogo()
-            .setTitle(titulo)
-            .setView(caja)
-            .setPositiveButton("Guardar") { _, _ -> alGuardar(campo.text.toString()) }
-            .setNegativeButton("Cancelar", null)
-        if (puedeBorrar && inicial.isNotEmpty()) b.setNeutralButton("Borrar") { _, _ -> alGuardar("") }
-        b.show()
     }
 
     // ---------------------------------------------------------------- ajustes de lectura y voz
@@ -3787,91 +3777,6 @@ class MainActivity : Activity() {
     }
 
     // ---------------------------------------------------------------- capas que tapan la página (muros anti-bloqueador, modales)
-
-    /** Busca capas a pantalla completa que tapan la página y permite ocultarlas ahora o siempre en este sitio. */
-    private fun quitarMuros(p: Pestana) {
-        val w = p.web
-        if (w == null || p.inicio) {
-            toast("Abre primero una página")
-            return
-        }
-        val paginaHost = (try { Uri.parse(w.url ?: p.url).host } catch (e: Exception) { null } ?: "").lowercase()
-        val sitio = ReglasUsuario.clave(paginaHost)
-        if (sitio.isEmpty()) return
-        w.evaluateJavascript(anuncios.scriptMuros()) { crudo ->
-            var muros: org.json.JSONArray? = null
-            var scrollBloqueado = false
-            try {
-                val v = org.json.JSONTokener(crudo ?: "null").nextValue()
-                if (v is String) {
-                    val o = org.json.JSONObject(v)
-                    muros = o.optJSONArray("muros")
-                    scrollBloqueado = o.optBoolean("scrollBloqueado")
-                }
-            } catch (e: Exception) {
-                muros = null
-            }
-            if (muros == null || muros.length() == 0) {
-                if (scrollBloqueado) {
-                    nuevoDialogo()
-                        .setTitle("No veo ninguna capa")
-                        .setMessage("La página tiene el desplazamiento bloqueado. ¿Quieres desbloquearlo?")
-                        .setPositiveButton("Desbloquear siempre aquí") { _, _ ->
-                            val css = "html,body{overflow:auto!important}"
-                            ReglasUsuario.agregarCss(sitio, "Desbloquear desplazamiento", css)
-                            reinstalarAnuncios()
-                            anuncios.aplicarCssAhora(w, css)
-                        }
-                        .setNeutralButton("Solo ahora") { _, _ ->
-                            anuncios.aplicarCssAhora(w, "html,body{overflow:auto!important}")
-                        }
-                        .setNegativeButton("Cancelar", null)
-                        .show()
-                } else {
-                    toast("No he encontrado ninguna capa que tape la página. Prueba «Elegir un elemento» en Personalizar este sitio")
-                }
-            } else {
-                mostrarMuros(w, sitio, muros, scrollBloqueado)
-            }
-        }
-    }
-
-    private fun mostrarMuros(w: WebView, sitio: String, muros: org.json.JSONArray, scrollBloqueado: Boolean) {
-        val n = muros.length()
-        val sels = ArrayList<String>()
-        val etiquetas = ArrayList<String>()
-        val marcadas = BooleanArray(n)
-        for (i in 0 until n) {
-            val m = muros.getJSONObject(i)
-            sels.add(m.optString("sel"))
-            val texto = m.optString("texto")
-            etiquetas.add(m.optString("tag") + " " + m.optInt("w") + "×" + m.optInt("h") + (if (texto.isNotEmpty()) " · «" + texto + "»" else ""))
-            marcadas[i] = m.optBoolean("fuerte")
-        }
-        fun aplicar(guardar: Boolean) {
-            var hechos = 0
-            for (i in 0 until n) {
-                if (!marcadas[i] || sels[i].isEmpty()) continue
-                hechos++
-                if (guardar) ReglasUsuario.agregarOcultar(sitio, sels[i])
-                anuncios.aplicarCssAhora(w, sels[i] + "{display:none!important}")
-            }
-            if (hechos > 0 || scrollBloqueado) {
-                val css = "html,body{overflow:auto!important}"
-                if (guardar) ReglasUsuario.agregarCss(sitio, "Desbloquear desplazamiento", css)
-                anuncios.aplicarCssAhora(w, css)
-            }
-            if (guardar) reinstalarAnuncios()
-            toast(if (hechos == 0) "No marcaste ninguna capa" else if (guardar) "Capas ocultas en $sitio. Se mantendrá en tus visitas" else "Capas ocultas hasta recargar")
-        }
-        nuevoDialogo()
-            .setTitle("Capas que tapan la página")
-            .setMultiChoiceItems(etiquetas.toTypedArray(), marcadas) { _, i, v -> marcadas[i] = v }
-            .setPositiveButton("Ocultar siempre aquí") { _, _ -> aplicar(true) }
-            .setNeutralButton("Solo ahora") { _, _ -> aplicar(false) }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
 
     // ---------------------------------------------------------------- modo lectura
 
