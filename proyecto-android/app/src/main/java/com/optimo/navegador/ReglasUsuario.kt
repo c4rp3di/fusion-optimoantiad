@@ -150,6 +150,13 @@ object ReglasUsuario {
         return true
     }
 
+    /** Quita la regla de ocultar [sel] en [host] (para «Deshacer» justo después de crearla). */
+    fun quitarOcultar(host: String, sel: String) {
+        val h = clave(host)
+        ocultar = ocultar.filter { !(it.host == h && it.sel == sel) }
+        guardar()
+    }
+
     fun quitarOcultar(r: ReglaOcultar) {
         ocultar = ocultar.filter { it !== r }
         guardar()
