@@ -191,6 +191,7 @@ class MainActivity : Activity() {
     private lateinit var principal: LinearLayout
     private lateinit var pantallaCompleta: FrameLayout
     private lateinit var contenedor: FrameLayout
+    private lateinit var raizVista: FrameLayout
     private lateinit var candado: TextView
     private lateinit var omnibox: EditText
     private lateinit var progreso: ProgressBar
@@ -735,6 +736,7 @@ class MainActivity : Activity() {
 
     private fun construirUi() {
         val raiz = FrameLayout(this)
+        raizVista = raiz
         raiz.setBackgroundColor(paleta.fondo)
 
         principal = LinearLayout(this)
@@ -1942,7 +1944,9 @@ class MainActivity : Activity() {
         } else {
             val nueva = urlMarcador(p, true)
             if (nueva.isEmpty()) return
-            if (marcadores.agregar(tituloDe(p), nueva, 0L)) {
+            if (marcadores.contiene(nueva)) {
+                toast("Ya estaba en marcadores")
+            } else if (marcadores.agregar(tituloDe(p), nueva, 0L)) {
                 toast("Marcador guardado (mantén pulsada ☆ para elegir carpeta)")
             } else {
                 toast("Has alcanzado el máximo de marcadores")
@@ -2681,8 +2685,12 @@ class MainActivity : Activity() {
         return sb.toString()
     }
 
+    /** Fila de la lista de enlaces: casilla (solo visible al seleccionar), nombre y detalle. */
+    private class FilaEnlace(val raiz: LinearLayout, val cb: CheckBox, val t1: TextView, val t2: TextView)
+
     /**
-     * Diálogo con la lista. [guardada] = la lista viene de una lista ya guardada (no se puede volver a guardar ni se rehace la búsqueda).
+     * Diálogo con la lista: búsqueda por texto, pulsar una fila abre su menú, y una pulsación larga (o «Seleccionar») pasa a la
+     * selección múltiple, con «Acciones» para copiar, compartir, exportar o guardar solo lo marcado.
      */
     private fun mostrarEnlaces(
         p: Pestana, titulo: String, fuenteTitulo: String, fuenteUrl: String,
@@ -2690,38 +2698,168 @@ class MainActivity : Activity() {
     ) {
         val visibles = todos.filter { enlaceVisible(it, filtro) }
         val ocultos = todos.size - todos.count { enlaceVisible(it, null) }
-        val vista = ListView(this)
-        val adaptador = object : ArrayAdapter<EnlaceEncontrado>(
-            this, android.R.layout.simple_list_item_2, android.R.id.text1, visibles
-        ) {
+        val mostradas = ArrayList<EnlaceEncontrado>(visibles)
+        val marcados = HashSet<String>()
+        var seleccion = false
+        var consulta = ""
+        var dialogo: AlertDialog? = null
+
+        val adaptador = object : BaseAdapter() {
+            override fun getCount(): Int = mostradas.size
+            override fun getItem(i: Int): Any = mostradas[i]
+            override fun getItemId(i: Int): Long = i.toLong()
             override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getView(pos, convertView, parent)
-                val e = visibles[pos]
-                val t1 = v.findViewById<TextView>(android.R.id.text1)
-                val t2 = v.findViewById<TextView>(android.R.id.text2)
-                t1.text = e.nombre
-                t1.maxLines = 2
-                t1.ellipsize = android.text.TextUtils.TruncateAt.END
-                t2.text = lineaEnlace(e)
-                t2.maxLines = 2
-                t1.setTextColor(paleta.texto)
-                t2.setTextColor(paleta.tenue)
-                return v
+                val f: FilaEnlace = (convertView?.tag as? FilaEnlace) ?: run {
+                    val raiz = LinearLayout(this@MainActivity)
+                    raiz.orientation = LinearLayout.HORIZONTAL
+                    raiz.gravity = Gravity.CENTER_VERTICAL
+                    raiz.setPadding(4.dp(), 8.dp(), 4.dp(), 8.dp())
+                    val cb = CheckBox(this@MainActivity)
+                    cb.isFocusable = false
+                    cb.isClickable = false
+                    raiz.addView(cb)
+                    val col = LinearLayout(this@MainActivity)
+                    col.orientation = LinearLayout.VERTICAL
+                    val t1 = TextView(this@MainActivity)
+                    t1.textSize = 15f
+                    t1.maxLines = 2
+                    t1.ellipsize = TextUtils.TruncateAt.END
+                    t1.setTextColor(paleta.texto)
+                    val t2 = TextView(this@MainActivity)
+                    t2.textSize = 12f
+                    t2.maxLines = 2
+                    t2.setTextColor(paleta.tenue)
+                    col.addView(t1)
+                    col.addView(t2)
+                    raiz.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+                    val nueva2 = FilaEnlace(raiz, cb, t1, t2)
+                    raiz.tag = nueva2
+                    nueva2
+                }
+                val e = mostradas[pos]
+                f.t1.text = e.nombre
+                f.t2.text = lineaEnlace(e)
+                f.cb.visibility = if (seleccion) View.VISIBLE else View.GONE
+                f.cb.isChecked = marcados.contains(e.url)
+                return f.raiz
             }
         }
+
+        val caja = LinearLayout(this)
+        caja.orientation = LinearLayout.VERTICAL
+        caja.setPadding(16.dp(), 4.dp(), 16.dp(), 0)
+        val buscar = EditText(this)
+        buscar.hint = "Buscar en la lista"
+        buscar.setSingleLine(true)
+        buscar.setTextColor(paleta.texto)
+        buscar.setHintTextColor(paleta.tenue)
+        caja.addView(buscar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        val barra = LinearLayout(this)
+        barra.orientation = LinearLayout.HORIZONTAL
+        fun boton(txt: String): TextView {
+            val v = TextView(this)
+            v.text = txt
+            v.setTextColor(paleta.acento)
+            v.textSize = 14f
+            v.setPadding(4.dp(), 10.dp(), 14.dp(), 10.dp())
+            v.isClickable = true
+            return v
+        }
+        val bSel = boton("☑ Seleccionar")
+        val bTodos = boton("Todos")
+        val bAcc = boton("Acciones")
+        barra.addView(bSel)
+        barra.addView(bTodos)
+        barra.addView(bAcc)
+        caja.addView(barra)
+        val vista = ListView(this)
         vista.adapter = adaptador
-        val cabecera = (if (filtro != null) filtro.etiqueta + ": " else "") + visibles.size + " enlaces" +
-            (if (ocultos > 0) " (" + ocultos + " de otros sitios ocultos)" else "")
-        vista.setOnItemClickListener { _, _, i, _ -> menuEnlace(p, visibles[i]) }
-        nuevoDialogoNativo()
-            .setTitle(cabecera)
-            .setView(vista)
+        caja.addView(vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+
+        fun refrescar() {
+            mostradas.clear()
+            val q = consulta.trim().lowercase()
+            for (e in visibles) {
+                if (q.isEmpty() || e.nombre.lowercase().contains(q) || e.url.lowercase().contains(q) ||
+                    e.host.lowercase().contains(q) || e.tipo.etiqueta.lowercase().contains(q)
+                ) mostradas.add(e)
+            }
+            bTodos.visibility = if (seleccion) View.VISIBLE else View.GONE
+            bAcc.visibility = if (seleccion) View.VISIBLE else View.GONE
+            bAcc.text = "Acciones (" + marcados.size + ")"
+            bSel.text = if (seleccion) "✕ Salir de la selección" else "☑ Seleccionar"
+            adaptador.notifyDataSetChanged()
+            dialogo?.setTitle(
+                (if (filtro != null) filtro.etiqueta + ": " else "") + mostradas.size + " enlaces" +
+                    (if (ocultos > 0) " (" + ocultos + " de otros sitios ocultos)" else "")
+            )
+        }
+
+        buscar.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            override fun afterTextChanged(s: Editable?) {
+                consulta = s?.toString() ?: ""
+                refrescar()
+            }
+        })
+        bSel.setOnClickListener {
+            seleccion = !seleccion
+            if (!seleccion) marcados.clear()
+            refrescar()
+        }
+        bTodos.setOnClickListener {
+            if (mostradas.isNotEmpty() && mostradas.all { marcados.contains(it.url) }) {
+                for (e in mostradas) marcados.remove(e.url)
+            } else {
+                for (e in mostradas) marcados.add(e.url)
+            }
+            refrescar()
+        }
+        bAcc.setOnClickListener {
+            val sel = visibles.filter { marcados.contains(it.url) }
+            if (sel.isEmpty()) toast("Marca algún enlace") else menuSeleccionEnlaces(p, fuenteTitulo, fuenteUrl, sel, nueva)
+        }
+        vista.setOnItemClickListener { _, _, i, _ ->
+            val e = mostradas[i]
+            if (seleccion) {
+                if (!marcados.add(e.url)) marcados.remove(e.url)
+                refrescar()
+            } else {
+                menuEnlace(p, e)
+            }
+        }
+        vista.setOnItemLongClickListener { _, _, i, _ ->
+            seleccion = true
+            marcados.add(mostradas[i].url)
+            refrescar()
+            true
+        }
+
+        dialogo = nuevoDialogoNativo()
+            .setTitle("Enlaces")
+            .setView(caja)
             .setPositiveButton("Más") { _, _ ->
-                menuMasEnlaces(p, fuenteTitulo, fuenteUrl, todos, visibles, filtro, nueva)
+                menuMasEnlaces(p, fuenteTitulo, fuenteUrl, todos, ArrayList(mostradas), filtro, nueva)
             }
             .setNeutralButton("Filtrar") { _, _ -> filtrarEnlaces(p, fuenteTitulo, fuenteUrl, todos, filtro, nueva) }
             .setNegativeButton("Cerrar", null)
             .show()
+        refrescar()
+    }
+
+    /** Acciones sobre los enlaces marcados. */
+    private fun menuSeleccionEnlaces(p: Pestana, ft: String, fu: String, sel: List<EnlaceEncontrado>, nueva: Boolean) {
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        items.add(Pair<String, () -> Unit>("Copiar los " + sel.size + " enlaces", { copiar(Enlaces.texto(sel)) }))
+        items.add(Pair<String, () -> Unit>("Copiar con nombres", { copiar(Enlaces.textoConNombres(sel)) }))
+        items.add(Pair<String, () -> Unit>("Compartir enlaces", { compartir(Enlaces.texto(sel)) }))
+        items.add(Pair<String, () -> Unit>("Exportar a archivo (.txt)…", { exportarEnlaces(Enlaces.texto(sel), "txt", "text/plain", ft) }))
+        items.add(Pair<String, () -> Unit>("Exportar a archivo (.csv)…", { exportarEnlaces(Enlaces.csv(sel, fu), "csv", "text/csv", ft) }))
+        if (nueva && !p.privada) {
+            items.add(Pair<String, () -> Unit>("Guardar como lista…", { guardarListaEnlaces(ft, fu, sel) }))
+        }
+        opciones(sel.size.toString() + " enlaces marcados", items)
     }
 
     private fun filtrarEnlaces(p: Pestana, ft: String, fu: String, todos: List<EnlaceEncontrado>, filtro: TipoEnlace?, nueva: Boolean) {
@@ -3640,7 +3778,11 @@ class MainActivity : Activity() {
     private fun editarCss(titulo: String, inicial: String, pista: String, puedeBorrar: Boolean, alGuardar: (String) -> Unit) =
         capas.editarCss(actual?.privada == true, titulo, inicial, pista, puedeBorrar, null, alGuardar)
 
+    private val avisoAccion by lazy { AvisoConAccion(this, raizVista) }
+
     private val anfitrionElementos = object : AnfitrionElementos {
+        override fun avisarConAccion(texto: String, boton: String, accion: () -> Unit) = avisoAccion.mostrar(texto, boton, 7000L, accion)
+
         override fun scriptElemento(x: Float, y: Float, nivel: Int): String = anuncios.scriptElemento(x, y, nivel)
 
         @Suppress("DEPRECATION")
@@ -4497,11 +4639,19 @@ class MainActivity : Activity() {
             toast("Ya hay 200 MB de archivos guardados en marcadores: borra alguno")
             return null
         }
+        val sufijo = if (p.appWeb) "#app=" + p.appEspacio else if (p.permitirJs) "#js" else ""
+        // Si ya hay una copia idéntica (mismo contenido) se reutiliza en vez de guardar otra.
+        val igual = buscarLocalIdentico(origen)
+        if (igual != null) {
+            val url = PREFIJO_LOCAL + igual + sufijo
+            p.urlLocal = url
+            return url
+        }
         val id = java.lang.Long.toHexString(System.currentTimeMillis()) + java.lang.Integer.toHexString(java.util.Random().nextInt(0xFFFF) + 0x1000)
         val destino = File(dir, id + ".html")
         return try {
             origen.copyTo(destino, false)
-            val url = PREFIJO_LOCAL + id + ".html" + (if (p.appWeb) "#app=" + p.appEspacio else if (p.permitirJs) "#js" else "")
+            val url = PREFIJO_LOCAL + id + ".html" + sufijo
             p.urlLocal = url
             url
         } catch (e: Exception) {
@@ -4511,12 +4661,39 @@ class MainActivity : Activity() {
         }
     }
 
-    /** Quita el marcador y, si era de un archivo local, borra su copia permanente. */
+    private fun huellaArchivo(f: File): String? = try {
+        val md = java.security.MessageDigest.getInstance("SHA-256")
+        f.inputStream().use { ins ->
+            val buf = ByteArray(64 * 1024)
+            while (true) {
+                val n = ins.read(buf)
+                if (n < 0) break
+                md.update(buf, 0, n)
+            }
+        }
+        md.digest().joinToString("") { "%02x".format(it) }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Nombre («<id>.html») de una copia permanente con el mismo contenido que [origen], o null. Solo se calcula la huella si coincide el tamaño. */
+    private fun buscarLocalIdentico(origen: File): String? {
+        val candidatos = dirLocales().listFiles()?.filter { it.isFile && ID_LOCAL.matches(it.name) && it.length() == origen.length() }
+        if (candidatos.isNullOrEmpty()) return null
+        val h = huellaArchivo(origen) ?: return null
+        for (f in candidatos) {
+            if (huellaArchivo(f) == h) return f.name
+        }
+        return null
+    }
+
+    /** Quita el marcador y, si era de un archivo local, borra su copia permanente (salvo que otro marcador la comparta). */
     private fun quitarMarcadorUrl(url: String) {
         marcadores.quitar(url)
         if (esMarcadorLocal(url)) {
             val nombre = Uri.parse(url).lastPathSegment ?: ""
-            if (ID_LOCAL.matches(nombre)) File(dirLocales(), nombre).delete()
+            val compartida = marcadores.todos().any { it.url != url && esMarcadorLocal(it.url) && Uri.parse(it.url).lastPathSegment == nombre }
+            if (ID_LOCAL.matches(nombre) && !compartida) File(dirLocales(), nombre).delete()
             for (q in pestanas) {
                 if (q.urlLocal == url) q.urlLocal = ""
             }
