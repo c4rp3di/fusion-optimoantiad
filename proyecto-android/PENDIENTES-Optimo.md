@@ -179,3 +179,9 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - **Idea (necesita probar en el móvil):** que el WebView también anuncie «no móvil» en las pistas de cliente (`Sec-CH-UA-Mobile`, `navigator.userAgentData.mobile`) con `WebSettingsCompat.setUserAgentMetadata` (androidx.webkit ≥ 1.9). Hoy solo cambia el agente de usuario.
 - **Idea:** guardar la elección de escritorio de cada pestaña en la sesión (hoy se pierde al reiniciar; la regla por sitio sí persiste).
 - **Idea:** ajuste del ancho de escritorio (980 / 1024 / 1280) y lectura sin extraer a partir de `og:` cuando falla la heurística.
+
+## Apuntado en 1.33.0
+- Miniaturas: si en algún móvil `WebView.draw` sale en blanco, cambiar a `PixelCopy` sobre la ventana (API 26+) para la pestaña activa.
+- Miniaturas persistentes entre sesiones solo para pestañas normales (hoy se pierden al cerrar la app y las restauradas las recuperan al volver a visitarlas).
+- Miniaturas también en la lista (vista pequeña a la izquierda) como ajuste opcional.
+- Candidatos a salir de `MainActivity`: capas (`mostrarMuros`, `quitarMuros`) y `editarCss` (`CapasPagina.kt`).
