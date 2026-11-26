@@ -355,6 +355,10 @@ class PanelAspecto(
         hoja.fila("Accesos rápidos del menú", "Qué botones salen arriba y en qué orden", AccesosMenu.lista(ajustes).size.toString()) { ir(ACCESOS_MENU) }
         hoja.seccion("Interfaz de Optimo")
         hoja.fila("Barra de direcciones", "Botones, orden, tamaños y separación") { ir(BARRA) }
+        hoja.interruptor("Gestos de arrastre", "Cerrar paneles y plegar barras y hojas arrastrándolos", Gestos.activos) { v ->
+            Gestos.activos = v
+            repintar()
+        }
         hoja.fila("Pantalla de inicio", "Colores, accesos, buscador y título") { ir(INICIO) }
     }
 
