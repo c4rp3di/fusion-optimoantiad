@@ -632,3 +632,11 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - Qué hace: cierra las pestañas privadas, guarda la sesión (las demás pestañas se recuperan al volver a abrir Optimo si «Guardar pestañas abiertas» está activado), para el servicio de segundo plano (el audio de fondo termina), quita la app de recientes (`finishAndRemoveTask`) y, al terminar la actividad, se ejecuta «Al salir, borrar…».
 - Si el guardado de pestañas está desactivado y hay más de una abierta, pide confirmación antes (se perderían).
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.33.0 — Miniaturas de pestañas
+
+- **Miniaturas en la cuadrícula del gestor de pestañas** (`Miniaturas.kt`): cada ficha muestra la parte de arriba de la página tal como la dejaste, en lugar de la inicial de color. Las pestañas sin miniatura (nuevas, de inicio, privadas) siguen mostrando la inicial.
+- Cuándo se toman: al salir de una pestaña (cambiar de pestaña, abrir otra) y, para la activa, al abrir el gestor. Las pestañas dormidas conservan la última miniatura.
+- Privacidad: solo en memoria (máximo 16 MB, las más antiguas se descartan), **nunca se guardan en disco ni se toman de pestañas privadas**, se olvidan al cerrar la pestaña y se borran con el historial («Borrar todo», borrado al salir con historial).
+- La ficha seleccionada o activa se marca con borde de acento.
+- El Kotlin, sin compilar ni probar en el móvil. Por probar: que `WebView.draw` sobre un `Canvas` de software da imagen y no blanco en tu móvil, y el coste de la captura al cambiar de pestaña.
