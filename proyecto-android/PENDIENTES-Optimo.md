@@ -185,3 +185,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Miniaturas persistentes entre sesiones solo para pestañas normales (hoy se pierden al cerrar la app y las restauradas las recuperan al volver a visitarlas).
 - Miniaturas también en la lista (vista pequeña a la izquierda) como ajuste opcional.
 - Candidatos a salir de `MainActivity`: capas (`mostrarMuros`, `quitarMuros`) y `editarCss` (`CapasPagina.kt`).
+
+## Apuntado en 1.34.0
+- «Probar sin guardar» en el editor de CSS de un elemento (ahora solo está en el CSS propio del sitio).
+- Marcar visualmente en la página la capa elegida antes de ocultarla (hoy solo se ve la lista).
+- `MainActivity` sigue con ~5.200 líneas: lo más pesado que queda es la creación de WebView y sus clientes (`ClienteWeb`, `ClienteChrome`), descargas y el reproductor multimedia.
