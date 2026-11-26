@@ -110,6 +110,14 @@ class MainActivity : Activity() {
             "(function(){var v=window.__optAlm;try{delete window.__optAlm}catch(e){}return v||null})()"
 
         /** Instantánea del DOM ya renderizado (para guardar la página); null si supera el máximo. */
+        /** Ancho de maquetación (px) que se fuerza en la versión de escritorio, como hace Chrome con «Sitio para ordenador». */
+        private const val ANCHO_ESCRITORIO = 1280
+
+        private const val JS_VISTA_ESCRITORIO =
+            "(function(){var m=document.querySelectorAll('meta[name=\"viewport\"]');" +
+                "if(!m.length){var x=document.createElement('meta');x.name='viewport';(document.head||document.documentElement).appendChild(x);m=[x];}" +
+                "for(var i=0;i<m.length;i++)m[i].setAttribute('content','width=" + ANCHO_ESCRITORIO + "');})()"
+
         private const val JS_DOM_INSTANTANEA =
             "(function(){try{var h='<!doctype html>'+document.documentElement.outerHTML;return h.length>3000000?null:h}catch(e){return null}})()"
 
@@ -1372,7 +1380,8 @@ class MainActivity : Activity() {
 
     private fun calcularUaEscritorio(): String {
         val base = WebSettings.getDefaultUserAgent(this)
-        return base.replace(Regex("\\(Linux; Android[^)]*\\)"), "(X11; Linux x86_64)").replace(" Mobile", "")
+        // Sin «Version/4.0» (marca de WebView que el Chrome de escritorio no lleva), sin «Mobile» y con plataforma Linux.
+        return base.replace(Regex("\\(Linux; Android[^)]*\\)"), "(X11; Linux x86_64)").replace(" Version/4.0", "").replace(" Mobile", "")
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -1417,7 +1426,7 @@ class MainActivity : Activity() {
             s.blockNetworkLoads = true
             s.setGeolocationEnabled(false)
         }
-        if (p.escritorio) s.userAgentString = uaEscritorio
+        if (p.escritorio == true) s.userAgentString = uaEscritorio
         aplicarFondo(w)
         w.setWebViewClient(ClienteWeb(p))
         w.setWebChromeClient(ClienteChrome(p))
@@ -1506,7 +1515,7 @@ class MainActivity : Activity() {
      */
     private fun prepararNavegacion(p: Pestana, w: WebView, host: String) {
         val h = host.lowercase()
-        val escritorio = p.escritorio || (h.isNotEmpty() && ajustes.escritorioEn(h))
+        val escritorio = p.escritorio ?: (h.isNotEmpty() && ajustes.escritorioEn(h))
         if (escritorio != (w.settings.userAgentString == uaEscritorio)) {
             w.settings.userAgentString = if (escritorio) uaEscritorio else null
             w.settings.useWideViewPort = true
@@ -1930,15 +1939,20 @@ class MainActivity : Activity() {
         actualizarUi()
     }
 
+    /** Lo que se está usando de verdad: la elección de esta pestaña o, si no hay, la regla del sitio. */
+    private fun escritorioEfectivo(p: Pestana): Boolean = p.escritorio ?: ajustes.escritorioEn(hostDePagina(p.url))
+
     private fun alternarEscritorio() {
         val p = actual ?: return
-        p.escritorio = !p.escritorio
+        val ahora = !escritorioEfectivo(p)
+        // Si coincide con la regla del sitio, la pestaña vuelve a seguir la regla (antes, con una regla de escritorio, no se podía quitar).
+        p.escritorio = if (ahora == ajustes.escritorioEn(hostDePagina(p.url))) null else ahora
         val w = p.web ?: return
-        w.settings.userAgentString = if (p.escritorio) uaEscritorio else null
+        w.settings.userAgentString = if (ahora) uaEscritorio else null
         w.settings.useWideViewPort = true
         w.settings.loadWithOverviewMode = true
         if (p.inicio) mostrarInicio(p) else w.reload()
-        toast(if (p.escritorio) "Versión de escritorio" else "Versión móvil")
+        toast(if (ahora) "Versión de escritorio" else "Versión móvil")
     }
 
     // ---------------------------------------------------------------- buscar en la pagina
@@ -2002,7 +2016,7 @@ class MainActivity : Activity() {
             !p.privada && ReproductorExterno.esMega(p.url) && AppsMedia.apps(this@MainActivity, p.url, null).isNotEmpty()
 
         override fun imagenesBloqueadas(p: Pestana): Boolean = p.web?.settings?.blockNetworkImage == true
-        override fun escritorio(p: Pestana): Boolean = p.escritorio
+        override fun escritorio(p: Pestana): Boolean = escritorioEfectivo(p)
         override fun buscador(): String = Omnibox.motor(ajustes.motor).nombre
         override fun arranque(): String = nombreArranque()
         override fun oscurecer(): Boolean = ajustes.oscurecerPaginas
@@ -3635,9 +3649,6 @@ class MainActivity : Activity() {
         b.show()
     }
 
-    /** Cambios de apariencia listos para usar sobre el elemento elegido; «§» se sustituye por su selector. */
-)
-
     // ---------------------------------------------------------------- ajustes de lectura y voz
 
     private fun factor(v: Int): String = String.format(java.util.Locale.getDefault(), "%.1f×", v / 100.0)
@@ -4867,6 +4878,14 @@ class MainActivity : Activity() {
             fijarUrl(p, url)
             if (view != null && !p.inicio) view.setBackgroundColor(paleta.fondo)
             if (p === actual) actualizarUi()
+        }
+
+        /** En escritorio se fuerza el ancho de maquetación en cuanto la página se ve (el WebView, a diferencia de Chrome, respeta el `viewport` de la web). */
+        override fun onPageCommitVisible(view: WebView?, url: String?) {
+            super.onPageCommitVisible(view, url)
+            if (view != null && !p.lectura && url != null && url.startsWith("http") && view.settings.userAgentString == uaEscritorio) {
+                view.evaluateJavascript(JS_VISTA_ESCRITORIO, null)
+            }
         }
 
         override fun onPageFinished(view: WebView?, url: String?) {
