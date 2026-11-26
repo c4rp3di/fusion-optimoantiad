@@ -640,3 +640,11 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - Privacidad: solo en memoria (máximo 16 MB, las más antiguas se descartan), **nunca se guardan en disco ni se toman de pestañas privadas**, se olvidan al cerrar la pestaña y se borran con el historial («Borrar todo», borrado al salir con historial).
 - La ficha seleccionada o activa se marca con borde de acento.
 - El Kotlin, sin compilar ni probar en el móvil. Por probar: que `WebView.draw` sobre un `Canvas` de software da imagen y no blanco en tu móvil, y el coste de la captura al cambiar de pestaña.
+
+## 1.33.1 — Fichas del gestor de pestañas rediseñadas
+
+- La miniatura ocupa toda la ficha; el **título y el sitio van encima, sobre un fondo semitransparente** en la parte de abajo, para ver más de la página.
+- El **cierre es un botón pequeño redondo en la esquina superior derecha** de cada ficha (antes ocupaba una fila entera).
+- La pestaña de **nueva pestaña** no lleva miniatura: es un panel con un «+» grande encuadrado y el texto «Nueva pestaña».
+- Al elegir varias, cada ficha lleva arriba a la izquierda un círculo de selección (✓ en acento si está elegida); la ficha activa o elegida conserva el borde de acento. Sin miniatura (pestañas que aún no se han abandonado) se muestra la inicial de color a todo el tamaño de la ficha.
+- El Kotlin, sin compilar ni probar en el móvil.
