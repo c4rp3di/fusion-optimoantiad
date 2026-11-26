@@ -641,7 +641,8 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     /** Una ficha de la cuadrícula (pestañas): círculo grande con la letra, título y detalle. */
     class Ficha(
         val letra: String, val tono: Int, val titulo: String, val detalle: String, val marcado: Boolean?, val activa: Boolean,
-        val alTocar: () -> Unit, val alMantener: (() -> Unit)?, val alCerrar: (() -> Unit)?
+        val alTocar: () -> Unit, val alMantener: (() -> Unit)?, val alCerrar: (() -> Unit)?,
+        val miniatura: android.graphics.Bitmap? = null
     )
 
     /** Cuadrícula de dos columnas de fichas. */
@@ -665,16 +666,40 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
                 val f = GradientDrawable()
                 f.setColor(paleta.campo)
                 f.cornerRadius = dp(14).toFloat()
-                if (it2.activa) f.setStroke(dp(2), paleta.acento)
-                tarjeta.background = f
                 val sel = it2.marcado == true
-                val cuadro = texto(if (sel) "✓" else it2.letra, 24f, if (sel) Color.WHITE else paleta.texto, true)
-                cuadro.gravity = Gravity.CENTER
-                val fc = GradientDrawable()
-                fc.cornerRadius = dp(10).toFloat()
-                fc.setColor(if (sel) paleta.acento else Color.argb(60, Color.red(it2.tono), Color.green(it2.tono), Color.blue(it2.tono)))
-                cuadro.background = fc
-                tarjeta.addView(cuadro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+                if (it2.activa || sel) f.setStroke(dp(2), paleta.acento)
+                tarjeta.background = f
+                val mini = it2.miniatura
+                if (mini != null) {
+                    // Miniatura de la página: ocupa todo el ancho de la tarjeta y se recorta por abajo (se ve la parte de arriba).
+                    val iv = android.widget.ImageView(act)
+                    iv.scaleType = android.widget.ImageView.ScaleType.MATRIX
+                    iv.setImageBitmap(mini)
+                    iv.addOnLayoutChangeListener { v, l, _, r, _, _, _, _, _ ->
+                        val ancho = r - l
+                        if (ancho > 0) {
+                            val m = android.graphics.Matrix()
+                            val e = ancho.toFloat() / mini.width
+                            m.setScale(e, e)
+                            (v as android.widget.ImageView).imageMatrix = m
+                        }
+                    }
+                    iv.clipToOutline = true
+                    iv.outlineProvider = object : android.view.ViewOutlineProvider() {
+                        override fun getOutline(view: View, outline: android.graphics.Outline) {
+                            outline.setRoundRect(0, 0, view.width, view.height, dp(10).toFloat())
+                        }
+                    }
+                    tarjeta.addView(iv, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(96)))
+                } else {
+                    val cuadro = texto(if (sel) "✓" else it2.letra, 24f, if (sel) Color.WHITE else paleta.texto, true)
+                    cuadro.gravity = Gravity.CENTER
+                    val fc = GradientDrawable()
+                    fc.cornerRadius = dp(10).toFloat()
+                    fc.setColor(if (sel) paleta.acento else Color.argb(60, Color.red(it2.tono), Color.green(it2.tono), Color.blue(it2.tono)))
+                    cuadro.background = fc
+                    tarjeta.addView(cuadro, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(96)))
+                }
                 val t = texto(it2.titulo, 13f, paleta.texto)
                 t.setSingleLine(true)
                 t.ellipsize = android.text.TextUtils.TruncateAt.END
