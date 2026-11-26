@@ -332,7 +332,8 @@ class GestorPestanas(
         } else {
             null
         },
-        g.miniatura(p)
+        g.miniatura(p),
+        p.inicio
     )
 
     /** Cabecera de un grupo de sitio con sus pestañas debajo (plegable); «Cerrar grupo» cierra todas. */
