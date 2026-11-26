@@ -625,3 +625,10 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - **Versión de escritorio, ancho:** el WebView respeta el `viewport` de la web (Chrome con «Sitio para ordenador» no), así que muchas webs seguían maquetándose como móvil. Al hacerse visible la página (`onPageCommitVisible`) se fuerza `width=1280` (`ANCHO_ESCRITORIO`).
 - **Versión de escritorio, agente de usuario:** se quita también `Version/4.0`, que el Chrome de escritorio no lleva y que algunas webs usan para detectar un WebView.
 - Pendiente de probar en el móvil: que `onPageCommitVisible` llega antes del primer repintado sin parpadeo del diseño móvil, y qué ancho (980, 1024, 1280) da mejores resultados.
+
+## 1.32.3 — Cerrar Optimo desde el menú
+
+- **«Cerrar Optimo»** en el menú, justo debajo de «Cerrar todas las pestañas». Sale de la app de una vez, útil cuando se abre un enlace desde otra aplicación y ya no hace falta retroceder pestaña por pestaña.
+- Qué hace: cierra las pestañas privadas, guarda la sesión (las demás pestañas se recuperan al volver a abrir Optimo si «Guardar pestañas abiertas» está activado), para el servicio de segundo plano (el audio de fondo termina), quita la app de recientes (`finishAndRemoveTask`) y, al terminar la actividad, se ejecuta «Al salir, borrar…».
+- Si el guardado de pestañas está desactivado y hay más de una abierta, pide confirmación antes (se perderían).
+- El Kotlin, sin compilar ni probar en el móvil.
