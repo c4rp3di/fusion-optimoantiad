@@ -609,3 +609,19 @@ Kotlin sin compilar ni probar en dispositivo (revisado a mano).
 - Al ocultar, el aviso dice dónde deshacerlo (Personalizar este sitio › Reglas). El flujo de tocar un anuncio (menú del escudo) usa la misma hoja.
 - La lista de apariencias también se coloca arriba y apenas oscurece la página; cancelar siempre quita el resaltado.
 - `Hoja` gana `atenuar` y `anclarArriba`; `Dialogos.elegirEnPagina`.
+
+## 1.32.1 — Corrección de compilación
+
+- Quitado un resto en `MainActivity.kt` (un comentario y un `)` sueltos que quedaron al sacar la lista de apariencias a `ElementosPagina`) que impedía compilar con «Expecting member declaration».
+
+## 1.32.2 — Modo lectura y versión de escritorio
+
+Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en Chromium emulando un móvil (`pruebas/lectura/`); los cambios de Kotlin no se han compilado ni probado en el móvil.
+
+- **Modo lectura, letra diminuta:** la vista se maquetaba al ancho de la página (980 px sin `viewport`, 1280 en escritorio) y se encogía a ~0,4×, de modo que la letra de 19 px salía de unos 8 px. Ahora, al abrir la lectura se fuerza `width=device-width, initial-scale=1` en todas las etiquetas `viewport` (o se añade una) y al cerrarla se restauran.
+- **Modo lectura, texto partido:** un `<span>`, `<font>`, `<mark>`, `<small>`, etc. dentro de un párrafo o de un enlace se copiaba como un `<p>` anidado y la frase quedaba rota en bloques. Ahora las etiquetas en línea se aplanan.
+- **Modo lectura, «Esta página no parece un artículo»:** las páginas cuyo texto está en un `<div>` separado con `<br>` (foros, blogs antiguos) no se detectaban. Los `div` con texto propio ya puntúan como candidatos.
+- **Versión de escritorio, interruptor engañoso:** el menú mostraba solo la elección de la pestaña, no la regla del sitio, y con una regla de escritorio no se podía pasar a móvil (la siguiente navegación volvía a escritorio). Ahora `Pestana.escritorio` es `Boolean?` (null = según el sitio): el interruptor muestra lo que se usa de verdad y, si coincide con la regla, la pestaña vuelve a seguirla.
+- **Versión de escritorio, ancho:** el WebView respeta el `viewport` de la web (Chrome con «Sitio para ordenador» no), así que muchas webs seguían maquetándose como móvil. Al hacerse visible la página (`onPageCommitVisible`) se fuerza `width=1280` (`ANCHO_ESCRITORIO`).
+- **Versión de escritorio, agente de usuario:** se quita también `Version/4.0`, que el Chrome de escritorio no lleva y que algunas webs usan para detectar un WebView.
+- Pendiente de probar en el móvil: que `onPageCommitVisible` llega antes del primer repintado sin parpadeo del diseño móvil, y qué ancho (980, 1024, 1280) da mejores resultados.
