@@ -685,3 +685,13 @@ El Kotlin de esta versión no está compilado ni probado en el móvil.
 
 - El aviso con botón (`AvisoConAccion`) se puede quitar **arrastrándolo hacia un lado** (izquierda o derecha, a partir de un tercio de su ancho), sin esperar los 7 s. Si se suelta antes, vuelve a su sitio. Funciona también si el dedo empieza sobre el botón «Deshacer» (arrastrar no deshace; solo pulsar).
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.36.0 — Gestos: cerrar paneles y plegar barras
+
+El Kotlin de esta versión no está compilado ni probado en el móvil.
+
+- **Paneles laterales** (menú, ajustes, escudo, listas…): se cierran **arrastrándolos hacia la derecha**, hacia el borde por el que entran (a partir del 30 % de su ancho; si se suelta antes, vuelven). No roban el gesto a las filas de chips (`HorizontalScrollView`) ni a los deslizadores (`SeekBar`), ni al desplazamiento vertical. Está en `Hoja.kt` (`RaizPanelLateral`).
+- **Barras superior e inferior plegables** (`Plegables.kt`): la de arriba se pliega **arrastrándola hacia arriba** y la de abajo **hacia abajo** (hay que arrastrar al menos el 40 % de su alto; si no, vuelve). Su sitio lo ocupa una **tira fina** con una pastilla; **pulsarla o arrastrarla hacia dentro** despliega la barra. Así la página gana espacio sin ir a pantalla completa.
+- El plegado no se guarda: al reiniciar Optimo las barras vuelven a verse. Una pestaña de inicio despliega las barras (hace falta la barra de direcciones). En pantalla completa de la página no se ve ni la tira.
+- No hay ajuste para desactivar los gestos; si molestan, se añade.
+- Pendiente de probar: que el gesto de las barras no choque con tocar los botones o el campo de direcciones, y que el redimensionado del WebView al plegar no parpadee.
