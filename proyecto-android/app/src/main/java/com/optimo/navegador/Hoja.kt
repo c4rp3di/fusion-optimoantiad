@@ -23,6 +23,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.ScrollView
@@ -173,10 +174,22 @@ private class RaizHoja(
                 if (ev.actionMasked == MotionEvent.ACTION_UP && sentidoValido(dy) && abs(dy) > height * umbral) {
                     val fuera = if (anclaArriba()) -height.toFloat() else height.toFloat()
                     animate().translationY(fuera).alpha(0f).setDuration(130L).withEndAction {
-                        // La hoja vuelve a su sitio por si solo se pliega (la ventana sigue ahí con la tira).
-                        translationY = 0f
-                        alpha = 1f
-                        if (plegable()) alPlegar() else alCerrar()
+                        if (plegable()) {
+                            // Mientras se pliega, la raíz sigue fuera de pantalla y transparente: solo vuelve a su sitio cuando la tira ya
+                            // está maquetada. Si no, durante un fotograma se vería el marco de la hoja entera.
+                            viewTreeObserver.addOnPreDrawListener(object : android.view.ViewTreeObserver.OnPreDrawListener {
+                                override fun onPreDraw(): Boolean {
+                                    if (viewTreeObserver.isAlive) viewTreeObserver.removeOnPreDrawListener(this)
+                                    translationY = 0f
+                                    alpha = 1f
+                                    return true
+                                }
+                            })
+                            alPlegar()
+                        } else {
+                            // Al cerrar no se devuelve a su sitio (se vería la hoja durante la animación de salida de la ventana).
+                            alCerrar()
+                        }
                     }
                 } else {
                     animate().translationY(0f).alpha(1f).setDuration(130L)
@@ -265,18 +278,20 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
             val scroll = ScrollLimitado(act, maxAlto)
             scrollVista = scroll
             scroll.addView(contenido, ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            // Tirador
-            val tirador = View(act)
+            // Tirador: la pastilla va dentro de una zona táctil más alta; tocarla pliega la hoja (si deja ver la página).
+            val pastilla = View(act)
             val formaTirador = GradientDrawable()
             formaTirador.setColor(paleta.tenue)
             formaTirador.cornerRadius = dp(2).toFloat()
-            tirador.background = formaTirador
-            tirador.alpha = 0.5f
+            pastilla.background = formaTirador
+            pastilla.alpha = 0.5f
+            val tirador = FrameLayout(act)
+            tirador.addView(pastilla, FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
+            tirador.isClickable = true
+            tirador.contentDescription = "Plegar el menú"
+            tirador.setOnClickListener { if (plegableActiva) plegar() }
             this.tirador = tirador
-            val lpT = LinearLayout.LayoutParams(dp(36), dp(4))
-            lpT.gravity = Gravity.CENTER_HORIZONTAL
-            lpT.topMargin = dp(8)
-            raiz.addView(tirador, lpT)
+            raiz.addView(tirador, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)))
             raiz.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
         }
         dialogo.setContentView(raiz)
@@ -301,6 +316,10 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     fun mostrar() {
+        raizVista?.let {
+            it.translationY = 0f
+            it.alpha = 1f
+        }
         if (plegada) desplegar()
         if (!act.isFinishing) dialogo.show()
     }
@@ -362,10 +381,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         val t = tirador
         if (raiz != null && t != null && !lateral) {
             raiz.removeView(t)
-            val lp = LinearLayout.LayoutParams(dp(36), dp(4))
-            lp.gravity = Gravity.CENTER_HORIZONTAL
-            lp.bottomMargin = dp(8)
-            raiz.addView(t, lp)
+            raiz.addView(t, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)))
         }
     }
 
