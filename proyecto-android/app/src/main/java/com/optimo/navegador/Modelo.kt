@@ -105,6 +105,9 @@ class Pestana(val id: Int, val privada: Boolean) {
     /** Última vez (elapsedRealtime) que se entró o salió de esta pestaña; sirve para suspender las que llevan mucho sin usarse. */
     @Volatile var ultimoUsoMs: Long = 0L
 
+    /** Pestaña abierta desde otra app (un enlace o «Compartir»): al agotar su historial, «atrás» la cierra y vuelve a esa app. Se pierde al cambiar de pestaña. */
+    var deFuera: Boolean = false
+
     /** Visor de una página guardada: sin red, sin JavaScript y con acceso de lectura a su archivo (ver [PaginasGuardadas]). */
     var sinConexion: Boolean = false
 
