@@ -660,3 +660,11 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - **Editor de CSS** también en una hoja, con campo multilínea monoespaciado y teclado abierto: «Guardar», «Borrar el CSS» (si había algo guardado) y, nuevo, **«Probar sin guardar»** en el CSS propio del sitio, que lo aplica a la página abierta antes de guardarlo.
 - `Hoja` gana `campoMultilinea`.
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.34.1 — «Atrás» vuelve a la app de la que viene un enlace
+
+- Una pestaña abierta desde otra aplicación (un enlace o «Compartir» con Optimo) queda marcada (`Pestana.deFuera`). Cuando ya no tiene historial, **«atrás» la cierra y devuelve a la app anterior** (`moveTaskToBack`), en vez de ir cerrando pestañas una a una. Mientras hay historial en la pestaña, «atrás» retrocede como siempre.
+- La pestaña cerrada se puede recuperar en «Reabrir pestaña cerrada».
+- La marca se pierde en cuanto cambias a otra pestaña (entonces «atrás» vuelve a ser el de siempre), y solo cuenta la última pestaña abierta desde fuera.
+- Los archivos .html abiertos desde otra app no usan esto (se abren por otro camino).
+- El Kotlin, sin compilar ni probar en el móvil.
