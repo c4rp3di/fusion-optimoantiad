@@ -1595,7 +1595,10 @@ class MainActivity : Activity() {
         val ahoraUso = android.os.SystemClock.elapsedRealtime()
         if (anterior != null) anterior.ultimoUsoMs = ahoraUso
         p.ultimoUsoMs = ahoraUso
-        if (anterior != null && anterior !== p) retirarAnterior(anterior)
+        if (anterior != null && anterior !== p) {
+            Miniaturas.capturar(anterior)
+            retirarAnterior(anterior)
+        }
         actual = p
         if (p === sonando) {
             // Se vuelve a la pestaña que sonaba en segundo plano: recupera su tamaño normal.
@@ -1707,6 +1710,7 @@ class MainActivity : Activity() {
         val idx = pestanas.indexOf(p)
         if (idx < 0) return
         recordarCerrada(p)
+        Miniaturas.olvidar(p)
         if (p.appWeb && p.archivoRuta.isNotEmpty()) AppLocal.liberar(p.url, File(p.archivoRuta))
         pestanas.removeAt(idx)
         if (p === sonando) {
@@ -2172,6 +2176,13 @@ class MainActivity : Activity() {
         override fun marcar(p: Pestana): Boolean {
             val u = p.url
             return u.startsWith("http") && !marcadores.contiene(u) && marcadores.agregar(tituloDe(p), u, 0L)
+        }
+
+        override fun miniatura(p: Pestana): android.graphics.Bitmap? = Miniaturas.obtener(p)
+
+        override fun capturarActual() {
+            val a = this@MainActivity.actual
+            if (a != null) Miniaturas.capturar(a)
         }
 
         override fun comprobarSonido(alCambiar: () -> Unit) {
