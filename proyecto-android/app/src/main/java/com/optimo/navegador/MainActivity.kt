@@ -245,6 +245,7 @@ class MainActivity : Activity() {
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         BarraConfig.iniciar(this)
+        Gestos.iniciar(this)
         EstadisticasBloqueo.iniciar(this)
         PaginasGuardadas.iniciar(this)
         ListasEnlaces.iniciar(this)
