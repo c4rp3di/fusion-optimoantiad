@@ -668,3 +668,15 @@ Revisión de estas dos funciones. Los fallos del modo lectura se reprodujeron en
 - La marca se pierde en cuanto cambias a otra pestaña (entonces «atrás» vuelve a ser el de siempre), y solo cuenta la última pestaña abierta desde fuera.
 - Los archivos .html abiertos desde otra app no usan esto (se abren por otro camino).
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.35.0 — Deshacer al ocultar, sin duplicar .html locales y lista de enlaces con búsqueda y selección
+
+El Kotlin de esta versión no está compilado ni probado en el móvil.
+
+- **Deshacer al ocultar un elemento:** tras «Ocultar siempre en el sitio» sale un aviso sobre la barra inferior con el botón **Deshacer** (7 s; `AvisoConAccion.kt`). Deshacer quita la regla y recarga la página para que el elemento vuelva a verse (las hojas CSS inyectadas no se pueden retirar una a una). Antes el aviso solo remitía a «Personalizar este sitio › Reglas».
+- **Sin duplicados al marcar un `.html` local:** al pulsar ☆ se busca una copia permanente con el mismo contenido (primero por tamaño y luego por huella SHA-256) y se reutiliza en vez de guardar otra. Si ese mismo marcador ya existe avisa «Ya estaba en marcadores». Si dos marcadores comparten copia (p. ej. uno con JavaScript y otro sin él), la copia solo se borra cuando se quita el último.
+- **Lista de enlaces encontrados:**
+  - **Búsqueda** por texto en el nombre, la dirección, el dominio o el tipo; el título muestra cuántos quedan.
+  - **Selección múltiple:** pulsación larga en una fila o «☑ Seleccionar»; «Todos» marca o desmarca lo que se ve; «Acciones (N)» ofrece copiar (con o sin nombres), compartir, exportar a .txt o .csv y guardar como lista solo lo marcado.
+  - «Más» ahora actúa sobre lo que se ve tras buscar.
+- Sigue pendiente **enviar varios enlaces a Optimo Play**: no se sabe qué `Intent` de lista acepta (haría falta su código o generar una lista `.m3u`, que además exigiría un `FileProvider`).
