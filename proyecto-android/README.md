@@ -698,7 +698,7 @@ Compilada y probada en el móvil: funciona como debe.
 
 ## 1.37.0 — Interruptor de gestos y hojas que se pliegan
 
-Estado: 1.34.0 a 1.36.0 compiladas y probadas en el móvil (sin fallos). Esta versión, sin compilar ni probar todavía.
+Estado: 1.34.0 a 1.36.0 compiladas y probadas en el móvil (sin fallos). 1.37.0 compilada y probada: funciona.
 
 - **Interruptor «Gestos de arrastre»** (Ajustes › Aspecto › Interfaz de Optimo; `Gestos` en `Plegables.kt`, preferencia `gestos_arrastre`, activado por defecto). Apagado, ni los paneles laterales, ni las barras, ni las hojas interceptan el arrastre. Las tiras que ya estuvieran plegadas se pueden desplegar igualmente tocándolas.
 - **Hojas arriba y abajo con el mismo plegado que las barras** (`RaizHoja` en `Hoja.kt`):
@@ -707,3 +707,11 @@ Estado: 1.34.0 a 1.36.0 compiladas y probadas en el móvil (sin fallos). Esta ve
   - No roban el desplazamiento de su contenido: arrastran solo cuando la lista ya no puede desplazarse más en ese sentido, o si el dedo empieza en el **tirador** (en las hojas ancladas arriba, el tirador pasa al borde de abajo). Tampoco roban el gesto a las filas de chips ni a los deslizadores.
 - Refactor: `hayArrastrableDentro` pasa a una función común de `Hoja.kt`.
 - **A probar:** plegar y desplegar la hoja de «Ocultar» con el elemento arriba y abajo; tocar la página con la hoja plegada; que cerrar con «atrás» funcione plegada; arrastrar hojas con listas largas (que siga desplazando la lista); cerrar una confirmación arrastrándola y que cuente como cancelar (p. ej. al abrir un `.html` local, el archivo temporal se borra); que apagar el interruptor desactive los tres gestos.
+
+## 1.37.1 — Plegar tocando el tirador y sin parpadeo al plegar
+
+Sin compilar ni probar todavía.
+
+- **Plegar también con un toque:** en las hojas que dejan ver la página, tocar el **tirador** las pliega, igual que tocar la tira las despliega. El tirador ahora es una zona táctil de 26 dp de alto (la pastilla va centrada dentro; antes solo medía 4 dp). En las hojas que no se pliegan, el toque no hace nada. En las ancladas arriba, el tirador sigue en el borde de abajo.
+- **Parpadeo corregido** (`RaizHoja`): al terminar de arrastrar, la hoja se devolvía a su sitio un fotograma antes de que la tira estuviera maquetada, y se veía su marco (sobre todo hacia abajo). Ahora la raíz sigue fuera de pantalla y transparente hasta el primer dibujo con la tira ya colocada. Al **cerrar** arrastrando tampoco se devuelve a su sitio (se vería durante la animación de salida de la ventana); `Hoja.mostrar()` la restablece por si una hoja se vuelve a abrir.
+- **A probar:** que no quede ningún destello al plegar hacia abajo y hacia arriba (con el elemento arriba y abajo), que tocar el tirador pliegue y la tira despliegue, que arrastrar desde el tirador siga funcionando y que cerrar confirmaciones arrastrando no deje destellos.
