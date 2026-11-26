@@ -231,6 +231,31 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         return c
     }
 
+    /** Campo de texto de varias líneas (CSS, notas), en letra monoespaciada. */
+    fun campoMultilinea(pista: String, inicial: String, lineas: Int): EditText {
+        val c = EditText(act)
+        c.hint = pista
+        c.setText(inicial)
+        c.minLines = lineas
+        c.gravity = Gravity.TOP or Gravity.START
+        c.typeface = Typeface.MONOSPACE
+        c.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
+        c.setTextColor(paleta.texto)
+        c.setHintTextColor(paleta.tenue)
+        c.setPadding(dp(14), dp(10), dp(14), dp(10))
+        c.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        c.setHorizontallyScrolling(false)
+        val f = GradientDrawable()
+        f.setColor(paleta.campo)
+        f.cornerRadius = dp(12).toFloat()
+        c.background = f
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(4)
+        lp.bottomMargin = dp(8)
+        agregar(c, lp)
+        return c
+    }
+
     /** Etiqueta pequeña sobre un campo. */
     fun etiqueta(t: String) {
         val v = texto(t, 12f, paleta.tenue)
