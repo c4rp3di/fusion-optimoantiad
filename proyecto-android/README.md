@@ -680,3 +680,8 @@ El Kotlin de esta versión no está compilado ni probado en el móvil.
   - **Selección múltiple:** pulsación larga en una fila o «☑ Seleccionar»; «Todos» marca o desmarca lo que se ve; «Acciones (N)» ofrece copiar (con o sin nombres), compartir, exportar a .txt o .csv y guardar como lista solo lo marcado.
   - «Más» ahora actúa sobre lo que se ve tras buscar.
 - Sigue pendiente **enviar varios enlaces a Optimo Play**: no se sabe qué `Intent` de lista acepta (haría falta su código o generar una lista `.m3u`, que además exigiría un `FileProvider`).
+
+## 1.35.1 — El aviso «Deshacer» se descarta deslizándolo
+
+- El aviso con botón (`AvisoConAccion`) se puede quitar **arrastrándolo hacia un lado** (izquierda o derecha, a partir de un tercio de su ancho), sin esperar los 7 s. Si se suelta antes, vuelve a su sitio. Funciona también si el dedo empieza sobre el botón «Deshacer» (arrastrar no deshace; solo pulsar).
+- El Kotlin, sin compilar ni probar en el móvil.
