@@ -245,6 +245,7 @@ class MainActivity : Activity() {
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         BarraConfig.iniciar(this)
+        ListaDescargas.iniciar(this)
         Gestos.iniciar(this)
         EstadisticasBloqueo.iniciar(this)
         PaginasGuardadas.iniciar(this)
@@ -3534,7 +3535,28 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Pantalla de Descargas de Optimo (las hechas desde aquí, con progreso, filtros y acciones). */
     private fun abrirDescargas() {
+        PanelDescargas(this, paleta, ajustes, anfitrionDescargas, actual?.privada == true).mostrar()
+    }
+
+    private val anfitrionDescargas = object : AnfitrionDescargas {
+        override fun abrirCarpeta() = abrirCarpetaDescargas()
+
+        override fun reintentar(r: RegistroDescarga) {
+            descargar(r.url, null, null, r.mime.ifEmpty { null }, false, r.nombre)
+        }
+
+        override fun abrirEnPestana(url: String) {
+            nuevaPestana(url)
+        }
+
+        override fun copiar(texto: String) = this@MainActivity.copiar(texto)
+        override fun avisar(texto: String) = toast(texto)
+        override fun volverAlMenu() = abrirMenuLateral()
+    }
+
+    private fun abrirCarpetaDescargas() {
         // Tu gestor de archivos, en la carpeta Descargas; si no está instalado, el gestor de descargas del sistema.
         if (GestorExterno.abrirDescargas(this)) return
         try {
@@ -4230,7 +4252,7 @@ class MainActivity : Activity() {
         opciones("Siempre abrir con…", items)
     }
 
-    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false) {
+    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false, nombreElegido: String? = null) {
         if (!(url.startsWith("http://") || url.startsWith("https://"))) {
             toast("Este tipo de descarga no es compatible")
             return
@@ -4242,15 +4264,22 @@ class MainActivity : Activity() {
                 return
             }
         }
+        // «Confirmar antes de descargar»: se muestra el sitio y se deja cambiar el nombre.
+        if (nombreElegido == null && ajustes.descargaConfirmar) {
+            confirmarDescarga(this, paleta, privada, URLUtil.guessFileName(url, disposicion, mime), Omnibox.hostDe(url), mime ?: "") { n ->
+                descargar(url, ua, disposicion, mime, privada, n)
+            }
+            return
+        }
         if (Build.VERSION.SDK_INT < 29 &&
             checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
         ) {
-            pendienteDescarga = { descargar(url, ua, disposicion, mime, privada) }
+            pendienteDescarga = { descargar(url, ua, disposicion, mime, privada, nombreElegido) }
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
             return
         }
         try {
-            val nombre = URLUtil.guessFileName(url, disposicion, mime)
+            val nombre = nombreElegido ?: URLUtil.guessFileName(url, disposicion, mime)
             val pet = DownloadManager.Request(Uri.parse(url))
             if (!mime.isNullOrEmpty()) pet.setMimeType(mime)
             if (!ua.isNullOrEmpty()) pet.addRequestHeader("User-Agent", ua)
@@ -4261,8 +4290,19 @@ class MainActivity : Activity() {
             pet.setTitle(nombre)
             pet.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
             pet.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, nombre)
+            if (ajustes.descargaSoloWifi) pet.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI)
             val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            dm.enqueue(pet)
+            val idDescarga = dm.enqueue(pet)
+            // Se anota para la pantalla de Descargas, salvo en pestañas privadas.
+            if (!privada && ajustes.descargaRecordar) {
+                val pagina = actual?.url ?: ""
+                ListaDescargas.agregar(
+                    RegistroDescarga(
+                        idDescarga, nombre, url, mime ?: "", Omnibox.hostDe(url).lowercase().removePrefix("www."),
+                        System.currentTimeMillis(), if (pagina.startsWith("http")) pagina else ""
+                    )
+                )
+            }
             toast("Descargando $nombre")
         } catch (e: Exception) {
             toast("No se pudo iniciar la descarga")
