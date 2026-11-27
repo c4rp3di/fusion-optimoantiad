@@ -248,6 +248,10 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     private var tirador: View? = null
     private var scrollVista: ScrollView? = null
     private var asa: AsaBarra? = null
+    private var sinBloqueo = false
+
+    /** ¿Está plegada a la tira del borde? */
+    val estaPlegada: Boolean get() = plegada
 
     private fun dp(v: Int): Int = (v * act.resources.displayMetrics.density + 0.5f).toInt()
 
@@ -332,6 +336,24 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         if (!plegada) dialogo.window?.setDimAmount(cantidad)
     }
 
+    /** Hoja que no bloquea la página ni lo que haya detrás: se puede tocar fuera de ella aunque esté desplegada. Sin oscurecer. */
+    fun sinBloquearDetras() {
+        sinBloqueo = true
+        dimActual = 0f
+        dialogo.window?.let {
+            it.setDimAmount(0f)
+            it.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+        }
+        dialogo.setCanceledOnTouchOutside(false)
+    }
+
+    /** Pliega la hoja si deja ver la página y no está ya plegada. Devuelve true si la ha plegado. */
+    fun plegarAhora(): Boolean {
+        if (!plegableActiva || plegada || lateral || !dialogo.isShowing) return false
+        plegar()
+        return true
+    }
+
     /** Pliega la hoja a una tira del borde (la página queda a la vista y se puede tocar). Tocar la tira, o arrastrarla hacia dentro, la despliega. */
     private fun plegar() {
         val raiz = raizVista ?: return
@@ -364,10 +386,11 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         scrollVista?.visibility = View.VISIBLE
         val w = dialogo.window
         if (w != null) {
-            w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+            if (sinBloqueo) w.addFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
+            else w.clearFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
             w.setDimAmount(dimActual)
         }
-        dialogo.setCanceledOnTouchOutside(cancelableBase)
+        dialogo.setCanceledOnTouchOutside(cancelableBase && !sinBloqueo)
     }
 
     /** Coloca la hoja arriba en vez de abajo (para no tapar un elemento elegido en la parte baja de la página). */
@@ -1065,6 +1088,32 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
     }
 
     /** Rótulo de un ajuste (encima de sus segmentos). */
+    /** Como [chips], pero cada uno se marca o desmarca por separado. [alCambiar] recibe la posición y el nuevo estado. */
+    fun chipsMultiples(etiquetas: List<String>, marcados: BooleanArray, alCambiar: (Int, Boolean) -> Unit) {
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.setPadding(0, dp(8), 0, dp(8))
+        for ((i, e) in etiquetas.withIndex()) {
+            val marcado = marcados[i]
+            val t = texto(e, 12f, if (marcado) Color.WHITE else paleta.texto, marcado)
+            t.gravity = Gravity.CENTER
+            t.setPadding(dp(12), dp(8), dp(12), dp(8))
+            val f = GradientDrawable()
+            f.cornerRadius = dp(16).toFloat()
+            f.setColor(if (marcado) paleta.acento else paleta.campo)
+            t.background = f
+            t.isClickable = true
+            t.setOnClickListener { alCambiar(i, !marcado) }
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+            if (i > 0) lp.leftMargin = dp(6)
+            fila.addView(t, lp)
+        }
+        val desplazable = HorizontalScrollView(act)
+        desplazable.isHorizontalScrollBarEnabled = false
+        desplazable.addView(fila)
+        agregar(desplazable)
+    }
+
     fun rotulo(t: String) {
         val v = texto(t, 15f, paleta.texto)
         v.setPadding(dp(4), dp(10), dp(4), dp(2))
