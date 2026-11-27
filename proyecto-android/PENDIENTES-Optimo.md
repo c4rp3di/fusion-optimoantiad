@@ -206,3 +206,10 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Descargas de aplicaciones web: el tamaño que se muestra es el de bytes escritos; mostrar progreso de las descargas blob grandes en la lista (hoy solo el aviso al terminar).
 - Mover `abrirDescargas`, `anfitrionDescargas` y `abrirCarpetaDescargas` (≈40 líneas) a `ControlDescargas.kt` cuando haya una interfaz común con `nuevaPestana` y `copiar`.
 - Reproductor multimedia y creación de WebView (`ClienteWeb`, `ClienteChrome`) siguen en `MainActivity`.
+
+## Apuntado en 1.40.0
+- Enviar varios enlaces a Optimo Play (necesita el código de Play).
+- Rastreador: la etiqueta «+N nuevos» solo aparece en los resultados de un nuevo rastreo; las tarjetas de «Listas de enlaces» no la guardan.
+- Rastreador: «Descargar» los enlaces marcados no está (no hay descargas de varios archivos desde la lista); se exporta o comparte la lista.
+- Rastreo en segundo plano con servicio (hoy solo con la app abierta).
+
