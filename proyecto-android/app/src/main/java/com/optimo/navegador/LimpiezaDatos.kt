@@ -142,6 +142,7 @@ class LimpiezaDatos(
 
     /** Historial, excepciones de certificado, cookies, almacenamiento y caché de la página abierta. */
     fun borrarDatosNavegacion() {
+        ListaDescargas.vaciar()
         vaciarHistorial()
         ExcepcionesSsl.quitarTodas()
         olvidarSsl()
