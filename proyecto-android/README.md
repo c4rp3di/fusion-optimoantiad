@@ -751,3 +751,16 @@ Sin compilar ni probar todavía. Misma apariencia que el resto de Optimo: panele
 - Las cifras de «≤ N páginas · ≤ M min» son **topes**, no una estimación del sitio.
 - **A probar:** rastrear con las tres opciones de alcance; pausar/reanudar; plegar y desplegar la hoja y seguir navegando; «atrás» (pliega, luego quita); que termine con la hoja plegada (aviso «Ver»); resultados con agrupación y filtros; marcar varios y cada acción de la hoja; «Rastrear de nuevo» desde una lista guardada.
 
+
+## 1.41.0 — Cada gesto de arrastre, por separado
+
+Sin compilar ni probar todavía (sobre 1.40.0).
+
+- **Pantalla lateral «Gestos de arrastre»** (Ajustes › Aspecto › Interfaz de Optimo; la fila muestra cuántos hay activos, p. ej. 6/6). Sustituye al interruptor único. Seis interruptores:
+  - **Paneles:** cerrar arrastrando hacia la derecha.
+  - **Barras:** plegar la superior (hacia arriba) y la inferior (hacia abajo), cada una por su lado.
+  - **Hojas:** plegar arrastrando las que dejan ver la página; plegar tocando el tirador; cerrar arrastrando hacia abajo las demás.
+  - «Activar todos los gestos» los vuelve a encender.
+- Un gesto apagado deja de interceptar los toques; los demás siguen igual. Las tiras ya plegadas se despliegan siempre tocándolas.
+- `Gestos` (`Plegables.kt`) guarda una preferencia por gesto (`gesto_<id>`); si antes se había apagado el interruptor único (`gestos_arrastre`), ese valor es el de partida de todos hasta que se cambie alguno.
+- **A probar:** apagar cada gesto y ver que solo desaparece ese; que el tirador pliegue con «Plegar hojas arrastrándolas» apagado y al revés; la hoja del rastreador (plegable) y las de confirmar/elegir (cerrar); el contador de la fila; «Activar todos»; «atrás» vuelve a Aspecto.
