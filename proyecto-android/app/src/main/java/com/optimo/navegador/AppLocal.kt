@@ -163,12 +163,19 @@ object AppLocal {
  * Escribe un archivo en la carpeta Descargas del dispositivo, trozo a trozo (se llama desde un hilo de fondo).
  * Android 10+: MediaStore (sin permisos); antes: carpeta pública Descargas (permiso de almacenamiento ya concedido).
  */
-class EscritorDescarga(private val c: Context, nombre: String, private val mime: String) {
+class EscritorDescarga(private val c: Context, nombre: String, val mime: String) {
 
     val nombre: String = limpiar(nombre, mime)
     private var salida: OutputStream? = null
     private var uri: Uri? = null
     private var archivo: File? = null
+
+    /** Bytes escritos hasta ahora (se actualiza desde el hilo de escritura). */
+    @Volatile var bytes: Long = 0L
+        private set
+
+    /** Dónde quedó el archivo: la dirección de MediaStore (Android 10+) o la ruta del archivo (antes). */
+    val ubicacion: String get() = uri?.toString() ?: archivo?.absolutePath ?: ""
 
     private fun limpiar(n: String, mime: String): String {
         var r = n.replace(Regex("[\\\\/:*?\"<>|\\p{Cntrl}]"), "_").trim().trim('.').take(120)
@@ -215,8 +222,9 @@ class EscritorDescarga(private val c: Context, nombre: String, private val mime:
         }
     }
 
-    fun escribir(bytes: ByteArray) {
-        salida!!.write(bytes)
+    fun escribir(datos: ByteArray) {
+        salida!!.write(datos)
+        bytes += datos.size
     }
 
     /** Cierra y publica el archivo. */
