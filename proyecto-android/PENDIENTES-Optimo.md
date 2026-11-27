@@ -201,3 +201,8 @@ Pestaña «Auditoría» del panel de DevTools; ver README 1.15.0. Pendiente:
 - Descargas: pausar y reanudar exigiría un descargador propio (hoy solo cancelar y reintentar).
 - Descargas: cambiar el nombre de un archivo ya descargado y mostrar la carpeta exacta del archivo.
 - Confirmar antes de descargar: mostrar también el tamaño (haría falta una petición HEAD previa).
+
+## Apuntado en 1.39.0
+- Descargas de aplicaciones web: el tamaño que se muestra es el de bytes escritos; mostrar progreso de las descargas blob grandes en la lista (hoy solo el aviso al terminar).
+- Mover `abrirDescargas`, `anfitrionDescargas` y `abrirCarpetaDescargas` (≈40 líneas) a `ControlDescargas.kt` cuando haya una interfaz común con `nuevaPestana` y `copiar`.
+- Reproductor multimedia y creación de WebView (`ClienteWeb`, `ClienteChrome`) siguen en `MainActivity`.
