@@ -83,7 +83,13 @@ class PanelDescargas(
     }
 
     private fun refrescarEstados() {
-        estados = gestor.consultar(ListaDescargas.todas().map { it.id })
+        val todas = ListaDescargas.todas()
+        val mapa = HashMap(gestor.consultar(todas.filter { !it.local }.map { it.id }))
+        // Archivos guardados desde aplicaciones web locales: no pasan por el gestor del sistema, se comprueba que sigan ahí.
+        for (r in todas) {
+            if (r.local && gestor.existeLocal(r)) mapa[r.id] = EstadoDescarga(android.app.DownloadManager.STATUS_SUCCESSFUL, r.bytes, r.bytes, 0, r.ubicacion)
+        }
+        estados = mapa
         val ahora = SystemClock.elapsedRealtime()
         for ((id, e) in estados) {
             if (!e.enCurso) continue
@@ -104,7 +110,8 @@ class PanelDescargas(
 
     // ---------------------------------------------------------------- datos
 
-    private fun nombreDe(r: RegistroDescarga): String = estados[r.id]?.nombreLocal?.takeIf { it.isNotEmpty() } ?: r.nombre
+    private fun nombreDe(r: RegistroDescarga): String =
+        if (r.local) r.nombre else estados[r.id]?.nombreLocal?.takeIf { it.isNotEmpty() } ?: r.nombre
 
     private fun tipoDe(r: RegistroDescarga): Int = TiposDescarga.de(nombreDe(r), r.mime)
 
@@ -290,12 +297,12 @@ class PanelDescargas(
     // ---------------------------------------------------------------- acciones
 
     private fun abrir(r: RegistroDescarga, elegir: Boolean) {
-        if (!gestor.abrir(r.id, r.mime, elegir)) g.avisar("No hay ninguna app para abrir este archivo, o ya no existe")
+        if (!gestor.abrir(r, elegir)) g.avisar("No hay ninguna app para abrir este archivo, o ya no existe")
     }
 
     private fun cancelar(r: RegistroDescarga) {
         confirmar("Cancelar la descarga", "Se detendrá «" + nombreDe(r) + "» y se borrará lo descargado.", "Cancelar descarga") {
-            gestor.borrarArchivo(r.id)
+            gestor.borrarArchivo(r)
             ListaDescargas.quitar(r.id)
             g.avisar("Descarga cancelada")
             refrescarEstados()
@@ -310,13 +317,13 @@ class PanelDescargas(
             l.add(Triple("Abrir", false, { abrir(r, false) }))
             l.add(Triple("Abrir con…", false, { abrir(r, true) }))
             l.add(Triple("Compartir…", false, {
-                if (!gestor.compartir(listOf(r.id), mapOf(r.id to r.mime))) g.avisar("No se pudo compartir el archivo")
+                if (!gestor.compartir(listOf(r))) g.avisar("No se pudo compartir el archivo")
             }))
             l.add(Triple("Mostrar en la carpeta", false, {
                 hoja.cerrar()
                 g.abrirCarpeta()
             }))
-        } else if (e == null || e.fallida) {
+        } else if (!r.local && (e == null || e.fallida)) {
             l.add(Triple(if (e == null) "Descargar de nuevo" else "Reintentar", false, {
                 g.reintentar(r)
                 ListaDescargas.quitar(r.id)
@@ -324,7 +331,7 @@ class PanelDescargas(
                 pintarTodo()
             }))
         }
-        l.add(Triple("Copiar el enlace de descarga", false, { g.copiar(r.url) }))
+        if (r.url.isNotEmpty()) l.add(Triple("Copiar el enlace de descarga", false, { g.copiar(r.url) }))
         if (r.origen.startsWith("http")) {
             l.add(Triple("Abrir la página de origen", false, {
                 hoja.cerrar()
@@ -338,7 +345,7 @@ class PanelDescargas(
         if (e != null) {
             l.add(Triple("Borrar el archivo", true, {
                 confirmar("Borrar el archivo", "Se borrará «" + nombreDe(r) + "» del dispositivo.", "Borrar") {
-                    gestor.borrarArchivo(r.id)
+                    gestor.borrarArchivo(r)
                     ListaDescargas.quitar(r.id)
                     g.avisar("Archivo borrado")
                     refrescarEstados()
@@ -353,7 +360,7 @@ class PanelDescargas(
 
     private fun compartirElegidas() {
         val l = elegidas().filter { estados[it.id]?.completada == true }
-        if (l.isEmpty() || !gestor.compartir(l.map { it.id }, l.associate { it.id to it.mime })) g.avisar("Nada que compartir en la selección")
+        if (l.isEmpty() || !gestor.compartir(l)) g.avisar("Nada que compartir en la selección")
     }
 
     private fun quitarElegidas() {
@@ -366,7 +373,7 @@ class PanelDescargas(
         val l = elegidas()
         confirmar("Borrar " + l.size + (if (l.size == 1) " archivo" else " archivos"), "Se borrarán del dispositivo y de la lista.", "Borrar") {
             for (r in l) {
-                gestor.borrarArchivo(r.id)
+                gestor.borrarArchivo(r)
                 ListaDescargas.quitar(r.id)
             }
             seleccion.clear()
