@@ -1454,16 +1454,16 @@ class MainActivity : Activity() {
         w.setDownloadListener { url, ua, disposicion, mime, _ ->
             if (url.startsWith("blob:")) {
                 // Las descargas blob: solo se admiten en una aplicación web local (puente restringido a su origen).
-                if (p.appWeb) descargarBlob(w, url, disposicion, mime) else toast("Este tipo de descarga no es compatible")
+                if (p.appWeb) controlDescargas.descargarBlob(w, url, disposicion, mime) else toast("Este tipo de descarga no es compatible")
                 return@setDownloadListener
             }
             if (ReproductorExterno.esMedio(url, mime)) {
                 // Vídeo, audio o torrent: según Ajustes › «Enlaces multimedia y magnets», se descarga, se pregunta o va a otra app.
                 gestionarMedio(url, mime, p, ua, URLUtil.guessFileName(url, disposicion, mime), "Descargar") {
-                    descargar(url, ua, disposicion, mime, p.privada)
+                    controlDescargas.descargar(url, ua, disposicion, mime, p.privada)
                 }
             } else {
-                descargar(url, ua, disposicion, mime, p.privada)
+                controlDescargas.descargar(url, ua, disposicion, mime, p.privada)
             }
         }
         w.setFindListener { ordinal, total, _ ->
@@ -1472,7 +1472,7 @@ class MainActivity : Activity() {
         w.setOnTouchListener { v, ev -> alTocar(v as WebView, p, ev) }
         w.setOnLongClickListener { v -> menuContextual(v as WebView, p) }
         aplicarAjustesWeb(w)
-        if (p.appWeb) instalarPuenteApp(w) else anuncios.instalar(w)
+        if (p.appWeb) controlDescargas.instalarPuente(w) else anuncios.instalar(w)
         agenteDev.instalar(w)
         silenciador.instalar(w, p.silenciada)
         p.web = w
@@ -3544,7 +3544,7 @@ class MainActivity : Activity() {
         override fun abrirCarpeta() = abrirCarpetaDescargas()
 
         override fun reintentar(r: RegistroDescarga) {
-            descargar(r.url, null, null, r.mime.ifEmpty { null }, false, r.nombre)
+            controlDescargas.descargar(r.url, null, null, r.mime.ifEmpty { null }, false, r.nombre)
         }
 
         override fun abrirEnPestana(url: String) {
@@ -3711,7 +3711,7 @@ class MainActivity : Activity() {
         if (imagen != null) {
             add("Abrir imagen en pestaña nueva") { nuevaPestana(imagen, privada) }
             add("Descargar imagen") {
-                descargar(imagen, actual?.web?.settings?.userAgentString, null, null, actual?.privada == true)
+                controlDescargas.descargar(imagen, actual?.web?.settings?.userAgentString, null, null, actual?.privada == true)
             }
         }
         add("Bloquear este anuncio…") { bloquearAnuncio(web, p, imagen, p.toqueX, p.toqueY) }
@@ -4252,63 +4252,6 @@ class MainActivity : Activity() {
         opciones("Siempre abrir con…", items)
     }
 
-    private fun descargar(url: String, ua: String?, disposicion: String?, mime: String?, privada: Boolean = false, nombreElegido: String? = null) {
-        if (!(url.startsWith("http://") || url.startsWith("https://"))) {
-            toast("Este tipo de descarga no es compatible")
-            return
-        }
-        if (url.startsWith("http://")) {
-            val h = Omnibox.hostDe(url).lowercase()
-            if (!httpPermitido.contains(h) && !Omnibox.esLocal(h)) {
-                toast("Descarga sin cifrar bloqueada")
-                return
-            }
-        }
-        // «Confirmar antes de descargar»: se muestra el sitio y se deja cambiar el nombre.
-        if (nombreElegido == null && ajustes.descargaConfirmar) {
-            confirmarDescarga(this, paleta, privada, URLUtil.guessFileName(url, disposicion, mime), Omnibox.hostDe(url), mime ?: "") { n ->
-                descargar(url, ua, disposicion, mime, privada, n)
-            }
-            return
-        }
-        if (Build.VERSION.SDK_INT < 29 &&
-            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendienteDescarga = { descargar(url, ua, disposicion, mime, privada, nombreElegido) }
-            requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
-            return
-        }
-        try {
-            val nombre = nombreElegido ?: URLUtil.guessFileName(url, disposicion, mime)
-            val pet = DownloadManager.Request(Uri.parse(url))
-            if (!mime.isNullOrEmpty()) pet.setMimeType(mime)
-            if (!ua.isNullOrEmpty()) pet.addRequestHeader("User-Agent", ua)
-            // La descarga desde una pestaña privada usa las cookies del perfil privado, nunca las de las normales.
-            val gestor = if (privada) gestorCookiesPrivado() else CookieManager.getInstance()
-            val cookie = gestor?.getCookie(url)
-            if (!cookie.isNullOrEmpty()) pet.addRequestHeader("Cookie", cookie)
-            pet.setTitle(nombre)
-            pet.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            pet.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, nombre)
-            if (ajustes.descargaSoloWifi) pet.setAllowedNetworkTypes(DownloadManager.Request.NETWORK_WIFI)
-            val dm = getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-            val idDescarga = dm.enqueue(pet)
-            // Se anota para la pantalla de Descargas, salvo en pestañas privadas.
-            if (!privada && ajustes.descargaRecordar) {
-                val pagina = actual?.url ?: ""
-                ListaDescargas.agregar(
-                    RegistroDescarga(
-                        idDescarga, nombre, url, mime ?: "", Omnibox.hostDe(url).lowercase().removePrefix("www."),
-                        System.currentTimeMillis(), if (pagina.startsWith("http")) pagina else ""
-                    )
-                )
-            }
-            toast("Descargando $nombre")
-        } catch (e: Exception) {
-            toast("No se pudo iniciar la descarga")
-        }
-    }
-
     /** Enlaces que salen del navegador. Los magnet pasan por la decisión de Ajustes (preguntar / app fija / automático). */
     private fun abrirExterno(url: String) {
         if (ReproductorExterno.esMagnet(url)) {
@@ -4540,109 +4483,30 @@ class MainActivity : Activity() {
         q.web?.loadUrl(q.url)
     }
 
-    // ---------------------------------------------------------------- aplicación web local: descargas blob:
+    // ---------------------------------------------------------------- descargas (ControlDescargas.kt)
 
-    private val ejecutorDescargas: java.util.concurrent.ExecutorService = java.util.concurrent.Executors.newSingleThreadExecutor()
-    private var descargaBlob: EscritorDescarga? = null
-    private var tokenBlob: String? = null
+    private val anfitrionControlDescargas = object : AnfitrionControlDescargas {
+        override fun httpPermitido(host: String): Boolean = httpPermitido.contains(host)
 
-    private val soportaPuenteApp: Boolean by lazy {
-        try { WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER) } catch (e: Throwable) { false }
-    }
-    private val soportaInicioApp: Boolean by lazy {
-        try { WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT) } catch (e: Throwable) { false }
-    }
-
-    /** Instala (antes de cargar nada) el script de blobs y el puente de descargas, ambos restringidos a los orígenes de aplicaciones web. */
-    private fun instalarPuenteApp(w: WebView) {
-        if (!soportaPuenteApp || !soportaInicioApp) return
-        try {
-            WebViewCompat.addDocumentStartJavaScript(w, AppLocal.GUION_INICIO, setOf(AppLocal.REGLA_ORIGEN))
-            WebViewCompat.addWebMessageListener(w, AppLocal.NOMBRE_PUENTE, setOf(AppLocal.REGLA_ORIGEN)) { _, mensaje, origen, _, respuesta ->
-                alMensajeDescarga(origen, mensaje.data, respuesta)
-            }
-        } catch (e: Exception) {
-            // Sin puente: la aplicación funciona igual, solo fallan las descargas blob:.
+        override fun cookiesDe(url: String, privada: Boolean): String? {
+            // La descarga desde una pestaña privada usa las cookies del perfil privado, nunca las de las normales.
+            val gestor = if (privada) gestorCookiesPrivado() else CookieManager.getInstance()
+            return gestor?.getCookie(url)
         }
-    }
 
-    private fun descargarBlob(w: WebView, url: String, disposicion: String?, mime: String?) {
-        if (!soportaPuenteApp) {
-            toast("Este WebView no admite descargas de la aplicación; actualiza Android System WebView")
-            return
-        }
-        if (tokenBlob != null || descargaBlob != null) {
-            toast("Ya hay una descarga en curso")
-            return
-        }
-        if (Build.VERSION.SDK_INT < 29 &&
-            checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendienteDescarga = { descargarBlob(w, url, disposicion, mime) }
+        override fun permisoAlmacenamiento(reintentar: () -> Unit): Boolean {
+            if (Build.VERSION.SDK_INT >= 29 || checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) == PackageManager.PERMISSION_GRANTED) return true
+            pendienteDescarga = reintentar
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), REQ_ALMACENAMIENTO)
-            return
+            return false
         }
-        val token = java.util.UUID.randomUUID().toString()
-        tokenBlob = token
-        // Si la página no empieza a mandar datos en 30 s, se olvida el intento.
-        w.postDelayed({ if (tokenBlob == token && descargaBlob == null) tokenBlob = null }, 30000)
-        val nombre = if (disposicion != null && disposicion.contains("filename", true)) URLUtil.guessFileName(url, disposicion, mime) else ""
-        w.evaluateJavascript(AppLocal.guionDescarga(token, url, nombre), null)
+
+        override fun paginaActual(): String = actual?.url ?: ""
+        override fun appActual(): Pestana? = actual
+        override fun avisar(texto: String) = toast(texto)
     }
 
-    private fun abortarDescargaBlob(mensaje: String) {
-        val esc = descargaBlob
-        descargaBlob = null
-        tokenBlob = null
-        if (esc != null) ejecutorDescargas.execute { esc.abortar() }
-        toast(mensaje)
-    }
-
-    /** Mensajes de la página durante una descarga blob: solo de un origen de aplicación web y solo con el token de la descarga en curso. */
-    private fun alMensajeDescarga(origen: Uri, texto: String?, respuesta: androidx.webkit.JavaScriptReplyProxy) {
-        if (origen.scheme != "https" || !AppLocal.esHostApp(origen.host?.lowercase())) return
-        val j = try { JSONObject(texto ?: return) } catch (e: Exception) { return }
-        val token = tokenBlob ?: return
-        if (j.optString("t") != token) return
-        when (j.optString("a")) {
-            "ini" -> {
-                if (descargaBlob != null) return
-                val esc = EscritorDescarga(this, j.optString("n"), j.optString("m").ifEmpty { "application/octet-stream" })
-                if (!esc.abrir()) {
-                    abortarDescargaBlob("No se pudo crear el archivo en Descargas")
-                    return
-                }
-                descargaBlob = esc
-                respuesta.postMessage("ok")
-            }
-            "dat" -> {
-                val esc = descargaBlob ?: return
-                val datos = j.optString("d")
-                ejecutorDescargas.execute {
-                    val ok = try {
-                        esc.escribir(android.util.Base64.decode(datos, android.util.Base64.DEFAULT))
-                        true
-                    } catch (e: Exception) {
-                        false
-                    }
-                    runOnUiThread {
-                        if (descargaBlob !== esc) return@runOnUiThread
-                        if (ok) respuesta.postMessage("ok") else abortarDescargaBlob("No se pudo escribir el archivo")
-                    }
-                }
-            }
-            "fin" -> {
-                val esc = descargaBlob ?: return
-                descargaBlob = null
-                tokenBlob = null
-                ejecutorDescargas.execute {
-                    val ok = esc.cerrar()
-                    runOnUiThread { toast(if (ok) "Descargado en Descargas: " + esc.nombre else "No se pudo guardar el archivo") }
-                }
-            }
-            "err" -> abortarDescargaBlob("No se pudo leer el archivo de la página")
-        }
-    }
+    private val controlDescargas by lazy { ControlDescargas(this, paleta, ajustes, anfitrionControlDescargas) }
 
     /** Abre la copia en una pestaña visor: sin red, sin almacenamiento y sin historial; los enlaces se abren en una pestaña normal. */
     private fun abrirLocal(archivo: File, nombre: String, conJs: Boolean, urlMarcador: String = "") {
