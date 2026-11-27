@@ -58,7 +58,7 @@ private class RaizPanelLateral(c: Context, private val alCerrar: () -> Unit) : L
     private val margen = ViewConfiguration.get(c).scaledTouchSlop
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (!Gestos.activos) {
+        if (!Gestos.activo(Gestos.PANELES)) {
             arrastrando = false
             return false
         }
@@ -133,7 +133,7 @@ private class RaizHoja(
     }
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (!Gestos.activos) {
+        if (!Gestos.activo(if (plegable()) Gestos.HOJA_PLEGAR else Gestos.HOJA_CERRAR)) {
             arrastrando = false
             return false
         }
@@ -293,7 +293,7 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
             tirador.addView(pastilla, FrameLayout.LayoutParams(dp(36), dp(4), Gravity.CENTER))
             tirador.isClickable = true
             tirador.contentDescription = "Plegar el menú"
-            tirador.setOnClickListener { if (plegableActiva) plegar() }
+            tirador.setOnClickListener { if (plegableActiva && Gestos.activo(Gestos.TIRADOR)) plegar() }
             this.tirador = tirador
             raiz.addView(tirador, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(26)))
             raiz.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
