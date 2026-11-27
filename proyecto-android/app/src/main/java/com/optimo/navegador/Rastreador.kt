@@ -22,10 +22,27 @@ class ConfigRastreo(
     val ua: String,
     val bloquear: Boolean,
     val tiposMascara: Int,
-    val propio: FiltroPropio?
+    val propio: FiltroPropio?,
+    /** Si no está vacío, en el sitio de partida solo se siguen páginas cuya ruta empiece así («esta sección»). */
+    val prefijoRuta: String = "",
+    /** Solo se lee la página de partida; no se sigue ningún enlace. */
+    val soloPagina: Boolean = false
 )
 
-class ProgresoRastreo(val paginas: Int, val enlaces: Int, val nivel: Int, val enCola: Int, val actual: String)
+class ProgresoRastreo(
+    val paginas: Int,
+    val enlaces: Int,
+    val nivel: Int,
+    val enCola: Int,
+    val actual: String,
+    /** Enlaces encontrados por tipo (índice = [TipoEnlace.ordinal]). */
+    val porTipo: IntArray = IntArray(0),
+    /** Enlaces ya vistos en otra página (no se cuentan dos veces). */
+    val repetidos: Int = 0,
+    /** Los últimos enlaces nuevos, del más antiguo al más reciente. */
+    val recientes: List<EnlaceEncontrado> = emptyList(),
+    val transcurridoMs: Long = 0L
+)
 
 class ResultadoRastreo(val enlaces: List<EnlaceEncontrado>, val paginas: Int, val motivo: String, val inicio: String, val titulo: String)
 
@@ -150,6 +167,24 @@ class Rastreador(
 
     @Volatile
     private var hilo: Thread? = null
+
+    @Volatile
+    private var pausado = false
+
+    private val contTipo = IntArray(TipoEnlace.values().size)
+    private var repetidos = 0
+    private val recientes = ArrayDeque<EnlaceEncontrado>()
+
+    val enPausa: Boolean get() = pausado
+
+    /** Detiene el rastreo sin perder lo encontrado; el tiempo en pausa no cuenta para el tope de minutos. */
+    fun pausar() {
+        pausado = true
+    }
+
+    fun reanudar() {
+        pausado = false
+    }
 
     fun iniciar() {
         val t = Thread { correr() }
@@ -312,10 +347,15 @@ class Rastreador(
         var intentos = 0
         var tituloInicio = ""
         var motivo = "completo"
-        val t0 = SystemClock.elapsedRealtime()
-        val limiteProf = if (cfg.profMax <= 0) Int.MAX_VALUE else cfg.profMax
+        var t0 = SystemClock.elapsedRealtime()
+        val limiteProf = if (cfg.soloPagina) 0 else if (cfg.profMax <= 0) Int.MAX_VALUE else cfg.profMax
         try {
             while (cola.isNotEmpty()) {
+                while (pausado && motivoParada == null) {
+                    val ini = SystemClock.elapsedRealtime()
+                    Thread.sleep(200)
+                    t0 += SystemClock.elapsedRealtime() - ini
+                }
                 val parada = motivoParada
                 if (parada != null) { motivo = parada; break }
                 if (paginas >= cfg.maxPaginas) { motivo = "tope de páginas"; break }
@@ -331,7 +371,10 @@ class Rastreador(
                 if (paginas == 1) tituloInicio = titulo
                 if (pagina.url != url) vistas.add(normalizar(pagina.url))
                 procesarPagina(pagina, titulo, prof, limiteProf, hostInicio, resultados, vistas, cola)
-                val p = ProgresoRastreo(paginas, resultados.size, prof, cola.size, pagina.url)
+                val p = ProgresoRastreo(
+                    paginas, resultados.size, prof, cola.size, pagina.url,
+                    contTipo.copyOf(), repetidos, recientes.toList(), SystemClock.elapsedRealtime() - t0
+                )
                 principal.post { alProgreso(p) }
                 if (cola.isNotEmpty() && cfg.pausaMs > 0) Thread.sleep(cfg.pausaMs)
             }
@@ -350,9 +393,18 @@ class Rastreador(
         val k = Enlaces.clave(e)
         val previo = resultados[k]
         if (previo == null) {
-            if (resultados.size < Enlaces.MAX_ENLACES) resultados[k] = e.conOrigen(origen)
-        } else if (Enlaces.pesoOrigen(e.origenNombre) > Enlaces.pesoOrigen(previo.origenNombre)) {
-            resultados[k] = e.conOrigen(previo.origen)
+            if (resultados.size < Enlaces.MAX_ENLACES) {
+                val nuevo = e.conOrigen(origen)
+                resultados[k] = nuevo
+                contTipo[nuevo.tipo.ordinal]++
+                recientes.addLast(nuevo)
+                while (recientes.size > 3) recientes.removeFirst()
+            }
+        } else {
+            repetidos++
+            if (Enlaces.pesoOrigen(e.origenNombre) > Enlaces.pesoOrigen(previo.origenNombre)) {
+                resultados[k] = e.conOrigen(previo.origen)
+            }
         }
     }
 
@@ -402,6 +454,10 @@ class Rastreador(
         val url = normalizar(url0)
         val host = hostDe(url)
         if (host.isEmpty() || bloqueado(host) || !dentroDelAlcance(host, hostInicio)) return
+        if (cfg.prefijoRuta.isNotEmpty() && host == hostInicio) {
+            val ruta0 = try { URI(url).path ?: "" } catch (e: Exception) { "" }
+            if (!ruta0.startsWith(cfg.prefijoRuta)) return
+        }
         if (vistas.contains(url)) return
         // Trampas (calendarios, filtros infinitos): muchas variantes de la misma ruta solo cambiando la consulta.
         val ruta = url.substringBefore('?')
