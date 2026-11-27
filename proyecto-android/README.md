@@ -727,3 +727,12 @@ Sin compilar ni probar todavía.
 - **Privacidad:** las descargas de **pestañas privadas no se anotan**. La lista cifrada (hasta 300) se puede vaciar desde Privacidad y datos › Guardado en el dispositivo y se vacía con «Borrar todo» y con el borrado de datos de navegación; los archivos del dispositivo no se tocan.
 - No hay pausar/reanudar: el gestor de descargas de Android no lo permite (se puede cancelar y reintentar).
 - El Kotlin, sin compilar ni probar en el móvil.
+
+## 1.39.0 — Descargas de aplicaciones web en la lista y código de descargas fuera de MainActivity
+
+- **Los archivos que guardas desde una aplicación web local** (descargas `blob:`) **entran en la lista de Descargas**, con el origen «Aplicación web · nombre». Se pueden abrir, compartir, abrir con…, quitar de la lista y borrar; si el archivo ya no existe, aparece como «Archivo eliminado». Se aplica el ajuste «Recordar las descargas en esta lista».
+  - Android 10 o superior: se guarda la dirección del archivo en MediaStore y se comprueba que siga ahí.
+  - Android 8 y 9: se registra además en el gestor de descargas del sistema (`addCompletedDownload`) para poder abrirlo y compartirlo con seguridad.
+- **`ControlDescargas.kt`**: las descargas normales (comprobación de http, confirmar y cambiar nombre, solo Wi-Fi, cookies del perfil normal o privado, permiso de almacenamiento, registro en la lista) y las de aplicaciones web (puente de la página, escritura por bloques, token) salen de `MainActivity` (–136 líneas). Mismo comportamiento que antes.
+- `EscritorDescarga` expone el tipo, los bytes escritos y la ubicación del archivo; `GestorDescargas` trabaja ahora con el registro completo (normal o de aplicación web).
+- El Kotlin, sin compilar ni probar en el móvil. Por probar: descargar un archivo desde una aplicación web local y comprobar que aparece, se abre y se comparte; y que una descarga normal sigue funcionando igual.
