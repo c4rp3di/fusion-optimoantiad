@@ -320,6 +320,13 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("rastro_robots", v).apply()
         }
 
+    /** Hasta dónde llega el rastreo: 0 = solo esta página, 1 = esta sección (la carpeta de la dirección), 2 = todo el sitio. */
+    var rastroAlcance: Int
+        get() = sp.getInt("rastro_alcance", 1).coerceIn(0, 2)
+        set(v) {
+            sp.edit().putInt("rastro_alcance", v.coerceIn(0, 2)).apply()
+        }
+
     /** Rastreador de enlaces: tipos que se buscan, un bit por [TipoEnlace.ordinal]. Por defecto todos menos imágenes. */
     var enlacesTipos: Int
         get() = sp.getInt("enlaces_tipos", 511)
@@ -578,7 +585,7 @@ class Ajustes(contexto: Context) {
     private val tiposCopia: Map<String, String> = mapOf(
         "anuncios" to "b", "cookies3" to "b", "dev_captura" to "b", "guardar_historial" to "b", "guardar_sesion" to "b",
         "enlaces_otros" to "b", "enlaces_tipos" to "i", "rastro_otros" to "b", "rastro_cookies" to "b", "rastro_robots" to "b",
-        "rastro_prof" to "i", "rastro_paginas" to "i", "rastro_min" to "i", "rastro_pausa" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
+        "rastro_prof" to "i", "rastro_alcance" to "i", "rastro_paginas" to "i", "rastro_min" to "i", "rastro_pausa" to "i", "https" to "b", "inicio_accesos" to "b", "inicio_buscador" to "b", "inicio_cuadrados" to "b", "inicio_enlace" to "b",
         "listas_wifi" to "b", "oscuro" to "b", "pip" to "b", "redirecciones" to "b", "segundo_plano" to "b",
         "ahorro_datos" to "i", "audio_pestanas" to "i", "emergentes" to "i", "inicio_max" to "i", "historial_dias" to "i", "arranque" to "i", "inicio_origen" to "i", "lectura_inter" to "i",
         "lectura_tam" to "i", "magnet_modo" to "i", "medio_modo" to "i", "suspender_min" to "i", "voz_tono" to "i", "voz_velocidad" to "i",
