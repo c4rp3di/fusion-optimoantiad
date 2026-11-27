@@ -18,6 +18,7 @@ interface AnfitrionGuardados {
     fun refrescarUi()
     fun abrirSinConexion(pg: PaginaGuardada)
     fun verLista(l: ListaEnlaces)
+    fun rastrearDeNuevo(l: ListaEnlaces)
     fun descargas()
     fun ajustesHistorial()
     fun borrarPorRango(volver: () -> Unit)
@@ -670,6 +671,7 @@ class PantallaGuardados(
         val l = ArrayList<Triple<String, Boolean, () -> Unit>>()
         l.add(Triple("Ver la lista", false, { cerrarYHacer { g.verLista(lista) } }))
         if (lista.fuente.startsWith("http")) l.add(Triple("Abrir la página de origen", false, { cerrarYHacer { g.abrirNueva(lista.fuente) } }))
+        if (lista.fuente.startsWith("http")) l.add(Triple("Rastrear de nuevo (marca lo nuevo)", false, { cerrarYHacer { g.rastrearDeNuevo(lista) } }))
         l.add(Triple("Copiar todos los enlaces", false, {
             g.copiar(lista.items.joinToString("\n") { it.url })
             g.avisar(lista.items.size.toString() + " enlaces copiados")
