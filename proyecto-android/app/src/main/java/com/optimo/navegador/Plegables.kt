@@ -12,21 +12,54 @@ import android.widget.LinearLayout
 import kotlin.math.abs
 
 /**
- * Gestos de arrastre de la interfaz (Ajustes › Aspecto › «Gestos de arrastre»): cerrar paneles laterales, plegar las barras y plegar o cerrar
- * las hojas. Un único interruptor para todos. Si está apagado nada intercepta los toques (las tiras ya plegadas se pueden seguir desplegando).
+ * Gestos de arrastre de la interfaz (Ajustes › Aspecto › «Gestos de arrastre»): cada uno se activa o apaga por separado. Apagado, el gesto
+ * no intercepta los toques. Las tiras ya plegadas se pueden desplegar igualmente tocándolas. Por defecto todos activos; si en 1.37.0 se había
+ * apagado el interruptor único (`gestos_arrastre`), ese valor es el de partida de todos hasta que se cambie alguno.
  */
 object Gestos {
+    /** Cerrar los paneles laterales (menú, ajustes, escudo…) arrastrándolos hacia la derecha. */
+    const val PANELES = "paneles"
+
+    /** Plegar la barra superior arrastrándola hacia arriba. */
+    const val BARRA_SUP = "barra_sup"
+
+    /** Plegar la barra inferior arrastrándola hacia abajo. */
+    const val BARRA_INF = "barra_inf"
+
+    /** Plegar a una tira, arrastrándolas, las hojas que dejan ver la página (ocultar elemento, capas, elegir elemento). */
+    const val HOJA_PLEGAR = "hoja_plegar"
+
+    /** Plegar esas mismas hojas tocando su tirador. */
+    const val TIRADOR = "tirador"
+
+    /** Cerrar arrastrándolas hacia abajo las demás hojas (confirmar, elegir, acciones, escribir). */
+    const val HOJA_CERRAR = "hoja_cerrar"
+
+    val TODOS: List<String> = listOf(PANELES, BARRA_SUP, BARRA_INF, HOJA_PLEGAR, TIRADOR, HOJA_CERRAR)
+
     private var sp: SharedPreferences? = null
 
     fun iniciar(c: Context) {
         sp = c.getSharedPreferences("optimo_ajustes", Context.MODE_PRIVATE)
     }
 
-    var activos: Boolean
-        get() = sp?.getBoolean("gestos_arrastre", true) ?: true
-        set(v) {
-            sp?.edit()?.putBoolean("gestos_arrastre", v)?.apply()
-        }
+    private fun base(): Boolean = sp?.getBoolean("gestos_arrastre", true) ?: true
+
+    fun activo(id: String): Boolean = sp?.getBoolean("gesto_" + id, base()) ?: true
+
+    fun fijar(id: String, v: Boolean) {
+        sp?.edit()?.putBoolean("gesto_" + id, v)?.apply()
+    }
+
+    fun cuantosActivos(): Int = TODOS.count { activo(it) }
+
+    /** Vuelve a activar todos. */
+    fun activarTodos() {
+        val e = sp?.edit() ?: return
+        e.putBoolean("gestos_arrastre", true)
+        TODOS.forEach { e.remove("gesto_" + it) }
+        e.apply()
+    }
 }
 
 /**
@@ -42,7 +75,7 @@ class BarraPlegable(c: Context, private val haciaArriba: Boolean, private val al
     private fun sentidoValido(dy: Float): Boolean = if (haciaArriba) dy < 0f else dy > 0f
 
     override fun onInterceptTouchEvent(ev: MotionEvent): Boolean {
-        if (!Gestos.activos) {
+        if (!Gestos.activo(if (haciaArriba) Gestos.BARRA_SUP else Gestos.BARRA_INF)) {
             arrastrando = false
             return false
         }
