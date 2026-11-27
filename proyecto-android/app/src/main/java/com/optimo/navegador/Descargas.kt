@@ -11,7 +11,9 @@ import java.io.File
 
 /** Una descarga hecha desde Optimo (solo pestañas normales): lo que hace falta para listarla, reintentarla o volver a su página. */
 class RegistroDescarga(
-    val id: Long, val nombre: String, val url: String, val mime: String, val host: String, val fecha: Long, val origen: String
+    val id: Long, val nombre: String, val url: String, val mime: String, val host: String, val fecha: Long, val origen: String,
+    /** Archivo guardado desde una aplicación web local (no pasa por el gestor de descargas de Android). */
+    val local: Boolean = false, val ubicacion: String = "", val bytes: Long = 0L
 )
 
 /** Tipos de archivo para filtrar y poner icono. */
@@ -87,7 +89,7 @@ object ListaDescargas {
             for (r in todas()) {
                 a.put(
                     JSONObject().put("id", r.id).put("n", r.nombre).put("u", r.url).put("m", r.mime)
-                        .put("h", r.host).put("f", r.fecha).put("o", r.origen)
+                        .put("h", r.host).put("f", r.fecha).put("o", r.origen).put("l", r.local).put("p", r.ubicacion).put("b", r.bytes)
                 )
             }
             AlmacenSeguro.escribirTexto(f, a.toString())
@@ -108,7 +110,7 @@ object ListaDescargas {
                     lista.add(
                         RegistroDescarga(
                             o.optLong("id"), o.optString("n"), o.optString("u"), o.optString("m"),
-                            o.optString("h"), o.optLong("f"), o.optString("o")
+                            o.optString("h"), o.optLong("f"), o.optString("o"), o.optBoolean("l"), o.optString("p"), o.optLong("b")
                         )
                     )
                 }
@@ -186,23 +188,36 @@ class GestorDescargas(private val ctx: Context) {
         else -> ""
     }
 
-    private fun uri(id: Long): Uri? = try {
-        dm.getUriForDownloadedFile(id)
+    /** Dirección con la que otras apps pueden leer el archivo. */
+    private fun uriDe(r: RegistroDescarga): Uri? = try {
+        if (r.local) Uri.parse(r.ubicacion) else dm.getUriForDownloadedFile(r.id)
     } catch (e: Exception) {
         null
     }
 
-    private fun tipo(id: Long, mime: String): String {
-        val t = try { dm.getMimeTypeForDownloadedFile(id) } catch (e: Exception) { null }
-        return if (!t.isNullOrEmpty()) t else if (mime.isNotEmpty()) mime else "*/*"
+    private fun tipo(r: RegistroDescarga): String {
+        if (r.local) return if (r.mime.isNotEmpty()) r.mime else "*/*"
+        val t = try { dm.getMimeTypeForDownloadedFile(r.id) } catch (e: Exception) { null }
+        return if (!t.isNullOrEmpty()) t else if (r.mime.isNotEmpty()) r.mime else "*/*"
+    }
+
+    /** Si un archivo guardado desde una aplicación web sigue existiendo. */
+    fun existeLocal(r: RegistroDescarga): Boolean = try {
+        if (r.ubicacion.startsWith("content://")) {
+            ctx.contentResolver.openFileDescriptor(Uri.parse(r.ubicacion), "r")?.use { true } ?: false
+        } else {
+            File(r.ubicacion).exists()
+        }
+    } catch (e: Exception) {
+        false
     }
 
     /** Abre el archivo con la app que corresponda; con [elegir] muestra siempre el selector de apps. */
-    fun abrir(id: Long, mime: String, elegir: Boolean): Boolean {
-        val u = uri(id) ?: return false
+    fun abrir(r: RegistroDescarga, elegir: Boolean): Boolean {
+        val u = uriDe(r) ?: return false
         return try {
             val i = Intent(Intent.ACTION_VIEW)
-            i.setDataAndType(u, tipo(id, mime))
+            i.setDataAndType(u, tipo(r))
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
             ctx.startActivity(if (elegir) Intent.createChooser(i, "Abrir con").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) else i)
             true
@@ -211,13 +226,13 @@ class GestorDescargas(private val ctx: Context) {
         }
     }
 
-    fun compartir(ids: List<Long>, mimes: Map<Long, String>): Boolean {
+    fun compartir(lista: List<RegistroDescarga>): Boolean {
         val uris = ArrayList<Uri>()
-        for (id in ids) uri(id)?.let { uris.add(it) }
+        for (r in lista) uriDe(r)?.let { uris.add(it) }
         if (uris.isEmpty()) return false
         return try {
             val i = if (uris.size == 1) Intent(Intent.ACTION_SEND) else Intent(Intent.ACTION_SEND_MULTIPLE)
-            i.type = if (ids.size == 1) tipo(ids[0], mimes[ids[0]] ?: "") else "*/*"
+            i.type = if (lista.size == 1) tipo(lista[0]) else "*/*"
             if (uris.size == 1) i.putExtra(Intent.EXTRA_STREAM, uris[0]) else i.putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
             i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             ctx.startActivity(Intent.createChooser(i, "Compartir").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
@@ -228,9 +243,9 @@ class GestorDescargas(private val ctx: Context) {
     }
 
     /** Cancela la descarga si sigue en curso y borra el archivo (o lo que lleve descargado). */
-    fun borrarArchivo(id: Long) {
+    fun borrarArchivo(r: RegistroDescarga) {
         try {
-            dm.remove(id)
+            if (r.local) ctx.contentResolver.delete(Uri.parse(r.ubicacion), null, null) else dm.remove(r.id)
         } catch (e: Exception) {
             // Ya no existía.
         }
