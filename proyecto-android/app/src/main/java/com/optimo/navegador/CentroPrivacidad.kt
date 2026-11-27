@@ -221,6 +221,13 @@ class CentroPrivacidad(
             hoja.cerrar()
             g.paginasGuardadas()
         }
+        hoja.fila("Lista de descargas", "Las descargas anotadas en Optimo (los archivos no se borran)", ListaDescargas.todas().size.toString(), icono = "⬇") {
+            confirmar("Vaciar la lista de descargas", "Se quitan las descargas de la lista de Optimo. Los archivos del dispositivo no se borran.", "Vaciar") {
+                ListaDescargas.vaciar()
+                g.avisar("Lista de descargas vaciada")
+                repintar()
+            }
+        }
         hoja.fila("Listas de enlaces", "Enlaces encontrados y guardados", ListasEnlaces.todas().size.toString(), icono = "📋") {
             hoja.cerrar()
             g.listasEnlaces()
@@ -252,6 +259,7 @@ class CentroPrivacidad(
             ) {
                 limpieza.borrarDatosNavegacion()
                 limpieza.borrarCache()
+                ListaDescargas.vaciar()
                 ajustes.quitarTodosPermisos()
                 EstadisticasBloqueo.reiniciar()
                 invalidar()
