@@ -715,3 +715,15 @@ Sin compilar ni probar todavía.
 - **Plegar también con un toque:** en las hojas que dejan ver la página, tocar el **tirador** las pliega, igual que tocar la tira las despliega. El tirador ahora es una zona táctil de 26 dp de alto (la pastilla va centrada dentro; antes solo medía 4 dp). En las hojas que no se pliegan, el toque no hace nada. En las ancladas arriba, el tirador sigue en el borde de abajo.
 - **Parpadeo corregido** (`RaizHoja`): al terminar de arrastrar, la hoja se devolvía a su sitio un fotograma antes de que la tira estuviera maquetada, y se veía su marco (sobre todo hacia abajo). Ahora la raíz sigue fuera de pantalla y transparente hasta el primer dibujo con la tira ya colocada. Al **cerrar** arrastrando tampoco se devuelve a su sitio (se vería durante la animación de salida de la ventana); `Hoja.mostrar()` la restablece por si una hoja se vuelve a abrir.
 - **A probar:** que no quede ningún destello al plegar hacia abajo y hacia arriba (con el elemento arriba y abajo), que tocar el tirador pliegue y la tira despliegue, que arrastrar desde el tirador siga funcionando y que cerrar confirmaciones arrastrando no deje destellos.
+
+## 1.38.0 — Pantalla de Descargas
+
+- **Descargas** (`PanelDescargas.kt`, `Descargas.kt`): panel lateral con lo descargado desde Optimo. El botón «Descargas» (menú, accesos rápidos y Guardados) abre este panel en lugar del gestor de archivos, que sigue accesible con «Abrir la carpeta Descargas».
+  - **En curso**, arriba, con barra de progreso, «X de Y», velocidad (MB/s) y «Cancelar»; se actualiza cada segundo mientras haya algo descargándose y se detiene al cerrar el panel. Entiende «En cola», «Esperando Wi-Fi» y «Sin conexión».
+  - **Filtros** por estado (Todas, En curso, Completadas, Fallidas) y por tipo (imágenes, vídeos, audio, documentos, apps, otros), búsqueda por nombre o sitio y lista **agrupada por días**, con icono y color por tipo.
+  - **Menú por descarga:** abrir, abrir con…, compartir, mostrar en la carpeta, reintentar o descargar de nuevo, copiar el enlace, abrir la página de origen, quitar de la lista y borrar el archivo. Las fallidas dicen el motivo (sin espacio, acceso denegado, no encontrado, error de red…).
+  - **Elegir varias** (pulsación larga): compartir, quitar de la lista o borrar los archivos.
+- **Ajustes de descarga nuevos:** «Confirmar antes de descargar» (hoja con el sitio y el nombre editable), «Descargar solo con Wi-Fi» y «Recordar las descargas en esta lista». Entran en la copia de seguridad.
+- **Privacidad:** las descargas de **pestañas privadas no se anotan**. La lista cifrada (hasta 300) se puede vaciar desde Privacidad y datos › Guardado en el dispositivo y se vacía con «Borrar todo» y con el borrado de datos de navegación; los archivos del dispositivo no se tocan.
+- No hay pausar/reanudar: el gestor de descargas de Android no lo permite (se puede cancelar y reintentar).
+- El Kotlin, sin compilar ni probar en el móvil.
