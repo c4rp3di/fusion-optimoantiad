@@ -298,7 +298,7 @@ class MainActivity : Activity() {
     override fun onStop() {
         super.onStop()
         enPantalla = false
-        rastreador?.parar("app en segundo plano")
+        rastreoUI.parar("app en segundo plano")
         revisarSuspension(false)
         EstadisticasBloqueo.guardarSiHaceFalta()
         if (ajustes.borrarAlSalir != 0 && !isChangingConfigurations) ajustes.salidaPendiente = true
@@ -577,7 +577,7 @@ class MainActivity : Activity() {
     }
 
     override fun onDestroy() {
-        rastreador?.parar("descartado")
+        rastreoUI.parar("descartado")
         if (isFinishing) {
             limpieza.limpiarAlSalir()
             ExcepcionesSsl.olvidarSesion()
@@ -2039,7 +2039,7 @@ class MainActivity : Activity() {
         override fun cerradas(): Int = this@MainActivity.cerradas.size
         override fun paginasGuardadas(): Int = PaginasGuardadas.todas().size
         override fun listasEnlaces(): Int = ListasEnlaces.todas().size
-        override fun enlacesRastreo(): Int = ultimoRastreo?.enlaces?.size ?: -1
+        override fun enlacesRastreo(): Int = rastreoUI.enlacesAhora()
 
         override fun hayMedio(p: Pestana): Boolean {
             val m = p.medioDetectado
@@ -2260,7 +2260,11 @@ class MainActivity : Activity() {
 
         override fun verLista(l: ListaEnlaces) {
             val p = actual
-            if (p != null) mostrarEnlaces(p, "", l.nombre, l.fuente, l.items, null, false)
+            rastreoUI.mostrarEnlaces(p?.privada == true, l.nombre, l.fuente, l.items, nueva = false, deRastreo = false)
+        }
+
+        override fun rastrearDeNuevo(l: ListaEnlaces) {
+            rastreoUI.configurar(l.fuente, false, l.items.map { it.url }.toSet())
         }
 
         override fun descargas() = abrirDescargas()
@@ -2292,11 +2296,10 @@ class MainActivity : Activity() {
             AccionMenu.PANTALLA -> entrarPaginaCompleta()
             AccionMenu.GUARDAR_SIN_CONEXION -> if (p != null) guardarSinConexion(p)
             AccionMenu.BUSCAR_ENLACES -> if (p != null) buscarEnlaces(p)
-            AccionMenu.RASTREAR -> if (p != null) configurarRastreo(p)
-            AccionMenu.VER_RASTREO -> {
-                val ur = ultimoRastreo
-                if (p != null && ur != null) mostrarResultadoRastreo(p, ur)
+            AccionMenu.RASTREAR -> if (p != null) {
+                if (rastreoUI.enMarcha) rastreoUI.verProgreso() else rastreoUI.configurar(p.url, p.privada)
             }
+            AccionMenu.VER_RASTREO -> if (rastreoUI.enMarcha) rastreoUI.verProgreso() else rastreoUI.verUltimo()
             AccionMenu.CARGAR_IMAGENES -> {
                 val w = p?.web
                 if (w != null) {
@@ -2606,10 +2609,28 @@ class MainActivity : Activity() {
     // ---------------------------------------------------------------- rastreador de enlaces (fase 1: la página abierta)
 
     private var enlacesPorExportar: String? = null
-    private var enlacesDeRastreo = false
-    private var rastreador: Rastreador? = null
-    private var ultimoRastreo: ResultadoRastreo? = null
-    private var dialogoRastreo: DialogoHoja? = null
+
+    /** Interfaz del rastreador (configurar, progreso y resultados); el motor está en Rastreador.kt. */
+    private val rastreoUI by lazy { RastreadorUI(this, paleta, ajustes, anfitrionRastreador) }
+
+    private val anfitrionRastreador = object : AnfitrionRastreador {
+        override fun avisar(texto: String) = toast(texto)
+        override fun avisarConAccion(texto: String, boton: String, accion: () -> Unit) = avisoAccion.mostrar(texto, boton, 7000L, accion)
+        override fun copiar(texto: String) = this@MainActivity.copiar(texto)
+        override fun compartir(texto: String) = this@MainActivity.compartir(texto)
+        override fun nuevaPestana(url: String, privada: Boolean) {
+            this@MainActivity.nuevaPestana(url, privada)
+        }
+        override fun opciones(titulo: String, items: List<Pair<String, () -> Unit>>) = this@MainActivity.opciones(titulo, items)
+        override fun pedirTexto(titulo: String, inicial: String, alAceptar: (String) -> Unit) = pedirTextoOpcional(titulo, inicial, alAceptar)
+        override fun exportar(contenido: String, ext: String, mime: String, titulo: String) = exportarEnlaces(contenido, ext, mime, titulo)
+        override fun hayAppPara(e: EnlaceEncontrado): Boolean = AppsMedia.apps(this@MainActivity, e.url, null).isNotEmpty()
+        override fun abrirConApp(e: EnlaceEncontrado, privada: Boolean) {
+            val p = actual ?: return
+            elegirAppMedio(e.url, null, p, null, e.nombre)
+        }
+        override fun enPantalla(): Boolean = this@MainActivity.enPantalla
+    }
 
     /** Extrae los enlaces de la página abierta con `assets/enlaces/extraer.js` y los muestra clasificados. Solo mira esta página. */
     private fun buscarEnlaces(p: Pestana) {
@@ -2643,7 +2664,6 @@ class MainActivity : Activity() {
     }
 
     private fun ejecutarBusquedaEnlaces(p: Pestana) {
-        enlacesDeRastreo = false
         val w = p.web
         if (w == null || p.suspendida) {
             toast("Abre la página antes de buscar enlaces")
@@ -2675,268 +2695,12 @@ class MainActivity : Activity() {
                         .setNegativeButton("Cerrar", null)
                         .show()
                 } else {
-                    mostrarEnlaces(p, "Enlaces", r.titulo.ifBlank { p.titulo }, r.url.ifEmpty { p.url }, todos, null, true)
+                    rastreoUI.mostrarEnlaces(
+                        p.privada, r.titulo.ifBlank { p.titulo }, r.url.ifEmpty { p.url }, todos, nueva = true, deRastreo = false,
+                        alCambiarTipos = { buscarEnlaces(p) }, alRepetirBusqueda = { ejecutarBusquedaEnlaces(p) }
+                    )
                 }
             }
-        }
-    }
-
-    /** ¿Se muestra este enlace con los ajustes actuales? Magnets, Mega y nubes se ven siempre; los archivos de otros sitios solo si se activó. */
-    private fun enlaceVisible(e: EnlaceEncontrado, filtro: TipoEnlace?): Boolean {
-        if (filtro != null && e.tipo != filtro) return false
-        if (!e.externo) return true
-        return when (e.tipo) {
-            TipoEnlace.MAGNET, TipoEnlace.MEGA, TipoEnlace.NUBE -> true
-            else -> ajustes.enlacesOtros
-        }
-    }
-
-    private fun lineaEnlace(e: EnlaceEncontrado): String {
-        val sb = StringBuilder(e.tipo.etiqueta)
-        if (e.host.isNotEmpty() && e.tipo != TipoEnlace.MAGNET) sb.append(" · ").append(e.host)
-        if (e.tamano >= 0) sb.append(" · ").append(formatoTamano(e.tamano))
-        if (e.origen.isNotEmpty()) {
-            val u = Uri.parse(e.origen)
-            sb.append(" · en ").append(((u.host ?: "") + (u.path ?: "")).trimEnd('/').take(45))
-        }
-        if (!Enlaces.nombreFiable(e.origenNombre) && e.origenNombre != "dirección") sb.append(" · nombre: ").append(e.origenNombre)
-        return sb.toString()
-    }
-
-    /** Fila de la lista de enlaces: casilla (solo visible al seleccionar), nombre y detalle. */
-    private class FilaEnlace(val raiz: LinearLayout, val cb: CheckBox, val t1: TextView, val t2: TextView)
-
-    /**
-     * Diálogo con la lista: búsqueda por texto, pulsar una fila abre su menú, y una pulsación larga (o «Seleccionar») pasa a la
-     * selección múltiple, con «Acciones» para copiar, compartir, exportar o guardar solo lo marcado.
-     */
-    private fun mostrarEnlaces(
-        p: Pestana, titulo: String, fuenteTitulo: String, fuenteUrl: String,
-        todos: List<EnlaceEncontrado>, filtro: TipoEnlace?, nueva: Boolean
-    ) {
-        val visibles = todos.filter { enlaceVisible(it, filtro) }
-        val ocultos = todos.size - todos.count { enlaceVisible(it, null) }
-        val mostradas = ArrayList<EnlaceEncontrado>(visibles)
-        val marcados = HashSet<String>()
-        var seleccion = false
-        var consulta = ""
-        var dialogo: AlertDialog? = null
-
-        val adaptador = object : BaseAdapter() {
-            override fun getCount(): Int = mostradas.size
-            override fun getItem(i: Int): Any = mostradas[i]
-            override fun getItemId(i: Int): Long = i.toLong()
-            override fun getView(pos: Int, convertView: View?, parent: ViewGroup): View {
-                val f: FilaEnlace = (convertView?.tag as? FilaEnlace) ?: run {
-                    val raiz = LinearLayout(this@MainActivity)
-                    raiz.orientation = LinearLayout.HORIZONTAL
-                    raiz.gravity = Gravity.CENTER_VERTICAL
-                    raiz.setPadding(4.dp(), 8.dp(), 4.dp(), 8.dp())
-                    val cb = CheckBox(this@MainActivity)
-                    cb.isFocusable = false
-                    cb.isClickable = false
-                    raiz.addView(cb)
-                    val col = LinearLayout(this@MainActivity)
-                    col.orientation = LinearLayout.VERTICAL
-                    val t1 = TextView(this@MainActivity)
-                    t1.textSize = 15f
-                    t1.maxLines = 2
-                    t1.ellipsize = TextUtils.TruncateAt.END
-                    t1.setTextColor(paleta.texto)
-                    val t2 = TextView(this@MainActivity)
-                    t2.textSize = 12f
-                    t2.maxLines = 2
-                    t2.setTextColor(paleta.tenue)
-                    col.addView(t1)
-                    col.addView(t2)
-                    raiz.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
-                    val nueva2 = FilaEnlace(raiz, cb, t1, t2)
-                    raiz.tag = nueva2
-                    nueva2
-                }
-                val e = mostradas[pos]
-                f.t1.text = e.nombre
-                f.t2.text = lineaEnlace(e)
-                f.cb.visibility = if (seleccion) View.VISIBLE else View.GONE
-                f.cb.isChecked = marcados.contains(e.url)
-                return f.raiz
-            }
-        }
-
-        val caja = LinearLayout(this)
-        caja.orientation = LinearLayout.VERTICAL
-        caja.setPadding(16.dp(), 4.dp(), 16.dp(), 0)
-        val buscar = EditText(this)
-        buscar.hint = "Buscar en la lista"
-        buscar.setSingleLine(true)
-        buscar.setTextColor(paleta.texto)
-        buscar.setHintTextColor(paleta.tenue)
-        caja.addView(buscar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-        val barra = LinearLayout(this)
-        barra.orientation = LinearLayout.HORIZONTAL
-        fun boton(txt: String): TextView {
-            val v = TextView(this)
-            v.text = txt
-            v.setTextColor(paleta.acento)
-            v.textSize = 14f
-            v.setPadding(4.dp(), 10.dp(), 14.dp(), 10.dp())
-            v.isClickable = true
-            return v
-        }
-        val bSel = boton("☑ Seleccionar")
-        val bTodos = boton("Todos")
-        val bAcc = boton("Acciones")
-        barra.addView(bSel)
-        barra.addView(bTodos)
-        barra.addView(bAcc)
-        caja.addView(barra)
-        val vista = ListView(this)
-        vista.adapter = adaptador
-        caja.addView(vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-
-        fun refrescar() {
-            mostradas.clear()
-            val q = consulta.trim().lowercase()
-            for (e in visibles) {
-                if (q.isEmpty() || e.nombre.lowercase().contains(q) || e.url.lowercase().contains(q) ||
-                    e.host.lowercase().contains(q) || e.tipo.etiqueta.lowercase().contains(q)
-                ) mostradas.add(e)
-            }
-            bTodos.visibility = if (seleccion) View.VISIBLE else View.GONE
-            bAcc.visibility = if (seleccion) View.VISIBLE else View.GONE
-            bAcc.text = "Acciones (" + marcados.size + ")"
-            bSel.text = if (seleccion) "✕ Salir de la selección" else "☑ Seleccionar"
-            adaptador.notifyDataSetChanged()
-            dialogo?.setTitle(
-                (if (filtro != null) filtro.etiqueta + ": " else "") + mostradas.size + " enlaces" +
-                    (if (ocultos > 0) " (" + ocultos + " de otros sitios ocultos)" else "")
-            )
-        }
-
-        buscar.addTextChangedListener(object : TextWatcher {
-            override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
-            override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
-            override fun afterTextChanged(s: Editable?) {
-                consulta = s?.toString() ?: ""
-                refrescar()
-            }
-        })
-        bSel.setOnClickListener {
-            seleccion = !seleccion
-            if (!seleccion) marcados.clear()
-            refrescar()
-        }
-        bTodos.setOnClickListener {
-            if (mostradas.isNotEmpty() && mostradas.all { marcados.contains(it.url) }) {
-                for (e in mostradas) marcados.remove(e.url)
-            } else {
-                for (e in mostradas) marcados.add(e.url)
-            }
-            refrescar()
-        }
-        bAcc.setOnClickListener {
-            val sel = visibles.filter { marcados.contains(it.url) }
-            if (sel.isEmpty()) toast("Marca algún enlace") else menuSeleccionEnlaces(p, fuenteTitulo, fuenteUrl, sel, nueva)
-        }
-        vista.setOnItemClickListener { _, _, i, _ ->
-            val e = mostradas[i]
-            if (seleccion) {
-                if (!marcados.add(e.url)) marcados.remove(e.url)
-                refrescar()
-            } else {
-                menuEnlace(p, e)
-            }
-        }
-        vista.setOnItemLongClickListener { _, _, i, _ ->
-            seleccion = true
-            marcados.add(mostradas[i].url)
-            refrescar()
-            true
-        }
-
-        dialogo = nuevoDialogoNativo()
-            .setTitle("Enlaces")
-            .setView(caja)
-            .setPositiveButton("Más") { _, _ ->
-                menuMasEnlaces(p, fuenteTitulo, fuenteUrl, todos, ArrayList(mostradas), filtro, nueva)
-            }
-            .setNeutralButton("Filtrar") { _, _ -> filtrarEnlaces(p, fuenteTitulo, fuenteUrl, todos, filtro, nueva) }
-            .setNegativeButton("Cerrar", null)
-            .show()
-        refrescar()
-    }
-
-    /** Acciones sobre los enlaces marcados. */
-    private fun menuSeleccionEnlaces(p: Pestana, ft: String, fu: String, sel: List<EnlaceEncontrado>, nueva: Boolean) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Copiar los " + sel.size + " enlaces", { copiar(Enlaces.texto(sel)) }))
-        items.add(Pair<String, () -> Unit>("Copiar con nombres", { copiar(Enlaces.textoConNombres(sel)) }))
-        items.add(Pair<String, () -> Unit>("Compartir enlaces", { compartir(Enlaces.texto(sel)) }))
-        items.add(Pair<String, () -> Unit>("Exportar a archivo (.txt)…", { exportarEnlaces(Enlaces.texto(sel), "txt", "text/plain", ft) }))
-        items.add(Pair<String, () -> Unit>("Exportar a archivo (.csv)…", { exportarEnlaces(Enlaces.csv(sel, fu), "csv", "text/csv", ft) }))
-        if (nueva && !p.privada) {
-            items.add(Pair<String, () -> Unit>("Guardar como lista…", { guardarListaEnlaces(ft, fu, sel) }))
-        }
-        opciones(sel.size.toString() + " enlaces marcados", items)
-    }
-
-    private fun filtrarEnlaces(p: Pestana, ft: String, fu: String, todos: List<EnlaceEncontrado>, filtro: TipoEnlace?, nueva: Boolean) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Todos (" + todos.count { enlaceVisible(it, null) } + ")", { mostrarEnlaces(p, "", ft, fu, todos, null, nueva) }))
-        for (t in TipoEnlace.values()) {
-            val n = todos.count { enlaceVisible(it, t) }
-            if (n > 0) items.add(Pair<String, () -> Unit>(t.etiqueta + " (" + n + ")", { mostrarEnlaces(p, "", ft, fu, todos, t, nueva) }))
-        }
-        opciones("Mostrar solo…", items)
-    }
-
-    private fun menuEnlace(p: Pestana, e: EnlaceEncontrado) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Copiar enlace", { copiar(e.url) }))
-        items.add(Pair<String, () -> Unit>("Copiar nombre", { copiar(e.nombre) }))
-        if (AppsMedia.apps(this, e.url, null).isNotEmpty() &&
-            (e.tipo == TipoEnlace.MAGNET || e.tipo == TipoEnlace.MEGA || e.tipo == TipoEnlace.LISTA || e.tipo == TipoEnlace.VIDEO || e.tipo == TipoEnlace.AUDIO || e.tipo == TipoEnlace.TORRENT)
-        ) {
-            items.add(Pair<String, () -> Unit>("Abrir con otra app…", { elegirAppMedio(e.url, null, p, null, e.nombre) }))
-        }
-        if (e.url.startsWith("http")) items.add(Pair<String, () -> Unit>("Abrir en una pestaña nueva", { nuevaPestana(e.url, p.privada) }))
-        items.add(Pair<String, () -> Unit>("Compartir enlace", { compartir(e.url) }))
-        opciones(e.nombre.take(80), items)
-    }
-
-    private fun menuMasEnlaces(
-        p: Pestana, ft: String, fu: String, todos: List<EnlaceEncontrado>, visibles: List<EnlaceEncontrado>,
-        filtro: TipoEnlace?, nueva: Boolean
-    ) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        items.add(Pair<String, () -> Unit>("Copiar los " + visibles.size + " enlaces", { copiar(Enlaces.texto(visibles)) }))
-        items.add(Pair<String, () -> Unit>("Copiar con nombres", { copiar(Enlaces.textoConNombres(visibles)) }))
-        items.add(Pair<String, () -> Unit>("Exportar a archivo (.txt)…", { exportarEnlaces(Enlaces.texto(visibles), "txt", "text/plain", ft) }))
-        items.add(Pair<String, () -> Unit>("Exportar a archivo (.csv)…", { exportarEnlaces(Enlaces.csv(visibles, fu), "csv", "text/csv", ft) }))
-        if (nueva && !p.privada) {
-            items.add(Pair<String, () -> Unit>("Guardar esta lista para después…", { guardarListaEnlaces(ft, fu, visibles) }))
-        }
-        if (nueva) {
-            items.add(Pair<String, () -> Unit>("Incluir archivos de otros sitios: " + si(ajustes.enlacesOtros), {
-                ajustes.enlacesOtros = !ajustes.enlacesOtros
-                mostrarEnlaces(p, "", ft, fu, todos, filtro, nueva)
-            }))
-            if (!enlacesDeRastreo) items.add(Pair<String, () -> Unit>("Filtro propio: " + (ajustes.enlacesPropio.ifBlank { "ninguno" }).take(30) + "…", {
-                pedirTextoOpcional("Filtro propio (extensiones, texto o /regex/, separados por comas)", ajustes.enlacesPropio) { t ->
-                    ajustes.enlacesPropio = t
-                    ejecutarBusquedaEnlaces(p)
-                }
-            }))
-            if (!enlacesDeRastreo) items.add(Pair<String, () -> Unit>("Cambiar tipos a buscar…", { buscarEnlaces(p) }))
-        }
-        opciones("Enlaces", items)
-    }
-
-    private fun guardarListaEnlaces(ft: String, fu: String, visibles: List<EnlaceEncontrado>) {
-        pedirTextoOpcional("Nombre de la lista", ft.ifBlank { "Lista de enlaces" }) { nombre ->
-            val l = ListasEnlaces.guardar(nombre, fu, visibles)
-            if (l == null) toast("No se pudo guardar (máximo " + ListasEnlaces.MAX_LISTAS + " listas)")
-            else toast("Lista guardada (" + l.items.size + " enlaces)")
         }
     }
 
@@ -2968,113 +2732,6 @@ class MainActivity : Activity() {
 
 
     // ---------------------------------------------------------------- rastreador de enlaces (fase 2: seguir enlaces)
-
-    private fun pedirNumero(titulo: String, inicial: Int, alAceptar: (Int) -> Unit) {
-        pedirTextoOpcional(titulo, inicial.toString()) { t ->
-            val n = t.toIntOrNull()
-            if (n == null) toast("Escribe un número") else alAceptar(n)
-        }
-    }
-
-    private fun configurarRastreo(p: Pestana) {
-        val items = ArrayList<Pair<String, () -> Unit>>()
-        fun add(t: String, a: () -> Unit) {
-            items.add(Pair(t, a))
-        }
-        add("Profundidad: " + (if (ajustes.rastroProf == 0) "sin límite (solo frenan los topes)" else ajustes.rastroProf.toString() + " saltos")) {
-            pedirNumero("Profundidad en saltos desde esta página (0 = sin límite)", ajustes.rastroProf) { ajustes.rastroProf = it; configurarRastreo(p) }
-        }
-        add("Máximo de páginas: " + ajustes.rastroPaginas) {
-            pedirNumero("Máximo de páginas a leer (1–2000)", ajustes.rastroPaginas) { ajustes.rastroPaginas = it; configurarRastreo(p) }
-        }
-        add("Tiempo máximo: " + ajustes.rastroMin + " min") {
-            pedirNumero("Tiempo máximo en minutos (1–120)", ajustes.rastroMin) { ajustes.rastroMin = it; configurarRastreo(p) }
-        }
-        add("Pausa entre páginas: " + ajustes.rastroPausa + " ms") {
-            pedirNumero("Pausa entre páginas en milisegundos (0–10000)", ajustes.rastroPausa) { ajustes.rastroPausa = it; configurarRastreo(p) }
-        }
-        add("Seguir también otros sitios: " + si(ajustes.rastroOtros)) {
-            ajustes.rastroOtros = !ajustes.rastroOtros
-            configurarRastreo(p)
-        }
-        add("Enviar mis cookies (sesión iniciada): " + (if (p.privada) "no (pestaña privada)" else si(ajustes.rastroCookies))) {
-            if (!p.privada) ajustes.rastroCookies = !ajustes.rastroCookies
-            configurarRastreo(p)
-        }
-        add("Respetar robots.txt: " + si(ajustes.rastroRobots)) {
-            ajustes.rastroRobots = !ajustes.rastroRobots
-            configurarRastreo(p)
-        }
-        add("Tipos a buscar…") {
-            elegirTiposEnlaces("Tipos a buscar", "Aceptar", { configurarRastreo(p) }) { configurarRastreo(p) }
-        }
-        add("▶ Empezar el rastreo") { iniciarRastreo(p) }
-        opciones(
-            "Rastrear este sitio\nLee el HTML de las páginas (sin JavaScript) y sigue sus enlaces. Solo con la app abierta. No visita ni lista dominios bloqueados por el bloqueador.",
-            items
-        )
-    }
-
-    private fun textoProgresoRastreo(pr: ProgresoRastreo): String =
-        "Páginas leídas: " + pr.paginas + "\nEnlaces encontrados: " + pr.enlaces + "\nSaltos: " + pr.nivel + " · en cola: " + pr.enCola +
-            "\n" + pr.actual.removePrefix("https://").removePrefix("http://").take(70)
-
-    private fun iniciarRastreo(p: Pestana) {
-        if (rastreador != null) {
-            toast("Ya hay un rastreo en marcha")
-            return
-        }
-        if (!p.url.startsWith("http")) return
-        val propio = ajustes.enlacesPropio.let { if (it.isBlank()) null else FiltroPropio(it) }
-        val cfg = ConfigRastreo(
-            p.url, ajustes.rastroProf, ajustes.rastroPaginas, ajustes.rastroMin * 60000L, ajustes.rastroPausa.toLong(),
-            ajustes.rastroOtros, ajustes.rastroCookies && !p.privada, ajustes.rastroRobots,
-            WebSettings.getDefaultUserAgent(this), ajustes.bloquearAnuncios, ajustes.enlacesTipos, propio
-        )
-        val r = Rastreador(cfg, { pr -> dialogoRastreo?.setMessage(textoProgresoRastreo(pr)) }, { res -> terminarRastreo(p, res) })
-        rastreador = r
-        dialogoRastreo = nuevoDialogo()
-            .setTitle("Rastreando…")
-            .setMessage("Empezando…")
-            .setCancelable(false)
-            .setPositiveButton("Parar y ver") { _, _ -> r.parar("detenido") }
-            .setNegativeButton("Descartar") { _, _ -> r.parar("descartado") }
-            .show()
-        r.iniciar()
-    }
-
-    private fun terminarRastreo(p: Pestana, res: ResultadoRastreo) {
-        if (isDestroyed) return
-        rastreador = null
-        try {
-            dialogoRastreo?.dismiss()
-        } catch (e: Exception) {
-            // Ya cerrado.
-        }
-        dialogoRastreo = null
-        if (res.motivo == "descartado") {
-            toast("Rastreo descartado")
-            return
-        }
-        ultimoRastreo = res
-        if (!enPantalla) return
-        mostrarResultadoRastreo(actual ?: p, res)
-    }
-
-    private fun mostrarResultadoRastreo(p: Pestana, res: ResultadoRastreo) {
-        val resumen = res.paginas.toString() + " páginas leídas (" + res.motivo + ")"
-        if (res.enlaces.isEmpty()) {
-            nuevoDialogo()
-                .setTitle("Rastreo terminado")
-                .setMessage("Sin enlaces de los tipos elegidos.\n" + resumen)
-                .setPositiveButton("Aceptar", null)
-                .show()
-            return
-        }
-        toast(resumen)
-        enlacesDeRastreo = true
-        mostrarEnlaces(p, "", res.titulo.ifBlank { Omnibox.hostDe(res.inicio) }, res.inicio, res.enlaces, null, true)
-    }
 
     // ---------------------------------------------------------------- páginas guardadas (sin conexión)
 
