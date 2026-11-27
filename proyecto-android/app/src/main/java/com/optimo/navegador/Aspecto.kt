@@ -163,6 +163,7 @@ class PanelAspecto(
         const val COLORES = "colores"
         const val ACCESOS_INICIO = "accesos_inicio"
         const val ACCESOS_MENU = "accesos_menu"
+        const val GESTOS = "gestos"
         private val NOMBRES_OSCURO = listOf("auto", "siempre", "nunca")
         private val NOMBRES_ORIGEN = listOf("marcadores recientes", "lista propia", "predeterminados")
     }
@@ -199,7 +200,7 @@ class PanelAspecto(
 
     private fun atras() {
         when (pagina) {
-            BARRA, INICIO, ACCESOS_MENU -> ir(RAIZ)
+            BARRA, INICIO, ACCESOS_MENU, GESTOS -> ir(RAIZ)
             TEMAS, COLORES, ACCESOS_INICIO -> ir(INICIO)
             else -> {
                 hoja.cerrar()
@@ -225,6 +226,7 @@ class PanelAspecto(
             COLORES -> pintarColores()
             ACCESOS_INICIO -> pintarAccesosInicio()
             ACCESOS_MENU -> pintarAccesosMenu()
+            GESTOS -> pintarGestos()
             else -> pintarRaiz()
         }
     }
@@ -355,10 +357,10 @@ class PanelAspecto(
         hoja.fila("Accesos rápidos del menú", "Qué botones salen arriba y en qué orden", AccesosMenu.lista(ajustes).size.toString()) { ir(ACCESOS_MENU) }
         hoja.seccion("Interfaz de Optimo")
         hoja.fila("Barra de direcciones", "Botones, orden, tamaños y separación") { ir(BARRA) }
-        hoja.interruptor("Gestos de arrastre", "Cerrar paneles y plegar barras y hojas arrastrándolos", Gestos.activos) { v ->
-            Gestos.activos = v
-            repintar()
-        }
+        hoja.fila(
+            "Gestos de arrastre", "Cerrar paneles y plegar barras y hojas: activa o apaga cada uno",
+            Gestos.cuantosActivos().toString() + "/" + Gestos.TODOS.size
+        ) { ir(GESTOS) }
         hoja.fila("Pantalla de inicio", "Colores, accesos, buscador y título") { ir(INICIO) }
     }
 
@@ -409,6 +411,36 @@ class PanelAspecto(
         }
         hoja.boton("Restablecer los accesos", true) {
             ajustes.accesosMenu = ""
+            repintar()
+        }
+    }
+
+    // ---------------------------------------------------------------- gestos de arrastre
+
+    private fun interruptorGesto(id: String, titulo: String, detalle: String) {
+        hoja.interruptor(titulo, detalle, Gestos.activo(id)) { v ->
+            Gestos.fijar(id, v)
+            repintar()
+        }
+    }
+
+    private fun pintarGestos() {
+        titulo("Gestos de arrastre")
+        hoja.nota("Cada gesto se activa o se apaga por separado. Las tiras que ya estén plegadas se pueden desplegar siempre tocándolas.")
+        hoja.seccion("Paneles")
+        interruptorGesto(Gestos.PANELES, "Cerrar paneles arrastrando", "Menú, ajustes, escudo… se cierran arrastrándolos hacia la derecha")
+        hoja.seccion("Barras")
+        interruptorGesto(Gestos.BARRA_SUP, "Plegar la barra superior", "Arrastrarla hacia arriba la deja en una tira")
+        interruptorGesto(Gestos.BARRA_INF, "Plegar la barra inferior", "Arrastrarla hacia abajo la deja en una tira")
+        hoja.seccion("Hojas de arriba y abajo")
+        interruptorGesto(
+            Gestos.HOJA_PLEGAR, "Plegar hojas arrastrándolas",
+            "Las que dejan ver la página (ocultar elemento, capas, elegir elemento) pasan a una tira"
+        )
+        interruptorGesto(Gestos.TIRADOR, "Plegar tocando el tirador", "En esas mismas hojas; tocar la tira las despliega")
+        interruptorGesto(Gestos.HOJA_CERRAR, "Cerrar hojas arrastrándolas", "Confirmaciones, listas de opciones y acciones, hacia abajo")
+        hoja.boton("Activar todos los gestos") {
+            Gestos.activarTodos()
             repintar()
         }
     }
