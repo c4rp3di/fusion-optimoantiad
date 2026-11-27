@@ -221,6 +221,27 @@ class Ajustes(contexto: Context) {
             sp.edit().putBoolean("reducir_anim", v).apply()
         }
 
+    /** Antes de descargar, mostrar el nombre y el sitio y dejar cambiar el nombre. */
+    var descargaConfirmar: Boolean
+        get() = sp.getBoolean("descarga_confirmar", false)
+        set(v) {
+            sp.edit().putBoolean("descarga_confirmar", v).apply()
+        }
+
+    /** Descargar solo con Wi-Fi (si no hay, la descarga espera). */
+    var descargaSoloWifi: Boolean
+        get() = sp.getBoolean("descarga_wifi", false)
+        set(v) {
+            sp.edit().putBoolean("descarga_wifi", v).apply()
+        }
+
+    /** Anotar las descargas (de pestañas normales) en la lista de Descargas. */
+    var descargaRecordar: Boolean
+        get() = sp.getBoolean("descarga_recordar", true)
+        set(v) {
+            sp.edit().putBoolean("descarga_recordar", v).apply()
+        }
+
     /** Accesos rápidos del menú: acciones separadas por comas, en orden. Vacío = los de por defecto. */
     var accesosMenu: String
         get() = sp.getString("menu_rapidos", "") ?: ""
@@ -568,7 +589,7 @@ class Ajustes(contexto: Context) {
         "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss",
         "emergentes_est" to "ss", "emergentes_rec" to "ss", "cookies3_si" to "ss", "cookies3_no" to "ss",
         "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss",
-        "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "texto_zoom_sitios" to "ss"
+        "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "descarga_confirmar" to "b", "descarga_wifi" to "b", "descarga_recordar" to "b", "texto_zoom_sitios" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
