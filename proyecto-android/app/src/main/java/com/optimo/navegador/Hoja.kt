@@ -1153,6 +1153,57 @@ class Hoja(private val act: Activity, private val paleta: Paleta, private val pr
         agregar(fila, lp)
     }
 
+    /** Tarjeta de una operación en curso: título, detalle, barra de progreso (0–1000, o -1 si no se sabe) y un botón opcional. */
+    fun tarjetaProgreso(titulo: String, detalle: String, progreso: Int, boton: String?, alBoton: (() -> Unit)?) {
+        val caja = LinearLayout(act)
+        caja.orientation = LinearLayout.VERTICAL
+        caja.setPadding(dp(12), dp(10), dp(12), dp(12))
+        val f = GradientDrawable()
+        f.setColor(Color.argb(40, Color.red(paleta.acento), Color.green(paleta.acento), Color.blue(paleta.acento)))
+        f.cornerRadius = dp(14).toFloat()
+        caja.background = f
+        val fila = LinearLayout(act)
+        fila.orientation = LinearLayout.HORIZONTAL
+        fila.gravity = Gravity.CENTER_VERTICAL
+        val col = LinearLayout(act)
+        col.orientation = LinearLayout.VERTICAL
+        val t = texto(titulo, 14f, paleta.texto, true)
+        t.setSingleLine(true)
+        t.ellipsize = android.text.TextUtils.TruncateAt.END
+        col.addView(t)
+        val d = texto(detalle, 12f, paleta.tenue)
+        d.setSingleLine(true)
+        d.ellipsize = android.text.TextUtils.TruncateAt.END
+        col.addView(d)
+        fila.addView(col, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        if (boton != null && alBoton != null) {
+            val b = texto(boton, 12f, paleta.advertencia, true)
+            b.gravity = Gravity.CENTER
+            b.setPadding(dp(12), dp(8), dp(12), dp(8))
+            val fb = GradientDrawable()
+            fb.setColor(paleta.barra)
+            fb.cornerRadius = dp(16).toFloat()
+            b.background = fb
+            b.isClickable = true
+            b.setOnClickListener { alBoton() }
+            fila.addView(b)
+        }
+        caja.addView(fila)
+        val barra = android.widget.ProgressBar(act, null, android.R.attr.progressBarStyleHorizontal)
+        barra.max = 1000
+        barra.isIndeterminate = progreso < 0
+        if (progreso >= 0) barra.progress = progreso.coerceIn(0, 1000)
+        barra.progressTintList = ColorStateList.valueOf(paleta.acento)
+        barra.indeterminateTintList = ColorStateList.valueOf(paleta.acento)
+        val lpb = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(6))
+        lpb.topMargin = dp(8)
+        caja.addView(barra, lpb)
+        val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        lp.topMargin = dp(6)
+        lp.bottomMargin = dp(2)
+        agregar(caja, lp)
+    }
+
     /** Botón grande de acción principal (color de acento) con icono, título y subtítulo. */
     fun botonGrande(icono: String, titulo: String, sub: String, activo: Boolean = true, accion: () -> Unit) {
         val fila = LinearLayout(act)
