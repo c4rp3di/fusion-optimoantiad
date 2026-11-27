@@ -736,3 +736,18 @@ Sin compilar ni probar todavía.
 - **`ControlDescargas.kt`**: las descargas normales (comprobación de http, confirmar y cambiar nombre, solo Wi-Fi, cookies del perfil normal o privado, permiso de almacenamiento, registro en la lista) y las de aplicaciones web (puente de la página, escritura por bloques, token) salen de `MainActivity` (–136 líneas). Mismo comportamiento que antes.
 - `EscritorDescarga` expone el tipo, los bytes escritos y la ubicación del archivo; `GestorDescargas` trabaja ahora con el registro completo (normal o de aplicación web).
 - El Kotlin, sin compilar ni probar en el móvil. Por probar: descargar un archivo desde una aplicación web local y comprobar que aparece, se abre y se comparte; y que una descarga normal sigue funcionando igual.
+
+## 1.40.0 — Rastreador de enlaces rediseñado (interfaz en `RastreadorUI.kt`)
+
+Sin compilar ni probar todavía. Misma apariencia que el resto de Optimo: paneles laterales y hojas inferiores de `Hoja`, sin estilos nuevos.
+
+- **Interfaz fuera de `MainActivity`** (–343 líneas en `MainActivity`): `RastreadorUI.kt` lleva configurar, progreso, resultados y acciones; `MainActivity` solo conserva la búsqueda en la página abierta (JavaScript) y la exportación (resultado de actividad). El motor sigue en `Rastreador.kt`.
+- **Configurar** (panel lateral): «Hasta dónde llegar» con tres opciones (esta página, esta sección —la carpeta de la dirección y sus subcarpetas— o todo el sitio; se recuerda en `rastro_alcance`, dentro de la copia de seguridad), tipos a buscar como chips, filtro propio, tope de páginas y tiempo a la vista, interruptores de robots.txt, otros sitios y cookies, y «Ajustes avanzados» (profundidad, páginas, minutos y pausa con − / +).
+- **En marcha** (hoja inferior, la que se pliega): tiempo, página que lee, barra de progreso (páginas leídas sobre lo leído + lo que queda en cola, con el tope), enlaces / páginas / en cola, enlaces por tipo, repetidos y los 3 últimos encontrados. **Pausar y reanudar** (el tiempo en pausa no cuenta para el tope de minutos), **Descartar** y **Ver resultados**. Plegada (arrastrar hacia abajo o tocar el tirador) deja la página libre; «atrás» la pliega y, ya plegada, la quita (el rastreo sigue y se vuelve a ver desde el menú: «Rastrear este sitio…» o «Ver el último rastreo»). Si termina con la hoja plegada o cerrada, avisa con «Ver» en vez de abrir los resultados encima de lo que estés haciendo.
+- **Resultados** (panel lateral): búsqueda, filtro por tipo con contadores, **agrupar por tipo, página de origen o sitio**, 150 filas cada vez («Mostrar más») para no cargar miles de vistas. Pulsar una fila abre su menú; pulsación larga o «Seleccionar» pasa a marcar varios y aparece la **hoja de acciones** abajo (Copiar, Compartir, Exportar, Guardar, Quitar) sin bloquear la lista y plegable.
+- **Rastrear de nuevo** una lista guardada (Guardados › Listas de enlaces › menú de la lista): abre la configuración con su dirección y, al terminar, marca con **NUEVO** lo que no estaba en la lista y cuenta los nuevos.
+- Motor: `pausar()/reanudar()`, contadores por tipo, repetidos y últimos hallazgos en `ProgresoRastreo`, `ConfigRastreo.prefijoRuta` y `soloPagina`.
+- `Hoja`: `chipsMultiples`, `estaPlegada`, `plegarAhora()` y `sinBloquearDetras()` (hoja que deja tocar la página y la lista de detrás, también desplegada).
+- Las cifras de «≤ N páginas · ≤ M min» son **topes**, no una estimación del sitio.
+- **A probar:** rastrear con las tres opciones de alcance; pausar/reanudar; plegar y desplegar la hoja y seguir navegando; «atrás» (pliega, luego quita); que termine con la hoja plegada (aviso «Ver»); resultados con agrupación y filtros; marcar varios y cada acción de la hoja; «Rastrear de nuevo» desde una lista guardada.
+
