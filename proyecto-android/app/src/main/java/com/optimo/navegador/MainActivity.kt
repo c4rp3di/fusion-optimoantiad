@@ -207,8 +207,8 @@ class MainActivity : Activity() {
     private lateinit var btnEscudo: android.widget.FrameLayout
     private lateinit var escudoIcono: VistaEscudo
     private lateinit var escudoNum: TextView
-    private lateinit var btnMarcadores: TextView
-    private lateinit var btnPantalla: TextView
+    private lateinit var envPestanas: View
+    private lateinit var btnMenu: TextView
     private lateinit var cajaOmnibox: android.widget.FrameLayout
     private val escudoPendiente = java.util.concurrent.atomic.AtomicBoolean(false)
     private lateinit var barraSuperior: LinearLayout
@@ -750,7 +750,7 @@ class MainActivity : Activity() {
 
         // Barra superior: indicador de seguridad + omnibox
         val barraSup = BarraPlegable(this, true) { plegarBarra(true) }
-        barraSup.setOrientation(LinearLayout.HORIZONTAL)
+        barraSup.setOrientation(LinearLayout.VERTICAL)
         barraSup.setGravity(Gravity.CENTER_VERTICAL)
         barraSup.setBackgroundColor(paleta.barra)
         barraSup.setPadding(8.dp(), 6.dp(), 8.dp(), 6.dp())
@@ -760,7 +760,7 @@ class MainActivity : Activity() {
         candado.gravity = Gravity.CENTER
         candado.isClickable = true
         candado.setOnClickListener { mostrarInfoSitio() }
-        // Los botones de la barra se colocan en aplicarBarra() según Ajustes › Barra de direcciones.
+        // Los botones de la barra se colocan en aplicarBarra() según Ajustes › Aspecto › Barras.
 
         omnibox = EditText(this)
         omnibox.hint = "Busca o escribe una dirección"
@@ -816,8 +816,6 @@ class MainActivity : Activity() {
         // Altavoz: solo aparece si la pestaña suena o está silenciada (tocar para silenciar / activar el sonido)
         btnAltavoz = boton("🔊", 17f) { actual?.let { alternarSilencio(it) } }
         btnAltavoz.visibility = View.GONE
-        btnMarcadores = boton("🔖", 17f) { abrirGuardados(PantallaGuardados.MARCADORES) }
-        btnPantalla = boton("⛶", 18f) { entrarPaginaCompleta() }
         // Escudo: estado de la protección en la página activa (toca para ver el panel)
         btnEscudo = android.widget.FrameLayout(this)
         btnEscudo.isClickable = true
@@ -834,7 +832,6 @@ class MainActivity : Activity() {
         escudoNum.visibility = View.GONE
         btnEscudo.addView(escudoNum, android.widget.FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, 14.dp(), Gravity.TOP or Gravity.END))
         barraSuperior = barraSup
-        aplicarBarra()
         principal.addView(
             barraSup,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -912,9 +909,9 @@ class MainActivity : Activity() {
         )
         principal.addView(herramientas.vista, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 5f))
 
-        // Barra inferior: atras, adelante, recargar/parar, marcador, pestañas, menu
+        // Barra inferior: por defecto atrás, adelante, recargar/parar, marcador, pestañas y menú; los botones se colocan en aplicarBarra().
         val barraInf = BarraPlegable(this, false) { plegarBarra(false) }
-        barraInf.setOrientation(LinearLayout.HORIZONTAL)
+        barraInf.setOrientation(LinearLayout.VERTICAL)
         barraInf.setGravity(Gravity.CENTER_VERTICAL)
         barraInf.setBackgroundColor(paleta.barra)
         barraInferior = barraInf
@@ -945,17 +942,14 @@ class MainActivity : Activity() {
         cajaPestanas.setCornerRadius(6.dp().toFloat())
         btnPestanas.background = cajaPestanas
         val envoltorio = FrameLayout(this)
+        envPestanas = envoltorio
         envoltorio.isClickable = true
         envoltorio.setOnClickListener { mostrarPestanas() }
         ripple(envoltorio)
         envoltorio.addView(btnPestanas, FrameLayout.LayoutParams(26.dp(), 22.dp(), Gravity.CENTER))
 
-        val btnMenu = boton("⋮", 22f) { mostrarMenu() }
+        btnMenu = boton("⋮", 22f) { mostrarMenu() }
 
-        val vistasInf = listOf<View>(btnAtras, btnAdelante, btnRecargar, btnMarcador, envoltorio, btnMenu)
-        for (v in vistasInf) {
-            barraInf.addView(v, LinearLayout.LayoutParams(0, 48.dp(), 1f))
-        }
         asaInf = AsaBarra(this, paleta, false) { desplegarBarra(false) }
         asaInf.visibility = View.GONE
         principal.addView(asaInf, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 20.dp()))
@@ -963,6 +957,7 @@ class MainActivity : Activity() {
             barraInf,
             LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
         )
+        aplicarBarra()
 
         pantallaCompleta = FrameLayout(this)
         pantallaCompleta.setBackgroundColor(Color.BLACK)
@@ -1038,38 +1033,85 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- barra de direcciones configurable y escudo
 
-    /** Monta la barra de direcciones según [BarraConfig]: elementos visibles, orden, tamaños, separación y alto. */
-    private fun aplicarBarra() {
-        val barra = barraSuperior
-        barra.removeAllViews()
-        val alto = BarraConfig.alto.dp()
-        var primero = true
-        for (e in BarraConfig.orden()) {
-            if (e.id != BarraConfig.OMNIBOX && !e.visible) continue
-            val v: View
-            val lp: LinearLayout.LayoutParams
-            if (e.id == BarraConfig.OMNIBOX) {
-                v = cajaOmnibox
-                lp = LinearLayout.LayoutParams(0, alto, 1f)
-            } else {
-                v = when (e.id) {
-                    "candado" -> candado
-                    "escudo" -> btnEscudo
-                    "altavoz" -> btnAltavoz
-                    "marcadores" -> btnMarcadores
-                    else -> btnPantalla
-                }
-                lp = LinearLayout.LayoutParams(e.tamano.dp(), alto)
-                if (v is TextView) v.textSize = e.tamano * 0.45f
-                if (e.id == "escudo") {
-                    val lado = (e.tamano * 0.58f).toInt().dp()
-                    escudoIcono.layoutParams = android.widget.FrameLayout.LayoutParams(lado, lado, Gravity.CENTER)
+    /** Vista de un botón del catálogo: los que tienen estado propio son siempre la misma; el resto se crea al colocarlo. */
+    private fun vistaBoton(e: EntradaBarra): View? {
+        val def = BarraConfig.definicion(e.id) ?: return null
+        return when (e.id) {
+            "candado" -> candado
+            "escudo" -> btnEscudo
+            "altavoz" -> btnAltavoz
+            "atras" -> btnAtras
+            "adelante" -> btnAdelante
+            "recargar" -> btnRecargar
+            "marcador" -> btnMarcador
+            "pestanas" -> envPestanas
+            "menu" -> btnMenu
+            else -> boton(def.icono, def.texto) { pulsarBoton(def) }.also { t ->
+                t.setOnLongClickListener {
+                    toast(def.nombre)
+                    true
                 }
             }
-            if (!primero) lp.leftMargin = BarraConfig.separacion.dp()
-            primero = false
-            barra.addView(v, lp)
         }
+    }
+
+    /** Acción de un botón genérico del catálogo. */
+    private fun pulsarBoton(def: ElementoBarra) {
+        val a = def.accion
+        if (a != null) {
+            ejecutarMenu(a)
+            return
+        }
+        when (def.id) {
+            "subir" -> actual?.web?.pageUp(true)
+            "bajar" -> actual?.web?.pageDown(true)
+            "cerrar" -> actual?.let { cerrarPestana(it) }
+        }
+    }
+
+    /** Tamaño del símbolo de un botón: el suyo si tiene ancho fijo, o el que le toca por defecto si se reparte el ancho. */
+    private fun fijarTextoBoton(v: View, e: EntradaBarra, def: ElementoBarra) {
+        if (v is TextView && v !== btnPestanas) v.textSize = if (e.tamano > 0) e.tamano * 0.45f else def.texto
+    }
+
+    /** Monta las dos barras según [BarraConfig]: botones, filas, orden, tamaños, separación y alto. */
+    private fun aplicarBarra() {
+        if (!::barraSuperior.isInitialized || !::barraInferior.isInitialized || !::btnMenu.isInitialized) return
+        for (b in listOf(BarraConfig.sup, BarraConfig.inf)) {
+            val barra = if (b.arriba) barraSuperior else barraInferior
+            for (k in 0 until barra.childCount) (barra.getChildAt(k) as? LinearLayout)?.removeAllViews()
+            barra.removeAllViews()
+            val alto = b.alto.dp()
+            for (fila in b.filas) {
+                val caja = LinearLayout(this)
+                caja.orientation = LinearLayout.HORIZONTAL
+                caja.gravity = Gravity.CENTER_VERTICAL
+                var primero = true
+                for (e in fila) {
+                    val v: View
+                    val lp: LinearLayout.LayoutParams
+                    if (e.id == BarraConfig.OMNIBOX) {
+                        v = cajaOmnibox
+                        lp = LinearLayout.LayoutParams(0, alto, 1f)
+                    } else {
+                        val def = BarraConfig.definicion(e.id) ?: continue
+                        v = vistaBoton(e) ?: continue
+                        lp = if (e.tamano > 0) LinearLayout.LayoutParams(e.tamano.dp(), alto) else LinearLayout.LayoutParams(0, alto, 1f)
+                        fijarTextoBoton(v, e, def)
+                        if (e.id == "escudo") {
+                            val lado = (if (e.tamano > 0) e.tamano * 0.58f else 22f).toInt().dp()
+                            escudoIcono.layoutParams = android.widget.FrameLayout.LayoutParams(lado, lado, Gravity.CENTER)
+                        }
+                    }
+                    if (!primero) lp.leftMargin = b.separacion.dp()
+                    primero = false
+                    (v.parent as? ViewGroup)?.removeView(v)
+                    caja.addView(v, lp)
+                }
+                barra.addView(caja, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+            }
+        }
+        aplicarPlegado()
         if (actual != null) actualizarUi()
     }
 
@@ -4475,8 +4517,9 @@ class MainActivity : Activity() {
         (barraInferior as? BarraPlegable)?.restablecer()
         barraSuperior.visibility = if (!paginaCompleta && !barraSupPlegada) View.VISIBLE else View.GONE
         asaSup.visibility = if (!paginaCompleta && barraSupPlegada) View.VISIBLE else View.GONE
-        barraInferior.visibility = if (!paginaCompleta && !barraInfPlegada) View.VISIBLE else View.GONE
-        asaInf.visibility = if (!paginaCompleta && barraInfPlegada) View.VISIBLE else View.GONE
+        val hayInf = BarraConfig.inf.filas.isNotEmpty()
+        barraInferior.visibility = if (!paginaCompleta && !barraInfPlegada && hayInf) View.VISIBLE else View.GONE
+        asaInf.visibility = if (!paginaCompleta && barraInfPlegada && hayInf) View.VISIBLE else View.GONE
     }
 
     private fun entrarPaginaCompleta() {
