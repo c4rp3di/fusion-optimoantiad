@@ -17,6 +17,45 @@ fun dominioBase(host: String): String {
     return partes.takeLast(n).joinToString(".")
 }
 
+/** Lo que un sitio puede conservar frente a los borrados globales (suma de bits; ver [Ajustes.conservadoDe]). */
+object Conservar {
+    const val HISTORIAL = 1
+    const val COOKIES = 2
+    const val DATOS = 4
+    const val AJUSTES = 8
+    const val TODO = 15
+
+    /** Bit, título y detalle de cada opción, en el orden en que se muestran. */
+    val OPCIONES: List<Triple<Int, String, String>> = listOf(
+        Triple(HISTORIAL, "Historial", "Sus páginas se quedan al borrar el historial (todo, por rango o por plazo)"),
+        Triple(COOKIES, "Sesión (cookies)", "Sigues con la sesión iniciada después de un borrado global"),
+        Triple(DATOS, "Datos locales", "localStorage, IndexedDB… del sitio (también de una aplicación web local)"),
+        Triple(AJUSTES, "Permisos y ajustes", "Los permisos concedidos y los ajustes propios del sitio")
+    )
+
+    fun cuantos(bits: Int): Int = OPCIONES.count { (bits and it.first) != 0 }
+
+    /** Texto corto para una fila: «No», «2 de 4»… */
+    fun resumen(bits: Int): String = if (bits == 0) "No" else cuantos(bits).toString() + " de " + OPCIONES.size
+
+    /** Los interruptores de un sitio. [alCambiar] se llama después de guardar cada cambio. */
+    fun pintar(hoja: Hoja, ajustes: Ajustes, host: String, alCambiar: () -> Unit) {
+        val bits = ajustes.conservadoDe(host)
+        for (o in OPCIONES) {
+            hoja.interruptor(o.second, o.third, (bits and o.first) != 0) { v ->
+                val ahora = ajustes.conservadoDe(host)
+                ajustes.fijarConservadoDe(host, if (v) ahora or o.first else ahora and o.first.inv())
+                alCambiar()
+            }
+        }
+        hoja.nota(
+            "Lo que marques se salta los borrados globales: «Borrar todo», borrar al salir, borrar por rango o plazo del historial, " +
+                "«Borrar cookies y datos de todos los sitios» y «Revocar todos los permisos». Si borras algo de este sitio a propósito, sí se borra. " +
+                "La caché no es por sitio y se borra siempre."
+        )
+    }
+}
+
 fun tamanoDir(d: File): Long {
     var t = 0L
     try {
@@ -72,8 +111,35 @@ class LimpiezaDatos(
     fun aplicarRetencion() {
         val d = ajustes.retencionHistorial
         if (d <= 0) return
-        historial.quitarAnterioresA(System.currentTimeMillis() - d * 86400000L)
+        val limite = System.currentTimeMillis() - d * 86400000L
+        if (!ajustes.hayConservados(Conservar.HISTORIAL)) {
+            historial.quitarAnterioresA(limite)
+        } else {
+            quitarHistorialSi { e -> e.tiempo > 0L && e.tiempo < limite }
+        }
     }
+
+    private fun hostDe(e: Entrada): String = ReglasUsuario.clave(Omnibox.hostDe(e.url))
+
+    /** Quita del historial lo que cumpla [cond], salvo lo de los sitios que conservan su historial. */
+    private fun quitarHistorialSi(cond: (Entrada) -> Boolean) {
+        var n = 0
+        for (e in historial.todos().toList()) {
+            if (cond(e) && !ajustes.conservaHost(hostDe(e), Conservar.HISTORIAL)) {
+                historial.quitar(e.url)
+                n++
+            }
+        }
+        if (n > 0) historial.guardarAhora()
+    }
+
+    /** Entradas que borraría un borrado desde [desde] (ms; 0 = todo), sin las de los sitios que conservan su historial. */
+    fun contarDesde(desde: Long): Int =
+        historial.todos().count { e -> e.tiempo >= desde && !ajustes.conservaHost(hostDe(e), Conservar.HISTORIAL) }
+
+    /** Entradas que borraría la retención con ese [limite] (ms), sin las de los sitios que conservan su historial. */
+    fun contarAnterioresA(limite: Long): Int =
+        historial.todos().count { e -> e.tiempo > 0L && e.tiempo < limite && !ajustes.conservaHost(hostDe(e), Conservar.HISTORIAL) }
 
     /** Instante (ms) desde el que se borra para cada opción de [ETIQUETAS_RANGO]; 0 = todo. */
     fun inicioRango(i: Int): Long {
@@ -96,12 +162,12 @@ class LimpiezaDatos(
 
     fun vaciarHistorial() {
         Miniaturas.vaciar()
-        historial.vaciar()
+        if (!ajustes.hayConservados(Conservar.HISTORIAL)) historial.vaciar() else quitarHistorialSi { true }
         alVaciarHistorial()
     }
 
     fun quitarHistorialDesde(desde: Long) {
-        historial.quitarDesde(desde)
+        if (!ajustes.hayConservados(Conservar.HISTORIAL)) historial.quitarDesde(desde) else quitarHistorialSi { e -> e.tiempo >= desde }
         alVaciarHistorial()
     }
 
@@ -133,20 +199,62 @@ class LimpiezaDatos(
 
     fun tamanoCache(): Long = tamanoDir(ctx.cacheDir)
 
-    /** Cookies y almacenamiento local de todos los sitios (perfil normal). */
-    fun borrarCookiesYAlmacenamiento() {
-        CookieManager.getInstance().removeAllCookies(null)
+    /** Sitios que Optimo conoce (páginas abiertas, historial, permisos, ajustes y reglas): los únicos que se pueden borrar de uno en uno. */
+    private fun hostsConocidos(): List<String> {
+        val r = LinkedHashSet<String>()
+        fun a(h: String) {
+            val k = ReglasUsuario.clave(h)
+            if (k.isNotEmpty()) r.add(k)
+        }
+        for (w in webs()) {
+            val u = try { w.url } catch (e: Exception) { null } ?: continue
+            a(Omnibox.hostDe(u))
+        }
+        for (e in historial.todos()) a(Omnibox.hostDe(e.url))
+        for (h in ajustes.sitiosConPermisos()) a(h)
+        for (h in ajustes.sitiosConAjustes()) a(h)
+        for (h in ReglasUsuario.hostsConReglas()) a(h)
+        return ArrayList(r)
+    }
+
+    private fun borrarOrigenes(host: String) {
+        try {
+            WebStorage.getInstance().deleteOrigin("https://" + host)
+            WebStorage.getInstance().deleteOrigin("http://" + host)
+        } catch (e: Exception) {
+            // Origen desconocido para el WebView.
+        }
+    }
+
+    /**
+     * Cookies y almacenamiento local de todos los sitios (perfil normal). Si algún sitio conserva su sesión o sus datos locales, se borra
+     * sitio por sitio (los que Optimo conoce: Android no permite listar el resto) saltándose esos. [hosts] permite calcular la lista antes
+     * de vaciar el historial, de donde sale en buena parte.
+     */
+    fun borrarCookiesYAlmacenamiento(hosts: List<String>? = null) {
+        if (!ajustes.hayConservados(Conservar.COOKIES or Conservar.DATOS)) {
+            CookieManager.getInstance().removeAllCookies(null)
+            CookieManager.getInstance().flush()
+            WebStorage.getInstance().deleteAllData()
+            return
+        }
+        for (h in hosts ?: hostsConocidos()) {
+            if (!ajustes.conservaHost(h, Conservar.COOKIES)) {
+                for (c in cookiesDeSitio(h)) borrarCookie(h, c.first)
+            }
+            if (!ajustes.conservaHost(h, Conservar.DATOS)) borrarOrigenes(h)
+        }
         CookieManager.getInstance().flush()
-        WebStorage.getInstance().deleteAllData()
     }
 
     /** Historial, excepciones de certificado, cookies, almacenamiento y caché de la página abierta. */
     fun borrarDatosNavegacion() {
+        val hosts = if (ajustes.hayConservados(Conservar.COOKIES or Conservar.DATOS)) hostsConocidos() else null
         ListaDescargas.vaciar()
         vaciarHistorial()
         ExcepcionesSsl.quitarTodas()
         olvidarSsl()
-        borrarCookiesYAlmacenamiento()
+        borrarCookiesYAlmacenamiento(hosts)
         webs().firstOrNull()?.clearCache(true)
     }
 
@@ -171,9 +279,15 @@ class LimpiezaDatos(
             ajustes.salidaPendiente = false
             return
         }
+        val conservan = ajustes.hayConservados(Conservar.COOKIES or Conservar.DATOS)
+        // La lista de sitios sale en buena parte del historial: se calcula antes de vaciarlo.
+        val hosts = if ((m and 1) != 0 && conservan) hostsConocidos() else null
         if ((m and 2) != 0) vaciarHistorial()
         if ((m and 4) != 0) borrarCache()
-        if ((m and 1) != 0) {
+        if ((m and 1) != 0 && conservan) {
+            borrarCookiesYAlmacenamiento(hosts)
+            ajustes.salidaPendiente = false
+        } else if ((m and 1) != 0) {
             val cm = CookieManager.getInstance()
             cm.removeAllCookies { _ -> ajustes.salidaPendiente = false }
             cm.flush()
@@ -224,12 +338,7 @@ class LimpiezaDatos(
     /** Cookies (del sitio y de su dominio base) y almacenamiento local de un sitio. Solo el perfil normal. */
     fun borrarDatosSitio(host: String) {
         for (c in cookiesDeSitio(host)) borrarCookie(host, c.first)
-        try {
-            WebStorage.getInstance().deleteOrigin("https://" + host)
-            WebStorage.getInstance().deleteOrigin("http://" + host)
-        } catch (e: Exception) {
-            // Origen desconocido para el WebView.
-        }
+        borrarOrigenes(host)
     }
 
     /**
