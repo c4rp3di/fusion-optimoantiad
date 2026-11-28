@@ -106,6 +106,7 @@ class MenuLateral(
         const val PAGINA = "pagina"
         const val MULTIMEDIA = "multimedia"
         const val GENERAL = "general"
+        const val CONSERVAR = "conservar"
     }
 
     private val privada = g.pestana()?.privada == true
@@ -116,7 +117,10 @@ class MenuLateral(
     fun mostrar() {
         pintar()
         hoja.interceptarAtras {
-            if (pagina != RAIZ) {
+            if (pagina == CONSERVAR) {
+                ir(PAGINA)
+                true
+            } else if (pagina != RAIZ) {
                 ir(RAIZ)
                 true
             } else {
@@ -148,6 +152,7 @@ class MenuLateral(
             PAGINA -> pintarPagina()
             MULTIMEDIA -> pintarMultimedia()
             GENERAL -> pintarGeneral()
+            CONSERVAR -> pintarConservar()
             else -> pintarRaiz()
         }
     }
@@ -244,8 +249,28 @@ class MenuLateral(
         }
         hoja.seccion("Más")
         if (conPagina && http && !p.privada) hoja.fila("Personalizar este sitio…", "CSS propio, modo oscuro, emergentes…", icono = "🎛") { hacer(AccionMenu.PERSONALIZAR) }
+        if (conPagina && (http || p.appWeb) && !p.privada) {
+            val host = ReglasUsuario.clave(Omnibox.hostDe(p.url))
+            if (host.isNotEmpty()) {
+                hoja.fila("Conservar este sitio", "Que los borrados globales no le afecten", Conservar.resumen(ajustes.conservadoDe(host)), icono = "🔒") { ir(CONSERVAR) }
+            }
+        }
         if (conPagina) hoja.fila("Herramientas de desarrollo", icono = "🛠") { hacer(AccionMenu.HERRAMIENTAS) }
         hoja.fila("Ir a la pantalla de inicio", icono = "⌂") { hacer(AccionMenu.IR_INICIO) }
+    }
+
+    // ---------------------------------------------------------------- conservar el sitio de la pestaña
+
+    private fun pintarConservar() {
+        hoja.barraTitulo("Conservar este sitio", { ir(PAGINA) }, { hoja.cerrar() })
+        val p = g.pestana()
+        val host = if (p == null || p.inicio) "" else ReglasUsuario.clave(Omnibox.hostDe(p.url))
+        if (host.isEmpty()) {
+            hoja.nota("Abre una página para elegir qué conservar de su sitio.")
+            return
+        }
+        hoja.nota("Sitio: " + host)
+        Conservar.pintar(hoja, ajustes, host) { repintar() }
     }
 
     // ---------------------------------------------------------------- multimedia
