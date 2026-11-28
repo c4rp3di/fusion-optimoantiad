@@ -596,7 +596,7 @@ class Ajustes(contexto: Context) {
         "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss",
         "emergentes_est" to "ss", "emergentes_rec" to "ss", "cookies3_si" to "ss", "cookies3_no" to "ss",
         "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss",
-        "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "descarga_confirmar" to "b", "descarga_wifi" to "b", "descarga_recordar" to "b", "texto_zoom_sitios" to "ss"
+        "conservar_sitios" to "ss", "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "descarga_confirmar" to "b", "descarga_wifi" to "b", "descarga_recordar" to "b", "texto_zoom_sitios" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
@@ -1158,7 +1158,62 @@ class Ajustes(contexto: Context) {
     fun totalPermisos(): Int = permisosGuardados().size + permisosTemporales().size
 
     fun quitarTodosPermisos() {
-        sp.edit().remove("permisos_sitio").remove("permisos_temp").apply()
+        if (!hayConservados(Conservar.AJUSTES)) {
+            sp.edit().remove("permisos_sitio").remove("permisos_temp").apply()
+            return
+        }
+        val g = permisosGuardados().filter { conservaHost(it.substringBefore('|'), Conservar.AJUSTES) }.toSet()
+        val t = permisosTemporales().filter { conservaHost(it.substringBefore('|'), Conservar.AJUSTES) }.toSet()
+        sp.edit().putStringSet("permisos_sitio", g).putStringSet("permisos_temp", t).apply()
     }
+
+    // ---------------------------------------------------------------- sitios conservados (a salvo de los borrados globales)
+
+    /** Qué conserva [host] (clave exacta; suma de bits de [Conservar]); 0 = nada. */
+    fun conservadoDe(host: String): Int {
+        val h = claveSitio(host)
+        for (e in conjunto("conservar_sitios")) {
+            if (e.substringBefore('|') == h) return (e.substringAfter('|').toIntOrNull() ?: 0) and Conservar.TODO
+        }
+        return 0
+    }
+
+    fun fijarConservadoDe(host: String, bits: Int) {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return
+        val s = HashSet(conjunto("conservar_sitios"))
+        s.removeAll { it.substringBefore('|') == h }
+        val b = bits and Conservar.TODO
+        if (b != 0 && s.size < 300) s.add(h + "|" + b)
+        sp.edit().putStringSet("conservar_sitios", s).apply()
+    }
+
+    /** Sitios con algo conservado, ordenados. */
+    fun sitiosConservados(): List<String> = conjunto("conservar_sitios").map { it.substringBefore('|') }.sorted()
+
+    /** ¿Algún sitio conserva alguno de los [bits]? */
+    fun hayConservados(bits: Int): Boolean =
+        conjunto("conservar_sitios").any { ((it.substringAfter('|').toIntOrNull() ?: 0) and bits) != 0 }
+
+    /**
+     * ¿Queda [host] a salvo de los borrados globales en lo que indica [bit]? Vale para el sitio y sus subdominios. Con cookies y datos
+     * locales, también para su dominio base entero (los subdominios comparten cookies), salvo en las aplicaciones web locales, que van cada una por su lado.
+     */
+    fun conservaHost(host: String, bit: Int): Boolean {
+        val h = claveSitio(host)
+        if (h.isEmpty()) return false
+        val compartido = bit == Conservar.COOKIES || bit == Conservar.DATOS
+        val base = if (compartido) baseConservar(h) else ""
+        for (e in conjunto("conservar_sitios")) {
+            val bits = e.substringAfter('|').toIntOrNull() ?: continue
+            if ((bits and bit) == 0) continue
+            val p = e.substringBefore('|')
+            if (h == p || h.endsWith("." + p)) return true
+            if (base.isNotEmpty() && baseConservar(p) == base) return true
+        }
+        return false
+    }
+
+    private fun baseConservar(h: String): String = if (AppLocal.esHostApp(h)) h else dominioBase(h)
 }
 
