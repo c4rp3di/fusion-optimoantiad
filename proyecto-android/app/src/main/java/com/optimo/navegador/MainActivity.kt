@@ -245,6 +245,7 @@ class MainActivity : Activity() {
         agenteDev = AgenteDev(this, ajustes)
         ReglasUsuario.iniciar(this)
         BarraConfig.iniciar(this)
+        AppLocal.iniciarRegistro(this)
         ListaDescargas.iniciar(this)
         Gestos.iniciar(this)
         EstadisticasBloqueo.iniciar(this)
@@ -2316,6 +2317,16 @@ class MainActivity : Activity() {
         override fun cerradas(): Int = this@MainActivity.cerradas.size
         override fun reabrir() = mostrarCerradas()
         override fun volverAlMenu() = abrirMenuLateral()
+
+        override fun borrarDatosApp(espacio: String) = limpieza.borrarDatosSitio(AppLocal.host(espacio))
+        override fun quitarApp(espacio: String) = quitarAppRegistrada(espacio)
+        override fun datosConservados(espacio: String): Boolean = (ajustes.conservadoDe(AppLocal.host(espacio)) and Conservar.DATOS) != 0
+
+        override fun conservarDatos(espacio: String, v: Boolean) {
+            val h = AppLocal.host(espacio)
+            val b = ajustes.conservadoDe(h)
+            ajustes.fijarConservadoDe(h, if (v) b or Conservar.DATOS else b and Conservar.DATOS.inv())
+        }
     }
 
     private fun ejecutarMenu(a: AccionMenu) {
@@ -2357,6 +2368,7 @@ class MainActivity : Activity() {
             }
             AccionMenu.ABRIR_MEGA -> if (p != null) elegirAppMedio(p.url, null, p, null, p.titulo)
             AccionMenu.PAGINAS_GUARDADAS -> abrirGuardados(PantallaGuardados.PAGINAS)
+            AccionMenu.APPS_LOCALES -> abrirGuardados(PantallaGuardados.APPS)
             AccionMenu.LISTAS_ENLACES -> abrirGuardados(PantallaGuardados.LISTAS)
             AccionMenu.REABRIR -> mostrarCerradas()
             AccionMenu.CERRAR_TODAS -> cerrarTodas()
@@ -4180,6 +4192,26 @@ class MainActivity : Activity() {
         q.titulo = nombre
         activar(q)
         q.web?.loadUrl(q.url)
+        // Se anota en Guardados › Aplicaciones y se guarda una copia para poder abrirla desde allí.
+        AppLocal.anotar(esp, q.appNombre, urlMarcador)
+        if (urlMarcador.isEmpty()) {
+            val copia = guardarLocalPermanente(q)
+            if (copia != null) AppLocal.actualizarCopia(esp, copia)
+        }
+    }
+
+    /** Quita una aplicación de Guardados › Aplicaciones y borra su copia, salvo que un marcador u otra aplicación la use. Sus datos no se tocan. */
+    private fun quitarAppRegistrada(espacio: String) {
+        val a = AppLocal.registradas().firstOrNull { it.espacio == espacio } ?: return
+        AppLocal.olvidar(espacio)
+        if (a.copia.isEmpty()) return
+        val nombre = Uri.parse(a.copia).lastPathSegment ?: ""
+        val usada = marcadores.todos().any { esMarcadorLocal(it.url) && Uri.parse(it.url).lastPathSegment == nombre } ||
+            AppLocal.registradas().any { it.copia.isNotEmpty() && Uri.parse(it.copia).lastPathSegment == nombre }
+        if (ID_LOCAL.matches(nombre) && !usada) File(dirLocales(), nombre).delete()
+        for (q in pestanas) {
+            if (q.urlLocal == a.copia) q.urlLocal = ""
+        }
     }
 
     // ---------------------------------------------------------------- descargas (ControlDescargas.kt)
@@ -4312,7 +4344,8 @@ class MainActivity : Activity() {
         marcadores.quitar(url)
         if (esMarcadorLocal(url)) {
             val nombre = Uri.parse(url).lastPathSegment ?: ""
-            val compartida = marcadores.todos().any { it.url != url && esMarcadorLocal(it.url) && Uri.parse(it.url).lastPathSegment == nombre }
+            val compartida = marcadores.todos().any { it.url != url && esMarcadorLocal(it.url) && Uri.parse(it.url).lastPathSegment == nombre } ||
+                AppLocal.registradas().any { it.copia.isNotEmpty() && Uri.parse(it.copia).lastPathSegment == nombre }
             if (ID_LOCAL.matches(nombre) && !compartida) File(dirLocales(), nombre).delete()
             for (q in pestanas) {
                 if (q.urlLocal == url) q.urlLocal = ""
@@ -4362,6 +4395,9 @@ class MainActivity : Activity() {
         val usados = HashSet<String>()
         for (e in marcadores.todos()) {
             if (esMarcadorLocal(e.url)) usados.add(Uri.parse(e.url).lastPathSegment ?: "")
+        }
+        for (app in AppLocal.registradas()) {
+            if (app.copia.isNotEmpty()) usados.add(Uri.parse(app.copia).lastPathSegment ?: "")
         }
         val limite = System.currentTimeMillis() - 24 * 3600000L
         for (f in archivos) {
