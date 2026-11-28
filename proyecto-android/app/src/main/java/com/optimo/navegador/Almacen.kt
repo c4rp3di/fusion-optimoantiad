@@ -596,7 +596,7 @@ class Ajustes(contexto: Context) {
         "escritorio_sitios" to "ss", "oscuro_si" to "ss", "oscuro_no" to "ss",
         "emergentes_est" to "ss", "emergentes_rec" to "ss", "cookies3_si" to "ss", "cookies3_no" to "ss",
         "imagenes_si" to "ss", "imagenes_no" to "ss", "no_suspender" to "ss",
-        "conservar_sitios" to "ss", "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "descarga_confirmar" to "b", "descarga_wifi" to "b", "descarga_recordar" to "b", "texto_zoom_sitios" to "ss"
+        "conservar_sitios" to "ss", "html_local_modo" to "i", "texto_zoom" to "i", "forzar_zoom" to "b", "alto_contraste" to "b", "reducir_anim" to "b", "menu_rapidos" to "s", "descarga_confirmar" to "b", "descarga_wifi" to "b", "descarga_recordar" to "b", "texto_zoom_sitios" to "ss"
     )
 
     fun exportarJson(): org.json.JSONObject {
@@ -1034,6 +1034,16 @@ class Ajustes(contexto: Context) {
         }
 
     // ---------------------------------------------------------------- privacidad y datos guardados
+
+    /**
+     * Qué hacer con un .html del dispositivo que contiene JavaScript: 0 preguntar siempre, 1 sin JavaScript, 2 con JavaScript sin red
+     * ni almacenamiento, 3 aplicación web (solo directo si el archivo es del dispositivo; si viene de Descargas u otra app, pregunta).
+     */
+    var htmlLocalModo: Int
+        get() = sp.getInt("html_local_modo", 0).coerceIn(0, 3)
+        set(v) {
+            sp.edit().putInt("html_local_modo", v.coerceIn(0, 3)).apply()
+        }
 
     /** Días que se conserva el historial (0 = sin límite). Lo anterior se borra al abrir y al volver a Optimo. */
     var retencionHistorial: Int
