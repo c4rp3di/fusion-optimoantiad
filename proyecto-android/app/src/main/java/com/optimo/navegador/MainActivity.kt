@@ -2096,6 +2096,7 @@ class MainActivity : Activity() {
         override fun escritorio(p: Pestana): Boolean = escritorioEfectivo(p)
         override fun buscador(): String = Omnibox.motor(ajustes.motor).nombre
         override fun arranque(): String = nombreArranque()
+        override fun htmlLocales(): String = nombreModoHtmlLocal()
         override fun oscurecer(): Boolean = ajustes.oscurecerPaginas
         override fun ahorro(): String = NOMBRES_AHORRO[ajustes.ahorroDatos]
         override fun devCaptura(): Boolean = ajustes.devCaptura
@@ -2399,6 +2400,7 @@ class MainActivity : Activity() {
             }
             AccionMenu.MOTOR -> elegirMotor()
             AccionMenu.ARRANQUE -> elegirArranque()
+            AccionMenu.HTML_LOCALES -> elegirModoHtmlLocal()
             AccionMenu.DEV_CAPTURA -> {
                 ajustes.devCaptura = !ajustes.devCaptura
                 reinstalarDev()
@@ -2895,6 +2897,31 @@ class MainActivity : Activity() {
             abrirMenuLateral(MenuLateral.GENERAL)
         })
         opciones("Al abrir Optimo", items)
+    }
+
+    private fun nombreModoHtmlLocal(): String = when (ajustes.htmlLocalModo) {
+        1 -> "Sin JavaScript"
+        2 -> "Con JavaScript"
+        3 -> "Aplicación web"
+        else -> "Preguntar"
+    }
+
+    private fun elegirModoHtmlLocal() {
+        val actual = ajustes.htmlLocalModo
+        val textos = listOf(
+            "Preguntar siempre: eliges cada vez",
+            "Sin JavaScript: solo se ve el archivo",
+            "Con JavaScript, sin red ni almacenamiento",
+            "Aplicación web (con red y datos) si el archivo es del dispositivo; si viene de Descargas u otra app, preguntar"
+        )
+        val items = ArrayList<Pair<String, () -> Unit>>()
+        for (i in textos.indices) {
+            items.add(Pair((if (actual == i) "● " else "") + textos[i]) {
+                ajustes.htmlLocalModo = i
+                abrirMenuLateral(MenuLateral.GENERAL)
+            })
+        }
+        opciones("Archivos .html con JavaScript", items)
     }
 
     // ---------------------------------------------------------------- ajustes por sitio: emergentes y resumen
@@ -4079,6 +4106,7 @@ class MainActivity : Activity() {
             toast("Optimo solo abre archivos HTML desde el dispositivo")
             return
         }
+        val delDispositivo = origenDelDispositivo(uri)
         Thread {
             var archivo: File? = null
             var error: String? = null
@@ -4119,15 +4147,54 @@ class MainActivity : Activity() {
             val err = error
             val conScripts = if (a != null) contieneScripts(a) else false
             runOnUiThread {
-                if (a == null) toast(err ?: "No se pudo leer el archivo") else decidirScriptsLocal(a, nombre, conScripts)
+                if (a == null) toast(err ?: "No se pudo leer el archivo") else decidirScriptsLocal(a, nombre, conScripts, delDispositivo)
             }
         }.start()
     }
 
-    private fun decidirScriptsLocal(archivo: File, nombre: String, conScripts: Boolean) {
+    /**
+     * ¿El archivo es del propio dispositivo (lo abrió el usuario desde un gestor de archivos) y no viene de internet? Solo se da por bueno
+     * el almacenamiento interno o la tarjeta vía el proveedor de documentos del sistema, fuera de la carpeta Descargas. Descargas, correo,
+     * mensajería, la nube, otros navegadores y cualquier proveedor desconocido cuentan como «de fuera». Es una heurística: Android no dice de dónde vino un archivo.
+     */
+    private fun origenDelDispositivo(uri: Uri): Boolean {
+        return try {
+            when (uri.scheme?.lowercase()) {
+                "file" -> !(uri.path ?: "").lowercase().split('/').any { it == "download" || it == "downloads" }
+                "content" -> {
+                    if (uri.authority != "com.android.externalstorage.documents") {
+                        false
+                    } else {
+                        val id = android.provider.DocumentsContract.getDocumentId(uri).lowercase()
+                        !id.substringAfter(':').split('/').any { it == "download" || it == "downloads" }
+                    }
+                }
+                else -> false
+            }
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun decidirScriptsLocal(archivo: File, nombre: String, conScripts: Boolean, delDispositivo: Boolean) {
         if (!conScripts) {
             abrirLocal(archivo, nombre, false)
             return
+        }
+        val modo = ajustes.htmlLocalModo
+        when {
+            modo == 1 -> {
+                abrirLocal(archivo, nombre, false)
+                return
+            }
+            modo == 2 -> {
+                abrirLocal(archivo, nombre, true)
+                return
+            }
+            modo == 3 && delDispositivo -> {
+                abrirLocalApp(archivo, nombre, AppLocal.espacioPorDefecto(nombre))
+                return
+            }
         }
         val opciones = arrayOf(
             "Aplicación web: con almacenamiento y red, como en otro navegador",
@@ -4135,7 +4202,7 @@ class MainActivity : Activity() {
             "Sin JavaScript"
         )
         nuevoDialogo()
-            .setTitle(nombre + " contiene JavaScript")
+            .setTitle(nombre + (if (modo == 3) " viene de Descargas u otra app y contiene JavaScript" else " contiene JavaScript"))
             .setItems(opciones) { _, i ->
                 when (i) {
                     0 -> pedirEspacioApp(archivo, nombre)
