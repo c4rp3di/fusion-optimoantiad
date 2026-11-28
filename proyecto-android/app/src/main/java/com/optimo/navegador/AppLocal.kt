@@ -2,6 +2,7 @@ package com.optimo.navegador
 
 import android.content.ContentValues
 import android.content.Context
+import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -14,6 +15,9 @@ import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.OutputStream
+
+/** Una aplicación web local conocida: su espacio de datos, el último archivo con que se abrió, cuándo y la copia guardada (optimo://local/…, o vacío). */
+class AppRegistrada(val espacio: String, val nombre: String, val ultima: Long, val copia: String)
 
 /**
  * «Aplicación web» (Optimo 1.24.0): un .html del dispositivo abierto como si fuera una web, con su propio origen https, para que funcionen
@@ -36,6 +40,58 @@ object AppLocal {
     const val NOMBRE_PUENTE = "optimoDescarga"
 
     private val servidos = HashMap<String, File>()
+
+    // ------------------------------------------------------------------ registro de aplicaciones (Guardados › Aplicaciones)
+
+    private var registro: SharedPreferences? = null
+
+    fun iniciarRegistro(c: Context) {
+        registro = c.getSharedPreferences("optimo_apps", Context.MODE_PRIVATE)
+    }
+
+    /** Formato guardado: «espacio|nombre|última|copia» (el nombre solo lleva letras, dígitos y . _ -, y la copia no lleva «|»). */
+    private fun leerRegistro(): MutableList<AppRegistrada> {
+        val r = ArrayList<AppRegistrada>()
+        for (e in registro?.getStringSet("apps", emptySet()) ?: emptySet()) {
+            val p = e.split('|')
+            if (p.size < 3) continue
+            val esp = limpiarEspacio(p[0])
+            if (esp.isEmpty()) continue
+            r.add(AppRegistrada(esp, p[1], p[2].toLongOrNull() ?: 0L, if (p.size > 3) p[3] else ""))
+        }
+        return r
+    }
+
+    private fun guardarRegistro(l: List<AppRegistrada>) {
+        registro?.edit()?.putStringSet("apps", l.take(100).map { it.espacio + "|" + it.nombre + "|" + it.ultima + "|" + it.copia }.toSet())?.apply()
+    }
+
+    /** Las aplicaciones conocidas, la más reciente primero. */
+    fun registradas(): List<AppRegistrada> = leerRegistro().sortedByDescending { it.ultima }
+
+    /** Anota que se abrió [espacio] con el archivo [nombre]. Si [copia] va vacía se conserva la que ya hubiera. */
+    fun anotar(espacio: String, nombre: String, copia: String) {
+        val l = leerRegistro()
+        val antes = l.firstOrNull { it.espacio == espacio }
+        l.removeAll { it.espacio == espacio }
+        l.add(AppRegistrada(espacio, nombre, System.currentTimeMillis(), if (copia.isNotEmpty()) copia else (antes?.copia ?: "")))
+        guardarRegistro(l.sortedByDescending { it.ultima })
+    }
+
+    fun actualizarCopia(espacio: String, copia: String) {
+        val l = leerRegistro()
+        val i = l.indexOfFirst { it.espacio == espacio }
+        if (i < 0) return
+        val x = l[i]
+        l[i] = AppRegistrada(x.espacio, x.nombre, x.ultima, copia)
+        guardarRegistro(l.sortedByDescending { it.ultima })
+    }
+
+    fun olvidar(espacio: String) {
+        val l = leerRegistro()
+        l.removeAll { it.espacio == espacio }
+        guardarRegistro(l)
+    }
 
     // ------------------------------------------------------------------ nombres
 
