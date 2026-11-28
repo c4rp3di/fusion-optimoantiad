@@ -778,3 +778,7 @@ Sin compilar ni probar todavía (sobre 1.41.0).
 - Código: `BarraConfig` (catálogo, dos `Barra` con filas, `colocar/quitar/mover/tamano`), `MainActivity.aplicarBarra()` monta las dos barras (cada una es una columna de filas) y `vistaBoton`/`pulsarBoton`; `Aspecto.kt` con las pantallas `BARRA`, `ANADIR` y `MOVER`.
 - Límites conocidos: los botones de ajuste (escritorio, oscurecer) no cambian de aspecto según su estado; el ancho en reparto de varios botones es igual para todos.
 - **A probar:** arrancar sin tocar nada (barras como antes); añadir botones a la inferior y a la superior; mover entre barras y filas; filas nuevas (hasta 3); anchos reparto/fijo; alto y separación de cada barra; plegar la barra de varias filas; vaciar la inferior (desaparece) y recuperarla; que el menú no se pueda quitar; el botón de herramientas de desarrollo; subir/bajar; cerrar pestaña; «Restablecer las dos barras»; cerrar y abrir Optimo (persistencia) y actualizar desde 1.41.0 con la barra superior ya personalizada.
+
+## 1.42.1 — Corrige la compilación de 1.42.0
+
+Sin compilar todavía. La compilación de 1.42.0 fallaba (19 errores, todos en `AjustesBarra.kt`): el repositorio conservaba ese archivo de una versión antigua (la pantalla de la barra de direcciones, hoy en `Aspecto.kt`), que usaba funciones de `BarraConfig` que ya no existen. Aquí `AjustesBarra.kt` viene vacío para que sustituya al antiguo al copiar encima; se puede borrar del repositorio. Sin más cambios.
