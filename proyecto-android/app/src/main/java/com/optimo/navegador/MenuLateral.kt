@@ -293,6 +293,14 @@ class MenuLateral(
         hoja.fila("Al abrir Optimo", null, g.arranque(), icono = "🚀") { hacer(AccionMenu.ARRANQUE) }
         hoja.fila("Aplicaciones web guardadas", "Los .html que abres como aplicación, con sus datos", icono = "🧩") { hacer(AccionMenu.APPS_LOCALES) }
         hoja.fila("Archivos .html del dispositivo", "Cómo se abren los que traen JavaScript", g.htmlLocales(), icono = "📄") { hacer(AccionMenu.HTML_LOCALES) }
+        hoja.interruptor(
+            "Descargas cuenta como del dispositivo",
+            "En el modo «Aplicación web»: los .html de la carpeta Descargas se abren sin preguntar. Desactívalo para que pregunten",
+            ajustes.htmlDescargasConfianza
+        ) { v ->
+            ajustes.htmlDescargasConfianza = v
+            repintar()
+        }
         hoja.interruptor("Herramientas de desarrollo: capturar desde el inicio", "Recarga las páginas abiertas para aplicarlo", g.devCaptura()) { hacer(AccionMenu.DEV_CAPTURA) }
         hoja.fila("Copia de seguridad", "Exportar e importar tus datos", icono = "💽") { hacer(AccionMenu.COPIA) }
         hoja.fila("Acerca de Optimo", icono = "ℹ") { hacer(AccionMenu.ACERCA) }
