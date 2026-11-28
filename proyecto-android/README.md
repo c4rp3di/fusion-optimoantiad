@@ -754,7 +754,7 @@ Sin compilar ni probar todavía. Misma apariencia que el resto de Optimo: panele
 
 ## 1.41.0 — Cada gesto de arrastre, por separado
 
-Sin compilar ni probar todavía (sobre 1.40.0).
+Compilada y probada (sobre 1.40.0).
 
 - **Pantalla lateral «Gestos de arrastre»** (Ajustes › Aspecto › Interfaz de Optimo; la fila muestra cuántos hay activos, p. ej. 6/6). Sustituye al interruptor único. Seis interruptores:
   - **Paneles:** cerrar arrastrando hacia la derecha.
@@ -764,3 +764,17 @@ Sin compilar ni probar todavía (sobre 1.40.0).
 - Un gesto apagado deja de interceptar los toques; los demás siguen igual. Las tiras ya plegadas se despliegan siempre tocándolas.
 - `Gestos` (`Plegables.kt`) guarda una preferencia por gesto (`gesto_<id>`); si antes se había apagado el interruptor único (`gestos_arrastre`), ese valor es el de partida de todos hasta que se cambie alguno.
 - **A probar:** apagar cada gesto y ver que solo desaparece ese; que el tirador pliegue con «Plegar hojas arrastrándolas» apagado y al revés; la hoja del rastreador (plegable) y las de confirmar/elegir (cerrar); el contador de la fila; «Activar todos»; «atrás» vuelve a Aspecto.
+
+## 1.42.0 — Barra inferior personalizable, con el mismo catálogo que la superior
+
+Sin compilar ni probar todavía (sobre 1.41.0).
+
+- **Ajustes › Aspecto › «Barras superior e inferior»** (antes «Barra de direcciones»): selector de barra y, para la elegida, vista previa, filas, botones, anchos, separación y alto. Por defecto, las dos barras son las de siempre (arriba: candado, dirección, escudo, altavoz, marcadores, pantalla completa; abajo: atrás, adelante, recargar, marcar, pestañas, menú).
+- **Un catálogo único de ~40 botones** para las dos barras, por grupos: *Navegación* (atrás, adelante, recargar/parar, inicio, subir al principio, bajar al final), *Pestañas y menú* (pestañas con contador, nueva, privada, cerrar esta, reabrir la última, menú), *Esta página* (candado, escudo, altavoz, marcar, compartir, copiar dirección, buscar, lectura, escritorio, oscurecer, ocultar elemento, quitar capa, guardar sin conexión, pantalla completa), *Guardados* (marcadores, historial, descargas, páginas guardadas), *Herramientas* (**desarrollo**, buscar enlaces, rastrear, reproducir el vídeo detectado) y *Optimo* (centro de protección, aspecto). Los genéricos ejecutan la misma acción que en el menú (`AccionMenu`); una pulsación larga dice qué botón es.
+- Cada botón está en **una sola barra y fila**, o en ninguna. «＋ Añadir un botón» lista los que no están en la barra editada; si uno está en la otra, se mueve. «Mover» elige barra y fila (o fila nueva) y «Quitar» lo devuelve al catálogo. El **campo de dirección** solo va en la superior y no se quita; el **menú** se puede mover pero no quitar (para no quedarte sin él).
+- **Hasta 3 filas por barra.** Cada barra tiene su propio alto de fila y separación; la barra entera se pliega con los gestos de siempre. Si la inferior se queda sin botones, no se ve.
+- **Ancho de cada botón:** «reparto» (se reparte lo que sobra con el campo de dirección u otros en reparto; el símbolo conserva su tamaño por defecto) o fijo de 24 a 60 dp (el símbolo se escala). Los de la barra inferior por defecto son de reparto.
+- **Los cambios persisten** (`optimo_barra`: `f_sup`/`f_inf` con filas «id:ancho», `alto_*`, `sep_*`). Quien tuviera la barra superior personalizada la conserva: sus botones visibles, orden y tamaños pasan a la fila de arriba y los ocultos quedan en el catálogo.
+- Código: `BarraConfig` (catálogo, dos `Barra` con filas, `colocar/quitar/mover/tamano`), `MainActivity.aplicarBarra()` monta las dos barras (cada una es una columna de filas) y `vistaBoton`/`pulsarBoton`; `Aspecto.kt` con las pantallas `BARRA`, `ANADIR` y `MOVER`.
+- Límites conocidos: los botones de ajuste (escritorio, oscurecer) no cambian de aspecto según su estado; el ancho en reparto de varios botones es igual para todos.
+- **A probar:** arrancar sin tocar nada (barras como antes); añadir botones a la inferior y a la superior; mover entre barras y filas; filas nuevas (hasta 3); anchos reparto/fijo; alto y separación de cada barra; plegar la barra de varias filas; vaciar la inferior (desaparece) y recuperarla; que el menú no se pueda quitar; el botón de herramientas de desarrollo; subir/bajar; cerrar pestaña; «Restablecer las dos barras»; cerrar y abrir Optimo (persistencia) y actualizar desde 1.41.0 con la barra superior ya personalizada.
