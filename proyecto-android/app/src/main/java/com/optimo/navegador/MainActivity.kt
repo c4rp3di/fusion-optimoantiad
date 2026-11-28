@@ -2912,7 +2912,7 @@ class MainActivity : Activity() {
             "Preguntar siempre: eliges cada vez",
             "Sin JavaScript: solo se ve el archivo",
             "Con JavaScript, sin red ni almacenamiento",
-            "Aplicación web (con red y datos) si el archivo es del dispositivo; si viene de Descargas u otra app, preguntar"
+            "Aplicación web (con red y datos) si el archivo es del dispositivo (Descargas según el interruptor de abajo); si viene de otra app, preguntar"
         )
         val items = ArrayList<Pair<String, () -> Unit>>()
         for (i in textos.indices) {
@@ -4153,21 +4153,23 @@ class MainActivity : Activity() {
     }
 
     /**
-     * ¿El archivo es del propio dispositivo (lo abrió el usuario desde un gestor de archivos) y no viene de internet? Solo se da por bueno
-     * el almacenamiento interno o la tarjeta vía el proveedor de documentos del sistema, fuera de la carpeta Descargas. Descargas, correo,
-     * mensajería, la nube, otros navegadores y cualquier proveedor desconocido cuentan como «de fuera». Es una heurística: Android no dice de dónde vino un archivo.
+     * ¿El archivo es del propio dispositivo (lo abrió el usuario desde un gestor de archivos) y no viene de correo, mensajería, la nube u otra
+     * app? Se da por bueno el almacenamiento interno o la tarjeta vía el proveedor de documentos del sistema. La carpeta Descargas cuenta
+     * como del dispositivo según el ajuste «Descargas cuenta como del dispositivo» (Menú › General). Cualquier otro proveedor cuenta como
+     * «de fuera». Es una heurística: Android no dice de dónde vino un archivo.
      */
     private fun origenDelDispositivo(uri: Uri): Boolean {
+        val descargas = ajustes.htmlDescargasConfianza
         return try {
             when (uri.scheme?.lowercase()) {
-                "file" -> !(uri.path ?: "").lowercase().split('/').any { it == "download" || it == "downloads" }
-                "content" -> {
-                    if (uri.authority != "com.android.externalstorage.documents") {
-                        false
-                    } else {
+                "file" -> descargas || !(uri.path ?: "").lowercase().split('/').any { it == "download" || it == "downloads" }
+                "content" -> when (uri.authority) {
+                    "com.android.providers.downloads.documents" -> descargas
+                    "com.android.externalstorage.documents" -> {
                         val id = android.provider.DocumentsContract.getDocumentId(uri).lowercase()
-                        !id.substringAfter(':').split('/').any { it == "download" || it == "downloads" }
+                        descargas || !id.substringAfter(':').split('/').any { it == "download" || it == "downloads" }
                     }
+                    else -> false
                 }
                 else -> false
             }
@@ -4202,7 +4204,7 @@ class MainActivity : Activity() {
             "Sin JavaScript"
         )
         nuevoDialogo()
-            .setTitle(nombre + (if (modo == 3) " viene de Descargas u otra app y contiene JavaScript" else " contiene JavaScript"))
+            .setTitle(nombre + (if (modo == 3) " viene de fuera y contiene JavaScript" else " contiene JavaScript"))
             .setItems(opciones) { _, i ->
                 when (i) {
                     0 -> pedirEspacioApp(archivo, nombre)
