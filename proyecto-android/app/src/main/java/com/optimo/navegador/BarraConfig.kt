@@ -90,6 +90,7 @@ object BarraConfig {
         ElementoBarra("historial", "Historial", "🕘", 36, G_GUARD, AccionMenu.HISTORIAL),
         ElementoBarra("descargas", "Descargas", "⬇", 36, G_GUARD, AccionMenu.DESCARGAS),
         ElementoBarra("guardadas", "Páginas guardadas", "📁", 36, G_GUARD, AccionMenu.PAGINAS_GUARDADAS),
+        ElementoBarra("apps", "Aplicaciones web guardadas", "🧩", 36, G_GUARD, AccionMenu.APPS_LOCALES),
 
         ElementoBarra("devtools", "Herramientas de desarrollo", "🛠", 36, G_HERR, AccionMenu.HERRAMIENTAS),
         ElementoBarra("enlaces", "Buscar enlaces en la página", "🔗", 36, G_HERR, AccionMenu.BUSCAR_ENLACES),
