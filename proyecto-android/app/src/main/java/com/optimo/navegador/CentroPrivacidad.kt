@@ -62,7 +62,8 @@ class CentroPrivacidad(
         const val F_COOKIES = 1
         const val F_PERMISOS = 2
         const val F_AJUSTES = 3
-        private val ETIQUETAS_FILTRO = listOf("Todos", "Con cookies", "Con permisos", "Con ajustes")
+        const val F_CONSERVADOS = 4
+        private val ETIQUETAS_FILTRO = listOf("Todos", "Con cookies", "Con permisos", "Con ajustes", "Conservados")
     }
 
     private val privada = g.pestana()?.privada == true
@@ -149,6 +150,7 @@ class CentroPrivacidad(
         for (h in ajustes.sitiosConPermisos()) de(h)
         for (h in ajustes.sitiosConAjustes()) de(h)
         for (h in ReglasUsuario.hostsConReglas()) de(h)
+        for (h in ajustes.sitiosConservados()) de(h)
         for (info in mapa.values) rellenar(info)
         val lista = mapa.values.sortedWith(
             compareByDescending<InfoSitio> { it.cookies }.thenByDescending { it.visitas }.thenBy { it.host }
@@ -178,6 +180,7 @@ class CentroPrivacidad(
         if (i.reglas > 0) p.add(i.reglas.toString() + (if (i.reglas == 1) " regla" else " reglas"))
         if (i.ajustes.isNotEmpty()) p.add(i.ajustes.size.toString() + (if (i.ajustes.size == 1) " ajuste" else " ajustes"))
         if (i.visitas > 0) p.add(i.visitas.toString() + (if (i.visitas == 1) " visita" else " visitas"))
+        if (ajustes.conservadoDe(i.host) != 0) p.add("🔒 conservado")
         return if (p.isEmpty()) "Sin datos guardados" else p.joinToString(" · ")
     }
 
@@ -210,6 +213,10 @@ class CentroPrivacidad(
         }
         hoja.fila("Permisos concedidos", "Cámara, micrófono, ubicación…", ajustes.totalPermisos().toString(), icono = "🔑") {
             filtro = F_PERMISOS
+            ir(SITIOS)
+        }
+        hoja.fila("Sitios conservados", "A salvo de los borrados globales (se elige en cada sitio)", ajustes.sitiosConservados().size.toString(), icono = "🔒") {
+            filtro = F_CONSERVADOS
             ir(SITIOS)
         }
 
@@ -249,12 +256,13 @@ class CentroPrivacidad(
         hoja.interruptor("Cookies y datos de sitios", null, (ajustes.borrarAlSalir and 1) != 0) { v -> alternarAlSalir(1, v) }
         hoja.interruptor("Historial", null, (ajustes.borrarAlSalir and 2) != 0) { v -> alternarAlSalir(2, v) }
         hoja.interruptor("Caché", null, (ajustes.borrarAlSalir and 4) != 0) { v -> alternarAlSalir(4, v) }
+        if (ajustes.sitiosConservados().isNotEmpty()) hoja.nota(notaConservados())
 
         hoja.seccion("Limpieza total")
         hoja.boton("Borrar todo…", true) {
             confirmar(
                 "Borrar todo",
-                "Se borrarán el historial, la caché, las cookies, el almacenamiento de los sitios, los permisos concedidos y las estadísticas de bloqueo. Los marcadores y las reglas se conservan.",
+                "Se borrarán el historial, la caché, las cookies, el almacenamiento de los sitios, los permisos concedidos y las estadísticas de bloqueo. Los marcadores y las reglas se conservan. " + notaConservados(),
                 "Borrar todo"
             ) {
                 limpieza.borrarDatosNavegacion()
@@ -267,6 +275,11 @@ class CentroPrivacidad(
                 repintar()
             }
         }
+    }
+
+    private fun notaConservados(): String {
+        val n = ajustes.sitiosConservados().size
+        return if (n == 0) "" else "Los " + n + (if (n == 1) " sitio que conservas" else " sitios que conservas") + " no se tocan en lo que hayas marcado en cada uno."
     }
 
     private fun alternarAlSalir(bit: Int, activo: Boolean) {
@@ -304,7 +317,7 @@ class CentroPrivacidad(
         hoja.seccion("Borrar")
         for (i in LimpiezaDatos.ETIQUETAS_RANGO.indices) {
             val desde = limpieza.inicioRango(i)
-            val n = historial.contarDesde(desde)
+            val n = limpieza.contarDesde(desde)
             hoja.fila(
                 (if (i == 4) "Borrar todo el historial" else "Borrar: " + LimpiezaDatos.ETIQUETAS_RANGO[i].lowercase()),
                 null, n.toString() + (if (n == 1) " página" else " páginas"), aviso = i == 4
@@ -319,7 +332,7 @@ class CentroPrivacidad(
             repintar()
             return
         }
-        val n = historial.contarAnterioresA(System.currentTimeMillis() - dias * 86400000L)
+        val n = limpieza.contarAnterioresA(System.currentTimeMillis() - dias * 86400000L)
         if (n == 0) {
             ajustes.retencionHistorial = dias
             repintar()
@@ -359,7 +372,7 @@ class CentroPrivacidad(
     fun elegirRangoBorrado(volver: () -> Unit) {
         Dialogos.elegir(act, paleta, privada, "Borrar historial", LimpiezaDatos.ETIQUETAS_RANGO, -1) { i ->
             val desde = limpieza.inicioRango(i)
-            confirmarBorradoRango(i, desde, historial.contarDesde(desde), volver)
+            confirmarBorradoRango(i, desde, limpieza.contarDesde(desde), volver)
         }
     }
 
@@ -369,6 +382,7 @@ class CentroPrivacidad(
         F_COOKIES -> i.cookies > 0
         F_PERMISOS -> i.permisos.isNotEmpty()
         F_AJUSTES -> i.ajustes.isNotEmpty() || i.reglas > 0
+        F_CONSERVADOS -> ajustes.conservadoDe(i.host) != 0
         else -> true
     }
 
@@ -406,7 +420,8 @@ class CentroPrivacidad(
         hoja.boton("Borrar cookies y datos de todos los sitios…", true) {
             confirmar(
                 "Borrar cookies y datos de sitios",
-                "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local, incluidos los datos de las aplicaciones web locales (por ejemplo, los proyectos de un editor abierto como archivo).",
+                "Se cerrarán tus sesiones en los sitios web y se borrará su almacenamiento local, incluidos los datos de las aplicaciones web locales (por ejemplo, los proyectos de un editor abierto como archivo). " + notaConservados() +
+                    (if (ajustes.hayConservados(Conservar.COOKIES or Conservar.DATOS)) " Con sitios conservados se borra sitio por sitio, solo los que Optimo conoce." else ""),
                 "Borrar"
             ) {
                 limpieza.borrarCookiesYAlmacenamiento()
@@ -415,7 +430,7 @@ class CentroPrivacidad(
                 repintar()
             }
         }
-        val conAjustes = ajustes.sitiosConAjustes()
+        val conAjustes = ajustes.sitiosConAjustes().filter { h -> !ajustes.conservaHost(h, Conservar.AJUSTES) }
         if (conAjustes.isNotEmpty()) {
             hoja.boton("Restablecer los ajustes de todos los sitios…", true) {
                 confirmar(
@@ -423,7 +438,7 @@ class CentroPrivacidad(
                     "Se quitarán los ajustes propios de " + conAjustes.size + " sitios (escritorio, modo oscuro, emergentes, cookies de terceros, imágenes, suspensión y pausa del bloqueo). Los permisos, las reglas y el CSS no se tocan.",
                     "Restablecer"
                 ) {
-                    for (h in ajustes.sitiosConAjustes()) ajustes.restablecerSitio(h)
+                    for (h in conAjustes) ajustes.restablecerSitio(h)
                     g.reinstalarAnuncios()
                     invalidar()
                     g.avisar("Ajustes por sitio restablecidos. Recarga las páginas")
@@ -481,6 +496,12 @@ class CentroPrivacidad(
                 g.avisar("Datos de " + host + " borrados. Recarga la página")
                 repintar()
             }
+        }
+
+        hoja.seccion("Conservar este sitio")
+        Conservar.pintar(hoja, ajustes, host) {
+            invalidar()
+            repintar()
         }
 
         hoja.seccion("Protección en este sitio")
