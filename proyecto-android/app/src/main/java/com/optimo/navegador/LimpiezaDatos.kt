@@ -214,6 +214,7 @@ class LimpiezaDatos(
         for (h in ajustes.sitiosConPermisos()) a(h)
         for (h in ajustes.sitiosConAjustes()) a(h)
         for (h in ReglasUsuario.hostsConReglas()) a(h)
+        for (app in AppLocal.registradas()) a(AppLocal.host(app.espacio))
         return ArrayList(r)
     }
 
