@@ -815,3 +815,18 @@ Sin compilar ni probar todavía (sobre 1.44.0).
 - **Por qué importa:** una aplicación web comparte datos con las de su mismo espacio; un archivo de fuera con un nombre parecido a una aplicación tuya podría leer sus datos si se abriera sin preguntar.
 - **Limitación:** es una heurística. Android no dice de dónde vino un archivo: lo que descargaste con un navegador y luego mueves a otra carpeta cuenta como del dispositivo, y un archivo de un gestor que comparte por su propio proveedor (no el del sistema) cuenta como de fuera y pregunta. En la práctica, pregunta de más antes que de menos. Los modos 1 y 2 no distinguen origen (no dan red ni almacenamiento).
 - **A probar:** el modo «Aplicación web» con un .html abierto desde el gestor del sistema (directo), el mismo archivo desde la carpeta Descargas o desde un correo (pregunta), los modos 1, 2 y «Preguntar», que el valor de la fila de General cambie, y que Fusion vuelva a salir en Guardados › Aplicaciones tras abrirlo.
+
+## 1.45.1 — Descargas cuenta como del dispositivo
+
+Sin compilar ni probar todavía (sobre 1.45.0).
+
+- En el modo «Aplicación web» de Menú › General › «Archivos .html del dispositivo», los .html abiertos desde **Descargas** ya no preguntan: se abren directo como aplicación, igual que los del almacenamiento interno o la tarjeta (proveedores de documentos del sistema `externalstorage` y `downloads`). Siguen preguntando los que llegan de correo, mensajería, la nube, otros navegadores u otros proveedores (el título del aviso pasa a «viene de otra app»).
+- (1.45.2: ahora es un ajuste, ver abajo.) Contrapartida aceptada: un .html descargado de internet a Descargas se trata como propio; si su nombre coincide con el de una aplicación tuya (mismo espacio de datos), compartiría sus datos. Si algún día molesta, basta devolver Descargas a «de fuera» en `origenDelDispositivo` (`MainActivity.kt`).
+- **A probar:** un .html desde Descargas abierto con el modo «Aplicación web» (directo); uno recibido por correo o mensajería (pregunta).
+
+## 1.45.2 — «Descargas cuenta como del dispositivo» se elige en Ajustes
+
+Sin compilar ni probar todavía (sobre 1.45.1).
+
+- **Menú › General** tiene, bajo «Archivos .html del dispositivo», el interruptor **«Descargas cuenta como del dispositivo»** (`html_descargas`, activado por defecto; entra en la copia de seguridad). Activado, los .html de Descargas se abren directo como aplicación en el modo «Aplicación web»; desactivado, preguntan como los de otras apps (el almacenamiento interno o la tarjeta fuera de Descargas sigue contando como del dispositivo). No hace falta recompilar para cambiarlo.
+- **A probar:** con el interruptor activado, un .html de Descargas abre directo; desactivado, pregunta; un .html de otra carpeta abre directo en ambos casos.
