@@ -13,7 +13,7 @@ enum class AccionMenu(val cierra: Boolean = true) {
     PAGINAS_GUARDADAS, APPS_LOCALES, LISTAS_ENLACES, REABRIR, CERRAR_TODAS, SALIR,
     MEDIA, SEGUNDO_PLANO, LECTURA_VOZ,
     BARRA, INICIO_AJUSTES, OSCURECER(false), AHORRO(false),
-    MOTOR, ARRANQUE, DEV_CAPTURA(false), COPIA, ACERCA
+    MOTOR, ARRANQUE, HTML_LOCALES, DEV_CAPTURA(false), COPIA, ACERCA
 }
 
 /** Un botón de los accesos rápidos del menú. */
@@ -85,6 +85,9 @@ interface AnfitrionMenu {
     fun escritorio(p: Pestana): Boolean
     fun buscador(): String
     fun arranque(): String
+
+    /** Nombre corto del modo elegido para abrir los .html del dispositivo. */
+    fun htmlLocales(): String
     fun oscurecer(): Boolean
     fun ahorro(): String
     fun devCaptura(): Boolean
@@ -288,6 +291,8 @@ class MenuLateral(
         sub("General")
         hoja.fila("Buscador", null, g.buscador(), icono = "🔍") { hacer(AccionMenu.MOTOR) }
         hoja.fila("Al abrir Optimo", null, g.arranque(), icono = "🚀") { hacer(AccionMenu.ARRANQUE) }
+        hoja.fila("Aplicaciones web guardadas", "Los .html que abres como aplicación, con sus datos", icono = "🧩") { hacer(AccionMenu.APPS_LOCALES) }
+        hoja.fila("Archivos .html del dispositivo", "Cómo se abren los que traen JavaScript", g.htmlLocales(), icono = "📄") { hacer(AccionMenu.HTML_LOCALES) }
         hoja.interruptor("Herramientas de desarrollo: capturar desde el inicio", "Recarga las páginas abiertas para aplicarlo", g.devCaptura()) { hacer(AccionMenu.DEV_CAPTURA) }
         hoja.fila("Copia de seguridad", "Exportar e importar tus datos", icono = "💽") { hacer(AccionMenu.COPIA) }
         hoja.fila("Acerca de Optimo", icono = "ℹ") { hacer(AccionMenu.ACERCA) }
