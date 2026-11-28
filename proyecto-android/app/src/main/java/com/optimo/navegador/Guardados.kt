@@ -26,6 +26,12 @@ interface AnfitrionGuardados {
     fun cerradas(): Int
     fun reabrir()
     fun volverAlMenu()
+
+    /** Aplicaciones web locales (Guardados › Aplicaciones): borrar sus datos, quitarlas de la lista y conservar sus datos en los borrados globales. */
+    fun borrarDatosApp(espacio: String)
+    fun quitarApp(espacio: String)
+    fun datosConservados(espacio: String): Boolean
+    fun conservarDatos(espacio: String, v: Boolean)
 }
 
 /** Color estable para el círculo de un sitio (sale del texto, así el mismo sitio siempre tiene el mismo color). */
@@ -122,6 +128,7 @@ class PantallaGuardados(
         const val MARCADORES = "marcadores"
         const val HISTORIAL = "historial"
         const val PAGINAS = "paginas"
+        const val APPS = "apps"
         const val LISTAS = "listas"
         private val ORDENES = listOf("Como los guardaste", "Nombre (A–Z)", "Más recientes primero")
         private const val LOTE = 150
@@ -179,8 +186,8 @@ class PantallaGuardados(
     private fun pintarTodo() {
         hoja.limpiar()
         hoja.barraTitulo("Guardados", { atras() }, { hoja.cerrar() })
-        val nombres = listOf("Marcadores", "Historial", "Páginas guardadas", "Listas de enlaces", "Descargas")
-        val claves = listOf(MARCADORES, HISTORIAL, PAGINAS, LISTAS, "descargas")
+        val nombres = listOf("Marcadores", "Historial", "Páginas guardadas", "Aplicaciones", "Listas de enlaces", "Descargas")
+        val claves = listOf(MARCADORES, HISTORIAL, PAGINAS, APPS, LISTAS, "descargas")
         hoja.chips(nombres, claves.indexOf(pestana).coerceAtLeast(0)) { i ->
             if (claves[i] == "descargas") {
                 cerrarYHacer { g.descargas() }
@@ -195,6 +202,7 @@ class PantallaGuardados(
         val pista = when (pestana) {
             HISTORIAL -> "Buscar en el historial"
             PAGINAS -> "Buscar en las páginas guardadas"
+            APPS -> "Buscar en las aplicaciones"
             LISTAS -> "Buscar en las listas"
             else -> "Buscar en los marcadores"
         }
@@ -214,6 +222,7 @@ class PantallaGuardados(
             when (pestana) {
                 HISTORIAL -> listaHistorial()
                 PAGINAS -> listaPaginas()
+                APPS -> listaApps()
                 LISTAS -> listaListas()
                 else -> listaMarcadores()
             }
@@ -269,6 +278,10 @@ class PantallaGuardados(
                     n.toString() + (if (n == 1) " página" else " páginas") + " · " + formatoTamano(PaginasGuardadas.totalBytes()),
                     if (n > 0) listOf(Triple("Borrar todas…", true, { borrarTodasPaginas() })) else emptyList()
                 )
+            }
+            APPS -> {
+                val n = AppLocal.registradas().size
+                hoja.barraAcciones(n.toString() + (if (n == 1) " aplicación" else " aplicaciones"), emptyList())
             }
             else -> {
                 val n = ListasEnlaces.todas().size
@@ -643,6 +656,71 @@ class PantallaGuardados(
             g.avisar("Páginas guardadas borradas")
             pintarLista()
         }
+    }
+
+    // ---------------------------------------------------------------- aplicaciones web locales
+
+    private fun listaApps() {
+        val todas = AppLocal.registradas().filter { coincide(it.nombre + " " + it.espacio, it.copia) }
+        if (todas.isEmpty()) {
+            hoja.nota(
+                if (consulta.isEmpty()) "Aquí aparecen los .html que abres como aplicación web (con sus propios datos). Ábrelos desde el gestor de archivos con «Abrir con Optimo» y elige abrirlos como aplicación."
+                else "Nada coincide con la búsqueda."
+            )
+            return
+        }
+        val fecha = java.text.DateFormat.getDateInstance(java.text.DateFormat.SHORT)
+        for (a in todas) {
+            val detalle = "espacio " + a.espacio + " · " + fecha.format(java.util.Date(a.ultima)) +
+                (if (a.copia.isEmpty()) " · sin copia guardada" else "") +
+                (if (g.datosConservados(a.espacio)) " · 🔒 datos conservados" else "")
+            hoja.filaLista(
+                letraDe(a.espacio), tonoDe(a.espacio), a.nombre, detalle, null,
+                { abrirApp(a) }, { menuApp(a) }, { menuApp(a) }
+            )
+        }
+        hoja.nota("Los archivos con el mismo espacio comparten sus datos. «Conservar sus datos» los salva de los borrados globales; si no, «Borrar todo» y «Borrar cookies y datos de todos los sitios» también los borran.")
+    }
+
+    private fun abrirApp(a: AppRegistrada) {
+        if (a.copia.isEmpty()) {
+            g.avisar("No hay copia guardada de este archivo: ábrelo de nuevo desde el gestor de archivos")
+        } else {
+            cerrarYHacer { g.abrir(a.copia) }
+        }
+    }
+
+    private fun menuApp(a: AppRegistrada) {
+        val conservados = g.datosConservados(a.espacio)
+        val l = ArrayList<Triple<String, Boolean, () -> Unit>>()
+        if (a.copia.isNotEmpty()) l.add(Triple("Abrir", false, { abrirApp(a) }))
+        l.add(Triple(if (conservados) "No conservar sus datos" else "Conservar sus datos", false, {
+            g.conservarDatos(a.espacio, !conservados)
+            g.avisar(if (conservados) "Sus datos ya no están protegidos" else "Sus datos se conservan en los borrados globales")
+            pintarLista()
+        }))
+        l.add(Triple("Borrar sus datos…", true, {
+            confirmar(
+                "Borrar los datos de " + a.nombre,
+                "Se borrarán los datos que guarda esta aplicación en Optimo (proyectos, ajustes…) de todo el espacio «" + a.espacio + "». Si está abierta, recárgala.",
+                "Borrar"
+            ) {
+                g.borrarDatosApp(a.espacio)
+                g.avisar("Datos borrados")
+                pintarLista()
+            }
+        }))
+        l.add(Triple("Quitar de la lista…", true, {
+            confirmar(
+                "Quitar " + a.nombre,
+                "Se quita de esta lista y se borra su copia guardada. Sus datos no se borran: si los quieres borrar, hazlo antes.",
+                "Quitar"
+            ) {
+                g.quitarApp(a.espacio)
+                pintarLista()
+            }
+        }))
+        acciones(a.nombre, l)
     }
 
     // ---------------------------------------------------------------- listas de enlaces
